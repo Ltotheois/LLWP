@@ -291,6 +291,7 @@ table th {
   background-color: var(--primary-color);
   padding: 2rem;
   color: white;
+  margin-top: auto;
 }
 
 @keyframes fadeUp {
@@ -483,6 +484,41 @@ section.js-section li {
     border-radius: .25rem;
 	font-size: 0.9rem;
 }
+.unessential {
+    display:none;
+  }
+.download_card  {
+    min-width: 182px;
+    width: 182px;
+    height: 251px;
+    border-radius: 5px;
+    background: var(--light-gray-color);
+    padding: 10px;
+    display: inline-flex;
+    margin: 5px;
+	flex-direction: column;
+	justify-content: space-around;
+}
+
+.download_card img, .download_card i {
+    width: 120px;
+    height: 120px;
+    align-self: center;
+    font-size: 110px;
+    line-height: 110px;
+    color: var(--dark-gray-color);
+    text-align: center;
+}
+
+.download_card p {
+    margin: 0px;
+}
+
+
+.download_card:hover img, .download_card:hover i {
+	color:	var(--accent-color);
+}
+
 @media (min-width: 1150px) {
   .wrapper {
   max-width: min(90%, 1000px);
@@ -509,5 +545,8 @@ section.js-section li {
   
   .menu__item {
     padding: 1.5rem 1.2rem;
+  }
+  .unessential {
+	  display: inline-block;
   }
 }
