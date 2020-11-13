@@ -100,6 +100,19 @@
 	</footer>
   </body>
   <script>
+	function download(filename, content){
+		var element = document.createElement('a');
+		element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(content));
+		element.setAttribute('download', filename);
+		
+		element.style.display = 'none';
+		document.body.appendChild(element);
+		
+		element.click();
+		
+		document.body.removeChild(element);
+	}
+	
 	for (var link of document.getElementsByClassName("download_card")){
 		link.addEventListener("click", function(event){
 			event.preventDefault();
@@ -108,8 +121,7 @@
 			var xhr =new XMLHttpRequest();
 			xhr.onreadystatechange=function(){
 				if (xhr.readyState==4 && xhr.status==200){
-					var blob = new Blob([xhr.responseText], {type: "text/plain;charset=utf-8"});
-					saveAs(blob, "test.dxf");
+					download("test.txt", xhr.responseText);
 				}
 			}
 			xhr.open("GET", url, false );
