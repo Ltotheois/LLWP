@@ -11,7 +11,6 @@
   </head>
   <body>
 	<nav class="sideheader">
-		<a id="bars"><i class="fa fa-bars"></i></a>
 		<a href="index.html">
 			<h1 class="logo">LLWP <span class="logo__thin unessential">Loomis-Wood Plots/</span><span class="logo__thin">Download<span></h1>
 		</a>
@@ -108,7 +107,8 @@
 			var xhr =new XMLHttpRequest();
 			xhr.onreadystatechange=function(){
 				if (xhr.readyState==4 && xhr.status==200){
-					console.log(xhr.responseText);
+					var blob = new Blob([xhr.responseText], {type: "text/plain;charset=utf-8"});
+					saveAs(blob, "test.dxf");
 				}
 			}
 			xhr.open("GET", url, false );
@@ -116,12 +116,5 @@
 		
 		});
 	}
-	<!-- var myBtn = document.getElementById('save-btn'); -->
-
-		<!-- myBtn.addEventListener("click", function() -->
-		<!-- { -->
-			<!-- var blob = new Blob(["HelloWorld"], {type: "text/plain;charset=utf-8"}); -->
-			<!-- saveAs(blob, "test.dxf"); -->
-		<!-- }); -->
   </script>
 </html>
