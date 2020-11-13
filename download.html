@@ -30,21 +30,21 @@
 			
 			<h4 id="Software">Software</h4>
 			<div style="display:flex; width:100%; flex-wrap:wrap;">
-				<a class="download_card" href="resources/download/LLWP.exe">
+				<a target="_blank" download="LLWP.exe"  class="download_card" href="resources/download/LLWP.exe">
 					<i class="fab fa-microsoft"></i>
 					<div>
 						<span>LLWP.exe</span>
 						<p>The easiest solution for windows machines</p>
 					</div>
 				</a>
-				<a class="download_card" href="resources/download/LLWP.pyw">
+				<a target="_blank" download="LLWP.pyw" class="download_card" href="resources/download/LLWP.pyw">
 					<i class="fab fa-python"></i>
 					<div>
 						<span>LLWP.pyw</span>
 						<p>Needs python interpreter</p>
 					</div>
 				</a>
-				<a class="download_card" href="resources/download/LLWP.ico">
+				<a target="_blank" download="LLWP.ico" class="download_card" href="resources/download/LLWP.ico">
 					<i class="fas fa-rocket"></i>
 					<div>
 						<span>LLWP.ico</span>
@@ -55,14 +55,14 @@
 			
 			<h4 id="Install Scripts">Install Scripts</h4>
 			<div style="display:flex; width:100%; flex-wrap:wrap;">
-				<a class="download_card" href="resources/download/InstallScripts/windows_install.bat">
+				<a target="_blank" download="windows_install.bat"  class="download_card" href="resources/download/InstallScripts/windows_install.bat">
 					<i class="fab fa-windows"></i>
 					<div>
 						<span>Windows</span>
 						<p>Install Script for Windows</p>
 					</div>
 				</a>
-				<a class="download_card" download href="resources/download/InstallScripts/ubuntu_install.sh">
+				<a target="_blank" download="ubuntu_install.sh" class="download_card" download href="resources/download/InstallScripts/ubuntu_install.sh">
 					<i class="fab fa-ubuntu"></i>
 					<div>
 						<span>Ubuntu</span>
@@ -73,14 +73,14 @@
 			
 			<h4 id="Sample Data">Sample Data</h4>
 			<div style="display:flex; width:100%; flex-wrap:wrap;">
-				<a class="download_card" href="resources/download/SampleData/Sample.csv">
+				<a target="_blank" download="Sample.csv" class="download_card" href="resources/download/SampleData/Sample.csv">
 					<i class="fa fa-vials"></i>
 					<div>
 						<span>Spectrum</span>
 						<p>Sample Spectrum for C3H5N</p>
 					</div>
 				</a>
-				<a class="download_card" href="resources/download/SampleData/Sample.cat">
+				<a target="_blank" download="Sample.cat" class="download_card" href="resources/download/SampleData/Sample.cat">
 					<i class="fa fa-cat"></i>
 					<div>
 						<span>Cat-File</span>
@@ -99,35 +99,4 @@
 		</span>
 	</footer>
   </body>
-  <script>
-	function download(filename, content){
-		var element = document.createElement('a');
-		element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(content));
-		element.setAttribute('download', filename);
-		
-		element.style.display = 'none';
-		document.body.appendChild(element);
-		
-		element.click();
-		
-		document.body.removeChild(element);
-	}
-	
-	for (var link of document.getElementsByClassName("download_card")){
-		link.addEventListener("click", function(event){
-			event.preventDefault();
-			var url = event.target.closest(".download_card").href;
-			console.log(url);
-			var xhr =new XMLHttpRequest();
-			xhr.onreadystatechange=function(){
-				if (xhr.readyState==4 && xhr.status==200){
-					download("test.txt", xhr.responseText);
-				}
-			}
-			xhr.open("GET", url, false );
-			xhr.send();
-		
-		});
-	}
-  </script>
 </html>
