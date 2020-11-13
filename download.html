@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+  <head>
+	<meta charset="utf-8">
+	<meta name="description" content="">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>LLWP Loomis-Wood Plots</title>
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.1/css/all.min.css">
+	<link href="https://fonts.googleapis.com/css?family=Nunito+Sans:300,400,600,700,800,900" rel="stylesheet">
+	<link rel="stylesheet" href="resources/docs.css">
+  </head>
+  <body>
+	<nav class="sideheader">
+		<a id="bars"><i class="fa fa-bars"></i></a>
+		<a href="index.html">
+			<h1 class="logo">LLWP <span class="logo__thin unessential">Loomis-Wood Plots/</span><span class="logo__thin">Download<span></h1>
+		</a>
+		<ul class="menu">
+			<li class="menu__item"><a href="index.html" class="link link--dark"><i class="fa fa-home"></i> <span>Home</span></a></li>
+			<li class="menu__item"><a href="docs.html" class="link link--dark"><i class="fa fa-book"></i> <span>Docs</span></a></li>
+			<li class="menu__item"><a href="download.html" class="link link--dark"><i class="fa fa-download"></i> <span>Download</span></a></li>
+			<li class="menu__item"><a href="mailto:bonah@ph1.uni-koeln.de" class="link link--dark"><i class="fa fa-envelope"></i> <span>Contact</span></a></li>
+		</ul>
+	</nav>
+	<div class="wrapper">
+		
+		<article class="doc__content" id="doc__content" style="margin-left:0px;">
+			<h3>Download</h3>
+			<p>Here you can download the software as well as supplementary data. The different software versions and the icon, which is not necessary but allows to distinguish the program from other python programs in the taskbar, are found under <a class="link link--light" href="#Software">Software</a>. Installation Scripts for the dependencies, which are only useful for the <em>.pyw</em> version, are found under <a class="link link--light" href="#Install Scripts">Install Scripts</a>. Additionally sample data is provided for testing under <a class="link link--light" href="#Sample Data">Sample Data</a>. Alternatively see the whole folder <a class="link link--light" href="resources/download">here</a>.</p>
+			
+			<h4 id="Software">Software</h4>
+			<div style="display:flex; width:100%; flex-wrap:wrap;">
+				<a class="download_card" href="resources/download/LLWP.exe">
+					<i class="fab fa-microsoft"></i>
+					<div>
+						<span>LLWP.exe</span>
+						<p>The easiest solution for windows machines</p>
+					</div>
+				</a>
+				<a class="download_card" href="resources/download/LLWP.pyw">
+					<i class="fab fa-python"></i>
+					<div>
+						<span>LLWP.pyw</span>
+						<p>Needs python interpreter</p>
+					</div>
+				</a>
+				<a class="download_card" href="resources/download/LLWP.ico">
+					<i class="fas fa-rocket"></i>
+					<div>
+						<span>LLWP.ico</span>
+						<p>Download to see icon in taskbar</p>
+					</div>
+				</a>
+			</div>
+			
+			<h4 id="Install Scripts">Install Scripts</h4>
+			<div style="display:flex; width:100%; flex-wrap:wrap;">
+				<a class="download_card" href="resources/download/InstallScripts/windows_install.bat">
+					<i class="fab fa-windows"></i>
+					<div>
+						<span>Windows</span>
+						<p>Install Script for Windows</p>
+					</div>
+				</a>
+				<a class="download_card" download href="resources/download/InstallScripts/ubuntu_install.sh">
+					<i class="fab fa-ubuntu"></i>
+					<div>
+						<span>Ubuntu</span>
+						<p>Install Script for Ubuntu</p>
+					</div>
+				</a>
+			</div>
+			
+			<h4 id="Sample Data">Sample Data</h4>
+			<div style="display:flex; width:100%; flex-wrap:wrap;">
+				<a class="download_card" href="resources/download/SampleData/Sample.csv">
+					<i class="fa fa-vials"></i>
+					<div>
+						<span>Spectrum</span>
+						<p>Sample Spectrum for C3H5N</p>
+					</div>
+				</a>
+				<a class="download_card" href="resources/download/SampleData/Sample.cat">
+					<i class="fa fa-cat"></i>
+					<div>
+						<span>Cat-File</span>
+						<p>Sample Predictions for C3H5N</p>
+					</div>
+				</a>
+			</div>
+			
+			
+		</article>
+	</div>
+		
+	<footer class="footer">
+		<span>
+			LLWP is a Loomis-Wood Plotting tool based on Python that tries to be efficient and fun while being easy to pick up. As the software is still under development, <a class="link link--light" href="mailto:bonah@ph1.uni-koeln.de">feedback</a> is highly appreciated.
+		</span>
+	</footer>
+  </body>
+  <script>
+	for (var link of document.getElementsByClassName("download_card")){
+		link.addEventListener("click", function(event){
+			event.preventDefault();
+			var url = event.target.closest(".download_card").href;
+			console.log(url);
+			var xhr =new XMLHttpRequest();
+			xhr.onreadystatechange=function(){
+				if (xhr.readyState==4 && xhr.status==200){
+					console.log(xhr.responseText);
+				}
+			}
+			xhr.open("GET", url, false );
+			xhr.send();
+		
+		});
+	}
+	<!-- var myBtn = document.getElementById('save-btn'); -->
+
+		<!-- myBtn.addEventListener("click", function() -->
+		<!-- { -->
+			<!-- var blob = new Blob(["HelloWorld"], {type: "text/plain;charset=utf-8"}); -->
+			<!-- saveAs(blob, "test.dxf"); -->
+		<!-- }); -->
+  </script>
+</html>
