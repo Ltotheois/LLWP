@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+	<url>
+	  <loc>https://ltotheois.github.io/LLWP/</loc>
+	  <lastmod>2020-11-15T12:13:11+00:00</lastmod>
+	  <priority>1.00</priority>
+	</url>
+	<url>
+	  <loc>https://ltotheois.github.io/LLWP/index.html</loc>
+	  <lastmod>2020-11-15T12:13:11+00:00</lastmod>
+	  <priority>0.80</priority>
+	</url>
+	<url>
+	  <loc>https://ltotheois.github.io/LLWP/docs.html</loc>
+	  <lastmod>2020-11-15T12:13:11+00:00</lastmod>
+	  <priority>0.80</priority>
+	</url>
+	<url>
+	  <loc>https://ltotheois.github.io/LLWP/download.html</loc>
+	  <lastmod>2020-11-15T12:13:11+00:00</lastmod>
+	  <priority>0.80</priority>
+	</url>
+	<url>
+	  <loc>https://ltotheois.github.io/LLWP/contact.html</loc>
+	  <lastmod>2020-11-15T12:13:11+00:00</lastmod>
+	  <priority>0.80</priority>
+	</url>
+</urlset>
