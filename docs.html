@@ -62,14 +62,12 @@
 				<h2>News</h2>
 				<p>Here you can find the newest additions in a nutshell, so that you do not miss out on any new stuff.</p>
 				<ul>
-					<li><a class="link link--light" href="videos.html">Video Explanations!</a></li>
+					<li><a class="link link--light" href="videos.html">Video Series</a> introducing the basic concepts</li>
 					<li>Projects can be saved</li>
+					<li>Blends can be fitted together</li>
 					<li>Series Fit Module</li>
 					<li>Drag and Drop implementation for files</li>
-					<li>Speed! Made the plotting more performant</li>
-					<li>Files can be remembered instead of having to reload them on each start</li>
 					<li>Module for fitting blended lines was added</li>
-					<li>Third display mode was introduced, choose between <i>horizontal</i>, <i>vertical</i> or <i>window</i></li>
 				</ul>
 			</section>
 			
@@ -1039,8 +1037,8 @@
 			</section>
 
 			<section class="js-section">
-				<h2 id="faq">FAQ - Frequently Asked Questions</h2>
-				<h3>Can I doubleclick projects to open?</h3>
+				<h2 id="faq" onclick="this.parentNode.classList.toggle('rage');">FAQ - Frequently Asked Questions</h2>
+				<h3>Can I doubleclick projects to open?<span class="unimportant"> Like in excel, I mean I am not a programmer, but it cant be that hard!!1!!</span></h3>
 				<p>You can open projects by doubleclicking a project file on windows with the <em>.exe</em> version. To do so right click a <em>.llwp</em> project file and selct <em>Open with</em> and then <em>Choose another app</em>. Be sure to check <em>Always use this app to open .llwp files</em>.</p>
 				<p>For the <em>.pyw</em> version a little workaround is needed. Create a batch file in the same folder with the name <em>LLWP.bat</em> and the following content:</p>
 				<div>
@@ -1052,6 +1050,9 @@
 				</div>
 				<p>Then repeat the same steps as for the <em>.exe</em> version but choose the <em>LLWP.bat</em> file.</p>
 				<p>Please note, that using this technique will open a new instance on every doubleclick, if you want to open a project in an already running instance of LLWP you can drag and drop the project into this instance or use the <em>Load Project</em> action.</p>
+				
+				<h3>Where do I find the <span class="unimportant">great </span>Video Series<span class="unimportant"> a friend recommended</span>?<span class="unimportant"> It is not in the header!1!!</span></h3>
+				<p>The video series can be found <a class="link link--light" href="videos.html">here</a>. It gives an introduction of the basic concepts, covering you with all the knowledge to start your first project.</p>
 			</section>
 			
 	  </article>

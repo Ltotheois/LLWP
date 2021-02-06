@@ -768,6 +768,12 @@ table td:first-child {
 	overflow: auto;
 }
 
+.unimportant {
+	display: none;
+}
+.rage .unimportant {
+	display: inline;
+}
 
 /* Media Queries*/
 
