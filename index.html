@@ -34,7 +34,7 @@
 <div class="wrapper">
 	<article class="doc__content" id="doc__content" style="margin-left:0px;">
 		<video style="width:100%; height:auto; max-width:800px; margin:20px auto 0px; display:block;" preload="metadata" autoplay controls muted>
-			<source src="resources/LLWPvideo.mp4#t=0.25" type="video/mp4">
+			<source data-src="resources/LLWPvideo.mp4#t=0.25" type="video/mp4">
 			Example assignment in LLWP to show how fast, efficient and easy assignment is in Loomis-Wood plots.
 		</video>
 		<div style="display: flex; justify-content: space-around; flex-wrap: wrap; margin-top:20px; padding: 10px; border-radius: 5px;">
@@ -57,6 +57,22 @@
 		<p>LLWP is licensed under <b>GNU GPL v3</b> because a GUI library with the same license is used.</p>
 	</article>
 </div>
+
+<script>
+	document.addEventListener("DOMContentLoaded", function(){
+		video = document.getElementsByTagName("video")[0];
+		
+		for (var source of video.children){
+			source.src = source.dataset.src;
+		}
+		
+		if('connection' in navigator){
+			if(!navigator.connection.saveData){
+				video.load();
+			}
+		}
+	})
+</script>
 		
 	<footer class="footer">
 		<span>
