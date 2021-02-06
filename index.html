@@ -33,7 +33,7 @@
 	</nav>
 <div class="wrapper">
 	<article class="doc__content" id="doc__content" style="margin-left:0px;">
-		<video style="width:100%; height:auto; max-width:800px; margin:20px auto 0px; display:block;" preload="metadata" poster="resources/LLWPvideo.jpg" controls muted>
+		<video style="width:100%; height:auto; max-width:800px; margin:20px auto 0px; display:block;" preload="none" poster="resources/LLWPvideo.jpg" controls muted>
 			<source src="resources/LLWPvideo.mp4#t=0.25" type="video/mp4">
 			Example assignment in LLWP to show how fast, efficient and easy assignment is in Loomis-Wood plots.
 		</video>
@@ -60,12 +60,12 @@
 
 <script>
 	var video = document.getElementsByTagName("video")[0];
-	if ('connection' in navigator){
-		if (!navigator.connection.saveData){
-			video.addEventListener('canplaythrough', function() {
-				video.play();
-			});
-		}
+	var mobile = ( window.innerWidth <= 800 ) && ( window.innerHeight <= 600 );
+	var metered = "connection" in navigator && navigator.connection.saveData;
+	
+	if (!metered && !mobile){
+		video.autoplay = "true";
+		video.preload = "metadata";	
 	}
 </script>
 		
