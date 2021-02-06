@@ -33,8 +33,8 @@
 	</nav>
 <div class="wrapper">
 	<article class="doc__content" id="doc__content" style="margin-left:0px;">
-		<video style="width:100%; height:auto; max-width:800px; margin:20px auto 0px; display:block;" preload="metadata" autoplay controls muted>
-			<source data-src="resources/LLWPvideo.mp4#t=0.25" type="video/mp4">
+		<video style="width:100%; height:auto; max-width:800px; margin:20px auto 0px; display:block;" preload="metadata" controls muted>
+			<source src="resources/LLWPvideo.mp4#t=0.25" type="video/mp4">
 			Example assignment in LLWP to show how fast, efficient and easy assignment is in Loomis-Wood plots.
 		</video>
 		<div style="display: flex; justify-content: space-around; flex-wrap: wrap; margin-top:20px; padding: 10px; border-radius: 5px;">
@@ -59,19 +59,27 @@
 </div>
 
 <script>
-	document.addEventListener("DOMContentLoaded", function(){
-		video = document.getElementsByTagName("video")[0];
+	var video = document.getElementsByTagName("video")[0];
+	video.addEventListener("loadeddata", function(){
+		video.play();
+		console.log("Done");
+	});
+	<!-- document.addEventListener("DOMContentLoaded", function(){ -->
+		<!-- var video = document.getElementsByTagName("video")[0]; -->
 		
-		for (var source of video.children){
-			source.src = source.dataset.src;
-		}
+		<!-- for (var source of video.children){ -->
+			<!-- source.src = source.dataset.src; -->
+		<!-- } -->
+		<!-- video.load(); -->
 		
-		if('connection' in navigator){
-			if(!navigator.connection.saveData){
-				video.load();
-			}
-		}
-	})
+		<!-- if('connection' in navigator){ -->
+			<!-- if(navigator.connection.saveData){ -->
+				<!-- video.addEventListener('loadeddata', function() { -->
+					<!-- video.play(); -->
+				<!-- }); -->
+			<!-- } -->
+		<!-- } -->
+	<!-- }) -->
 </script>
 		
 	<footer class="footer">
