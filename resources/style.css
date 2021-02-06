@@ -438,6 +438,11 @@ table td:first-child {
 	margin: auto;
 }
 
+.footer .license svg {
+	height: 0.7rem;
+	vertical-align: middle;
+}
+
 .footer .license {
 	font-size: 0.7rem;
 }
