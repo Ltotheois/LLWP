@@ -228,777 +228,794 @@
 				</div>
 				<p>The <strong>[Layout]</strong> section of the file provides parameters to configure the layout and styling of the software.</p>
 				
-				<table>
-				<colgroup>
-				<col style="width: 12%" />
-				<col style="width: 27%" />
-				<col style="width: 59%" />
-				</colgroup>
-				<thead>
-				<tr class="header">
-				<th>Parameter</th>
-				<th>Values</th>
-				<th>Description</th>
-				</tr>
-				</thead>
-				<tbody>
-				<tr class="odd">
-				<td>direction</td>
-				<td>horizontal, vertical, window</td>
-				<td>Different layouts of the program, specifies if the other windows are to the left of the plot, beneath the plot or in their own windows</td>
-				</tr>
-				<tr class="even">
-				<td>configureplots_box</td>
-				<td>True, False</td>
-				<td>Visibility of <em>Configure Plots</em> window</td>
-				</tr>
-				<tr class="even">
-				<td>defineseries_box</td>
-				<td>True, False</td>
-				<td>Visibility of <em>Define Series</em> window</td>
-				</tr>
-				<tr class="odd">
-				<td>lines_box</td>
-				<td>True, False</td>
-				<td>Visibility of <em>Assigned Lines</em> window</td>
-				</tr>
-				<tr class="even">
-				<td>log_box</td>
-				<td>True, False</td>
-				<td>Visibility of <em>Log</em> window</td>
-				</tr>
-				<tr class="odd">
-				<td>style</td>
-				<td>dark, light</td>
-				<td>Dark or light theme</td>
-				</tr>
-				<tr class="even">
-				<td>window_width</td>
-				<td>{integer}</td>
-				<td>Window width in pixels</td>
-				</tr>
-				<tr class="odd">
-				<td>window_height</td>
-				<td>{integer}</td>
-				<td>Window height in pixels</td>
-				</tr>
-				<tr class="even">
-				<td>maximized</td>
-				<td>True, False</td>
-				<td>If window is opened maximized or not</td>
-				</tr>
-				<tr class="odd">
-				<td>xposition</td>
-				<td>{integer}</td>
-				<td>Window x coordinate in pixels</td>
-				</tr>
-				<tr class="even">
-				<td>yposition</td>
-				<td>{integer}</td>
-				<td>Window y coordinate in pixels</td>
-				</tr>
-				<tr class="odd">
-				<td>scheme</td>
-				<td>{json-dict}</td>
-				<td>Specify your own color scheme in a dictionary</td>
-				</tr>
-				<tr class="odd">
-				<td>annotate_single_line</td>
-				<td>True, False</td>
-				<td>Specify if the annotation line above the plot should span more than one line or not</td>
-				</tr>
-				</tbody>
-				</table>
-				
+				<div class="table-wrapper">
+					<table>
+					<colgroup>
+					<col style="width: 12%" />
+					<col style="width: 27%" />
+					<col style="width: 59%" />
+					</colgroup>
+					<thead>
+					<tr class="header">
+					<th>Parameter</th>
+					<th>Values</th>
+					<th>Description</th>
+					</tr>
+					</thead>
+					<tbody>
+					<tr class="odd">
+					<td>direction</td>
+					<td>horizontal, vertical, window</td>
+					<td>Different layouts of the program, specifies if the other windows are to the left of the plot, beneath the plot or in their own windows</td>
+					</tr>
+					<tr class="even">
+					<td>configureplots_box</td>
+					<td>True, False</td>
+					<td>Visibility of <em>Configure Plots</em> window</td>
+					</tr>
+					<tr class="even">
+					<td>defineseries_box</td>
+					<td>True, False</td>
+					<td>Visibility of <em>Define Series</em> window</td>
+					</tr>
+					<tr class="odd">
+					<td>lines_box</td>
+					<td>True, False</td>
+					<td>Visibility of <em>Assigned Lines</em> window</td>
+					</tr>
+					<tr class="even">
+					<td>log_box</td>
+					<td>True, False</td>
+					<td>Visibility of <em>Log</em> window</td>
+					</tr>
+					<tr class="odd">
+					<td>style</td>
+					<td>dark, light</td>
+					<td>Dark or light theme</td>
+					</tr>
+					<tr class="even">
+					<td>window_width</td>
+					<td>{integer}</td>
+					<td>Window width in pixels</td>
+					</tr>
+					<tr class="odd">
+					<td>window_height</td>
+					<td>{integer}</td>
+					<td>Window height in pixels</td>
+					</tr>
+					<tr class="even">
+					<td>maximized</td>
+					<td>True, False</td>
+					<td>If window is opened maximized or not</td>
+					</tr>
+					<tr class="odd">
+					<td>xposition</td>
+					<td>{integer}</td>
+					<td>Window x coordinate in pixels</td>
+					</tr>
+					<tr class="even">
+					<td>yposition</td>
+					<td>{integer}</td>
+					<td>Window y coordinate in pixels</td>
+					</tr>
+					<tr class="odd">
+					<td>scheme</td>
+					<td>{json-dict}</td>
+					<td>Specify your own color scheme in a dictionary</td>
+					</tr>
+					<tr class="odd">
+					<td>annotate_single_line</td>
+					<td>True, False</td>
+					<td>Specify if the annotation line above the plot should span more than one line or not</td>
+					</tr>
+					</tbody>
+					</table>
+				</div>
+					
 				<p>The <strong>[Color]</strong> section of the file sets the default colors of the plot.</p>
 				
-				<table>
-				<thead>
-				<tr class="header">
-				<th>Parameter</th>
-				<th>Values</th>
-				<th>Description</th>
-				</tr>
-				</thead>
-				<tbody>
-				<tr class="odd">
-				<td>experimental</td>
-				<td>{color}</td>
-				<td>Default color for experimental data</td>
-				</tr>
-				<tr class="even">
-				<td>assigned</td>
-				<td>{color}</td>
-				<td>Default color for assigned transitions</td>
-				</tr>
-				<tr class="odd">
-				<td>current</td>
-				<td>{color}</td>
-				<td>Default color for the current transition</td>
-				</tr>
-				<tr class="even">
-				<td>catfiles</td>
-				<td>{json-array of colors}</td>
-				<td>Color presets for the <em>.cat</em> files</td>
-				</tr>
-				<tr class="odd">
-				<td>fitcolor</td>
-				<td>{color}</td>
-				<td>Default Color for the fitline</td>
-				</tr>
-				</tbody>
-				</table>
+				<div class="table-wrapper">
+					<table>
+					<thead>
+					<tr class="header">
+					<th>Parameter</th>
+					<th>Values</th>
+					<th>Description</th>
+					</tr>
+					</thead>
+					<tbody>
+					<tr class="odd">
+					<td>experimental</td>
+					<td>{color}</td>
+					<td>Default color for experimental data</td>
+					</tr>
+					<tr class="even">
+					<td>assigned</td>
+					<td>{color}</td>
+					<td>Default color for assigned transitions</td>
+					</tr>
+					<tr class="odd">
+					<td>current</td>
+					<td>{color}</td>
+					<td>Default color for the current transition</td>
+					</tr>
+					<tr class="even">
+					<td>catfiles</td>
+					<td>{json-array of colors}</td>
+					<td>Color presets for the <em>.cat</em> files</td>
+					</tr>
+					<tr class="odd">
+					<td>fitcolor</td>
+					<td>{color}</td>
+					<td>Default Color for the fitline</td>
+					</tr>
+					</tbody>
+					</table>
+				</div>
 				
 				<p>The <strong>[Fit]</strong> section of the file sets the default values for fitting.</p>
 				
-				<table>
-				<colgroup>
-				<col style="width: 10%" />
-				<col style="width: 16%" />
-				<col style="width: 72%" />
-				</colgroup>
-				<thead>
-				<tr class="header">
-				<th>Parameter</th>
-				<th>Values</th>
-				<th>Description</th>
-				</tr>
-				</thead>
-				<tbody>
-				<tr class="odd">
-				<td>error</td>
-				<td>{integer}</td>
-				<td>Default value for the error field</td>
-				</tr>
-				<tr class="even">
-				<td>engine</td>
-				<td></td>
-				<td>Name of the fitfunction to be used</td>
-				</tr>
-				<tr class="odd">
-				<td>alwaysfit</td>
-				<td>True, False</td>
-				<td>Default value for <em>Always Fit</em> option, disabling the zoom on range feature</td>
-				</tr>
-				<tr class="even">
-				<td>uncertaintystep</td>
-				<td>{float}</td>
-				<td>Value with which the default uncertainty field steps (on clicking the arrows)</td>
-				</tr>
-				<tr class="even">
-				<td>rankpolynom</td>
-				<td>{int}</td>
-				<td>Rank of the polynom that can be used to fit the experimental data</td>
-				</tr>
-				<tr class="even">
-				<td>alwaysassign</td>
-				<td>True, False</td>
-				<td>Always fit when a range is selected with the mouse and never zoom</td>
-				</tr>
-				<tr class="even">
-				<td>askblends</td>
-				<td>True, False</td>
-				<td>Show blend dialog</td>
-				</tr>
-				<tr class="even">
-				<td>widthblends</td>
-				<td>{float}</td>
-				<td>Max distance of other lines to be shown in blend dialog</td>
-				</tr>
-				</tbody>
-				</table>
+				<div class="table-wrapper">
+					<table>
+					<colgroup>
+					<col style="width: 10%" />
+					<col style="width: 16%" />
+					<col style="width: 72%" />
+					</colgroup>
+					<thead>
+					<tr class="header">
+					<th>Parameter</th>
+					<th>Values</th>
+					<th>Description</th>
+					</tr>
+					</thead>
+					<tbody>
+					<tr class="odd">
+					<td>error</td>
+					<td>{integer}</td>
+					<td>Default value for the error field</td>
+					</tr>
+					<tr class="even">
+					<td>engine</td>
+					<td></td>
+					<td>Name of the fitfunction to be used</td>
+					</tr>
+					<tr class="odd">
+					<td>alwaysfit</td>
+					<td>True, False</td>
+					<td>Default value for <em>Always Fit</em> option, disabling the zoom on range feature</td>
+					</tr>
+					<tr class="even">
+					<td>uncertaintystep</td>
+					<td>{float}</td>
+					<td>Value with which the default uncertainty field steps (on clicking the arrows)</td>
+					</tr>
+					<tr class="even">
+					<td>rankpolynom</td>
+					<td>{int}</td>
+					<td>Rank of the polynom that can be used to fit the experimental data</td>
+					</tr>
+					<tr class="even">
+					<td>alwaysassign</td>
+					<td>True, False</td>
+					<td>Always fit when a range is selected with the mouse and never zoom</td>
+					</tr>
+					<tr class="even">
+					<td>askblends</td>
+					<td>True, False</td>
+					<td>Show blend dialog</td>
+					</tr>
+					<tr class="even">
+					<td>widthblends</td>
+					<td>{float}</td>
+					<td>Max distance of other lines to be shown in blend dialog</td>
+					</tr>
+					</tbody>
+					</table>
+				</div>
 				
 				<p>The <strong>[Plot]</strong> section of the file provides parameters to configure the plot and its appearance.</p>
 				
-				<table>
-				<colgroup>
-				<col style="width: 17%" />
-				<col style="width: 15%" />
-				<col style="width: 66%" />
-				</colgroup>
-				<thead>
-				<tr class="header">
-				<th>Parameter</th>
-				<th>Values</th>
-				<th>Description</th>
-				</tr>
-				</thead>
-				<tbody>
-				<tr class="odd">
-				<td>dpi</td>
-				<td>{int}</td>
-				<td>Sets the density per inch of the plot</td>
-				</tr>
-				<tr class="even">
-				<td>annotations_dict</td>
-				<td>{json-dict}</td>
-				<td>Specifies dictionaire of matplotlib keywords for the annotations. The coordinates are in plot dimensions, meaning 0,0 is the bottom left and 1,1 the top right corner.</td>
-				</tr>
-				<tr class="odd">
-				<td>font_dict</td>
-				<td>{json-dict}</td>
-				<td>Specifies dictionaire for the default font in matplotlib.</td>
-				</tr>
-				<tr class="even">
-				<td>matplotlibkwargs</td>
-				<td>{json-dict}</td>
-				<td>Specifies dictionaire of matplotlib keywords that are given to the subplots call of matploblib.</td>
-				</tr>
-				<tr class="odd">
-				<td>mark_assigned</td>
-				<td>True, False</td>
-				<td>If assigned lines should be marked in the plot with a star</td>
-				</tr>
-				<tr class="even">
-				<td>yrange_exp</td>
-				<td>0, 1, 2</td>
-				<td>Specifies which type of scaling will be chosen for the experimental data, 0 corresponds with <em>Full Scale</em>, 1 with <em>Dynamic Scale</em> and 2 with <em>Per Plot Scale</em></td>
-				</tr>
-				<tr class="odd">
-				<td>yrange_lin</td>
-				<td>0, 1, 2</td>
-				<td>The same as for yrange_exp but for the <em>.cat</em> scaling</td>
-				</tr>
-				<tr class="even">
-				<td>show_xaxis</td>
-				<td>True, False</td>
-				<td>Specifies if the x-ticks should be shown for all or only for the subplot at the bottom</td>
-				</tr>
-				<tr class="odd">
-				<td>coupled</td>
-				<td>True, False</td>
-				<td>Specifies if all plots should be moved together, which is sensible for most cases, or if each plot is independent</td>
-				</tr>
-				<tr class="even">
-				<td>show_yaxis_exp</td>
-				<td>True, False</td>
-				<td>Visibility of y-ticks of experimental y-axis (left y-axis)</td>
-				</tr>
-				<tr class="odd">
-				<td>show_yaxis_lin</td>
-				<td>True, False</td>
-				<td>Visibility of y-ticks of <em>.cat</em> y-axis (right y-axis)</td>
-				</tr>
-				<tr class="even">
-				<td>ymargin</td>
-				<td>{float}</td>
-				<td>Percent of margin, that is left to the top and bottom of the subplot area</td>
-				</tr>
-				<tr class="odd">
-				<td>annotate</td>
-				<td>True, False</td>
-				<td>Visibility of Annotation for each plot, shows the transition or frequency</td>
-				</tr>
-				<tr class="even">
-				<td>hover</td>
-				<td>True, False</td>
-				<td>Visibility of cursor coordinates and nearest lines</td>
-				</tr>
-				<tr class="odd">
-				<td>hover_cutoff</td>
-				<td>{integer}</td>
-				<td>Max Distance for nearest lines</td>
-				</tr>
-				<tr class="even">
-				<td>number_of_plots</td>
-				<td>{integer}</td>
-				<td>Number of subplots</td>
-				</tr>
-				<tr class="odd">
-				<td>tight_layout</td>
-				<td>True, False</td>
-				<td>Specifies if matplotlibs tight_layout is called on every update</td>
-				</tr>
-				<tr class="even">
-				<td>expyzoom</td>
-				<td>{float}</td>
-				<td>Initial value for the zoom value of the experimental y-axis</td>
-				</tr>
-				<tr class="odd">
-				<td>linyzoom</td>
-				<td>{float}</td>
-				<td>Initial value for the zoom value of the .cat y-axis</td>
-				</tr>
-				<tr class="odd">
-				<td>hidecatalogue</td>
-				<td>True, False</td>
-				<td>Hiding assigned lines from assigned lines window</td>
-				</tr>
-				<tr class="odd">
-				<td>ticknumbers</td>
-				<td>{int}</td>
-				<td>Number of xticks</td>
-				</tr>
-				<tr class="odd">
-				<td>offsetticks</td>
-				<td>True, False</td>
-				<td>If xticks are offset (middle tick is zero) or not</td>
-				</tr>
-				</tbody>
-				</table>
+				<div class="table-wrapper">
+					<table>
+					<colgroup>
+					<col style="width: 17%" />
+					<col style="width: 15%" />
+					<col style="width: 66%" />
+					</colgroup>
+					<thead>
+					<tr class="header">
+					<th>Parameter</th>
+					<th>Values</th>
+					<th>Description</th>
+					</tr>
+					</thead>
+					<tbody>
+					<tr class="odd">
+					<td>dpi</td>
+					<td>{int}</td>
+					<td>Sets the density per inch of the plot</td>
+					</tr>
+					<tr class="even">
+					<td>annotations_dict</td>
+					<td>{json-dict}</td>
+					<td>Specifies dictionaire of matplotlib keywords for the annotations. The coordinates are in plot dimensions, meaning 0,0 is the bottom left and 1,1 the top right corner.</td>
+					</tr>
+					<tr class="odd">
+					<td>font_dict</td>
+					<td>{json-dict}</td>
+					<td>Specifies dictionaire for the default font in matplotlib.</td>
+					</tr>
+					<tr class="even">
+					<td>matplotlibkwargs</td>
+					<td>{json-dict}</td>
+					<td>Specifies dictionaire of matplotlib keywords that are given to the subplots call of matploblib.</td>
+					</tr>
+					<tr class="odd">
+					<td>mark_assigned</td>
+					<td>True, False</td>
+					<td>If assigned lines should be marked in the plot with a star</td>
+					</tr>
+					<tr class="even">
+					<td>yrange_exp</td>
+					<td>0, 1, 2</td>
+					<td>Specifies which type of scaling will be chosen for the experimental data, 0 corresponds with <em>Full Scale</em>, 1 with <em>Dynamic Scale</em> and 2 with <em>Per Plot Scale</em></td>
+					</tr>
+					<tr class="odd">
+					<td>yrange_lin</td>
+					<td>0, 1, 2</td>
+					<td>The same as for yrange_exp but for the <em>.cat</em> scaling</td>
+					</tr>
+					<tr class="even">
+					<td>show_xaxis</td>
+					<td>True, False</td>
+					<td>Specifies if the x-ticks should be shown for all or only for the subplot at the bottom</td>
+					</tr>
+					<tr class="odd">
+					<td>coupled</td>
+					<td>True, False</td>
+					<td>Specifies if all plots should be moved together, which is sensible for most cases, or if each plot is independent</td>
+					</tr>
+					<tr class="even">
+					<td>show_yaxis_exp</td>
+					<td>True, False</td>
+					<td>Visibility of y-ticks of experimental y-axis (left y-axis)</td>
+					</tr>
+					<tr class="odd">
+					<td>show_yaxis_lin</td>
+					<td>True, False</td>
+					<td>Visibility of y-ticks of <em>.cat</em> y-axis (right y-axis)</td>
+					</tr>
+					<tr class="even">
+					<td>ymargin</td>
+					<td>{float}</td>
+					<td>Percent of margin, that is left to the top and bottom of the subplot area</td>
+					</tr>
+					<tr class="odd">
+					<td>annotate</td>
+					<td>True, False</td>
+					<td>Visibility of Annotation for each plot, shows the transition or frequency</td>
+					</tr>
+					<tr class="even">
+					<td>hover</td>
+					<td>True, False</td>
+					<td>Visibility of cursor coordinates and nearest lines</td>
+					</tr>
+					<tr class="odd">
+					<td>hover_cutoff</td>
+					<td>{integer}</td>
+					<td>Max Distance for nearest lines</td>
+					</tr>
+					<tr class="even">
+					<td>number_of_plots</td>
+					<td>{integer}</td>
+					<td>Number of subplots</td>
+					</tr>
+					<tr class="odd">
+					<td>tight_layout</td>
+					<td>True, False</td>
+					<td>Specifies if matplotlibs tight_layout is called on every update</td>
+					</tr>
+					<tr class="even">
+					<td>expyzoom</td>
+					<td>{float}</td>
+					<td>Initial value for the zoom value of the experimental y-axis</td>
+					</tr>
+					<tr class="odd">
+					<td>linyzoom</td>
+					<td>{float}</td>
+					<td>Initial value for the zoom value of the .cat y-axis</td>
+					</tr>
+					<tr class="odd">
+					<td>hidecatalogue</td>
+					<td>True, False</td>
+					<td>Hiding assigned lines from assigned lines window</td>
+					</tr>
+					<tr class="odd">
+					<td>ticknumbers</td>
+					<td>{int}</td>
+					<td>Number of xticks</td>
+					</tr>
+					<tr class="odd">
+					<td>offsetticks</td>
+					<td>True, False</td>
+					<td>If xticks are offset (middle tick is zero) or not</td>
+					</tr>
+					</tbody>
+					</table>
+				</div>
 
 				<p>The <strong>[Series]</strong> section of the file provides the default parameters for the <em>Define Series</em> section.</p>
 				
-				<table>
-				<colgroup>
-				<col style="width: 16%" />
-				<col style="width: 15%" />
-				<col style="width: 67%" />
-				</colgroup>
-				<thead>
-				<tr class="header">
-				<th>Parameter</th>
-				<th>Values</th>
-				<th>Description</th>
-				</tr>
-				</thead>
-				<tbody>
-				<tr class="odd">
-				<td>number_of_plots</td>
-				<td>{integer}</td>
-				<td>Default value for the <em>Plots</em> input of the <em>Define Series</em> section</td>
-				</tr>
-				<tr class="even">
-				<td>width</td>
-				<td>{integer}</td>
-				<td>Default value for the <em>Width</em> input of the <em>Define Series</em> section</td>
-				</tr>
-				<tr class="odd">
-				<td>ignore</td>
-				<td>True, False</td>
-				<td>Default value for the <em>Ignore on Apply</em> input of the <em>Define Series</em> section</td>
-				</tr>
-				<tr class="even">
-				<td>qns</td>
-				<td>True, False</td>
-				<td>Default value for the number of Quantum numbersof the <em>Define Series</em> section</td>
-				</tr>
-				<tr class="odd">
-				<td>j0</td>
-				<td>dark, light</td>
-				<td>Default value for the <em>J_0</em> input of the <em>Define Series</em> section</td>
-				</tr>
-				<tr class="even">
-				<td>expression</td>
-				<td>{integer}</td>
-				<td>Default value for the <em>Expression</em> input of the <em>Define Series</em> section</td>
-				</tr>
-				<tr class="odd">
-				<td>transition</td>
-				<td>{json-array}</td>
-				<td>Values from <em>Transition</em> tab</td>
-				</tr>
-				<tr class="even">
-				<td>method</td>
-				<td>{integer}</td>
-				<td>Which Define Series method is opened by default</td>
-				</tr>
-				<td>showqns</td>
-				<td>True, False</td>
-				<td>If for transition method the frequency of quantum numbers are shown in the plots</td>
-				</tr>
-				</tbody>
-				</table>
-				
-				
+				<div class="table-wrapper">
+					<table>
+					<colgroup>
+					<col style="width: 16%" />
+					<col style="width: 15%" />
+					<col style="width: 67%" />
+					</colgroup>
+					<thead>
+					<tr class="header">
+					<th>Parameter</th>
+					<th>Values</th>
+					<th>Description</th>
+					</tr>
+					</thead>
+					<tbody>
+					<tr class="odd">
+					<td>number_of_plots</td>
+					<td>{integer}</td>
+					<td>Default value for the <em>Plots</em> input of the <em>Define Series</em> section</td>
+					</tr>
+					<tr class="even">
+					<td>width</td>
+					<td>{integer}</td>
+					<td>Default value for the <em>Width</em> input of the <em>Define Series</em> section</td>
+					</tr>
+					<tr class="odd">
+					<td>ignore</td>
+					<td>True, False</td>
+					<td>Default value for the <em>Ignore on Apply</em> input of the <em>Define Series</em> section</td>
+					</tr>
+					<tr class="even">
+					<td>qns</td>
+					<td>True, False</td>
+					<td>Default value for the number of Quantum numbersof the <em>Define Series</em> section</td>
+					</tr>
+					<tr class="odd">
+					<td>j0</td>
+					<td>dark, light</td>
+					<td>Default value for the <em>J_0</em> input of the <em>Define Series</em> section</td>
+					</tr>
+					<tr class="even">
+					<td>expression</td>
+					<td>{integer}</td>
+					<td>Default value for the <em>Expression</em> input of the <em>Define Series</em> section</td>
+					</tr>
+					<tr class="odd">
+					<td>transition</td>
+					<td>{json-array}</td>
+					<td>Values from <em>Transition</em> tab</td>
+					</tr>
+					<tr class="even">
+					<td>method</td>
+					<td>{integer}</td>
+					<td>Which Define Series method is opened by default</td>
+					</tr>
+					<td>showqns</td>
+					<td>True, False</td>
+					<td>If for transition method the frequency of quantum numbers are shown in the plots</td>
+					</tr>
+					</tbody>
+					</table>
+				</div>
 				
 				<p>The <strong>[Flag]</strong> section of the file sets the default values for miscellaneous options.</p>
 				
-				<table>
-				<colgroup>
-				<col style="width: 15%" />
-				<col style="width: 15%" />
-				<col style="width: 68%" />
-				</colgroup>
-				<thead>
-				<tr class="header">
-				<th>Parameter</th>
-				<th>Values</th>
-				<th>Description</th>
-				</tr>
-				</thead>
-				<tbody>
-				<tr class="odd">
-				<td>append</td>
-				<td>True, False</td>
-				<td>States if on saving the file should be overwritten or appended to</td>
-				</tr>
-				<tr class="even">
-				<td>automatic_draw</td>
-				<td>True, False</td>
-				<td>States if the canvas should be redrawn on every update</td>
-				</tr>
-				<tr class="odd">
-				<td>binning</td>
-				<td>{int}, None</td>
-				<td>Sets the default value for the binning parameter</td>
-				</tr>
-				<tr class="even">
-				<td>xcolumn</td>
-				<td>{int}</td>
-				<td>Sets the value for the frequency column, that will be used when loading spectra, indexing starts with 0</td>
-				</tr>
-				<tr class="odd">
-				<td>ycolumn</td>
-				<td>{int}</td>
-				<td>Sets the value for the intensity column, that will be used when loading spectra, indexing starts with 0</td>
-				</tr>
-				<tr class="even">
-				<td>separator</td>
-				<td>{int}</td>
-				<td>Sets the separator of the spectrum-files in integer values according to ascii characters, 9 is tab, 44 is comma, 59 is semicolon. The default is 9 for tab separated files.</td>
-				</tr>
-				<tr class="odd">
-				<td>reverse_shift</td>
-				<td>True, False</td>
-				<td>If set to True, the range selector will zoom if shift is pressed and otherwise fit, this behavior is contrary to the default behavior, which is shift for fitting and no shift for zooming</td>
-				</tr>
-				<tr class="even">
-				<td>time_plots</td>
-				<td>True, False</td>
-				<td>If set to True the runtime of the update_plots function is printed, interesting for development</td>
-				</tr>
-				<tr class="odd">
-				<td>debug</td>
-				<td>True, False</td>
-				<td>By setting this to True, certain debug statements are printed</td>
-				</tr>
-				<tr class="even">
-				<td>alwaysshowlog</td>
-				<td>True, False</td>
-				<td>If set to True the log window is shown every time a new message is logged.</td>
-				</tr>
-				</tbody>
-				</table>
+				<div class="table-wrapper">
+					<table>
+					<colgroup>
+					<col style="width: 15%" />
+					<col style="width: 15%" />
+					<col style="width: 68%" />
+					</colgroup>
+					<thead>
+					<tr class="header">
+					<th>Parameter</th>
+					<th>Values</th>
+					<th>Description</th>
+					</tr>
+					</thead>
+					<tbody>
+					<tr class="odd">
+					<td>append</td>
+					<td>True, False</td>
+					<td>States if on saving the file should be overwritten or appended to</td>
+					</tr>
+					<tr class="even">
+					<td>automatic_draw</td>
+					<td>True, False</td>
+					<td>States if the canvas should be redrawn on every update</td>
+					</tr>
+					<tr class="odd">
+					<td>binning</td>
+					<td>{int}, None</td>
+					<td>Sets the default value for the binning parameter</td>
+					</tr>
+					<tr class="even">
+					<td>xcolumn</td>
+					<td>{int}</td>
+					<td>Sets the value for the frequency column, that will be used when loading spectra, indexing starts with 0</td>
+					</tr>
+					<tr class="odd">
+					<td>ycolumn</td>
+					<td>{int}</td>
+					<td>Sets the value for the intensity column, that will be used when loading spectra, indexing starts with 0</td>
+					</tr>
+					<tr class="even">
+					<td>separator</td>
+					<td>{int}</td>
+					<td>Sets the separator of the spectrum-files in integer values according to ascii characters, 9 is tab, 44 is comma, 59 is semicolon. The default is 9 for tab separated files.</td>
+					</tr>
+					<tr class="odd">
+					<td>reverse_shift</td>
+					<td>True, False</td>
+					<td>If set to True, the range selector will zoom if shift is pressed and otherwise fit, this behavior is contrary to the default behavior, which is shift for fitting and no shift for zooming</td>
+					</tr>
+					<tr class="even">
+					<td>time_plots</td>
+					<td>True, False</td>
+					<td>If set to True the runtime of the update_plots function is printed, interesting for development</td>
+					</tr>
+					<tr class="odd">
+					<td>debug</td>
+					<td>True, False</td>
+					<td>By setting this to True, certain debug statements are printed</td>
+					</tr>
+					<tr class="even">
+					<td>alwaysshowlog</td>
+					<td>True, False</td>
+					<td>If set to True the log window is shown every time a new message is logged.</td>
+					</tr>
+					</tbody>
+					</table>
+				</div>
 
 				<p>The <strong>[Pipe]</strong> section of the file sets the default values for the Pipe feature.</p>
 				
-				<table>
-				<colgroup>
-				<col style="width: 10%" />
-				<col style="width: 16%" />
-				<col style="width: 72%" />
-				</colgroup>
-				<thead>
-				<tr class="header">
-				<th>Parameter</th>
-				<th>Values</th>
-				<th>Description</th>
-				</tr>
-				</thead>
-				<tbody>
-				<tr class="odd">
-				<td>command</td>
-				<td>{string}</td>
-				<td>Sets the command for the pipe feature</td>
-				</tr>
-				<tr class="even">
-				<td>reread</td>
-				<td>True, False</td>
-				<td>Sets the value for reread option, if set to True all files are reread after the command has been executed</td>
-				</tr>
-				</tbody>
-				</table>
+				<div class="table-wrapper">
+					<table>
+					<colgroup>
+					<col style="width: 10%" />
+					<col style="width: 16%" />
+					<col style="width: 72%" />
+					</colgroup>
+					<thead>
+					<tr class="header">
+					<th>Parameter</th>
+					<th>Values</th>
+					<th>Description</th>
+					</tr>
+					</thead>
+					<tbody>
+					<tr class="odd">
+					<td>command</td>
+					<td>{string}</td>
+					<td>Sets the command for the pipe feature</td>
+					</tr>
+					<tr class="even">
+					<td>reread</td>
+					<td>True, False</td>
+					<td>Sets the value for reread option, if set to True all files are reread after the command has been executed</td>
+					</tr>
+					</tbody>
+					</table>
+				</div>
 				
 				<p>The <strong>[Blendedlineswindow]</strong> section of the file sets the default values for the Blended Lines module. Please note, that the values are only updated on closing the window and not while the window is still open. So if you want to make certain values default, set the correct values, close the <em>Blended Lines Window</em> and then save. Similar to this section there are sections for other windows, like the <em>Lineshape Window</em> and <em>Pathfinder Window</em>, with the same structure, basically saving your last chosen options, so the user does not have to reselect these.</p>
 				
-				<table>
-				<colgroup>
-				<col style="width: 12%" />
-				<col style="width: 17%" />
-				<col style="width: 70%" />
-				</colgroup>
-				<thead>
-				<tr class="header">
-				<th>Parameter</th>
-				<th>Values</th>
-				<th>Description</th>
-				</tr>
-				</thead>
-				<tbody>
-				<tr class="odd">
-				<td>lineshape</td>
-				<td>{string}</td>
-				<td>Sets the standard lineshape</td>
-				</tr>
-				<tr class="even">
-				<td>derivative</td>
-				<td>{int}</td>
-				<td>Sets the standard derivative, available values are 0, 1, 2</td>
-				</tr>
-				<tr class="odd">
-				<td>transparency</td>
-				<td>{float}</td>
-				<td>Sets the standard transparency</td>
-				</tr>
-				<tr class="odd">
-				<td>maxfwhm</td>
-				<td>{float}</td>
-				<td>Sets the standard value for the maximum FWHM of the lines</td>
-				</tr>
-				<tr class="odd">
-				<td>polynom</td>
-				<td>{int}</td>
-				<td>Rank of baseline polynom</td>
-				</tr>
-				<tr class="odd">
-				<td>showbaseline</td>
-				<td>True, False</td>
-				<td>Visibility of baseline</td>
-				</tr>
-				</tbody>
-				</table>
+				<div class="table-wrapper">
+					<table>
+					<colgroup>
+					<col style="width: 12%" />
+					<col style="width: 17%" />
+					<col style="width: 70%" />
+					</colgroup>
+					<thead>
+					<tr class="header">
+					<th>Parameter</th>
+					<th>Values</th>
+					<th>Description</th>
+					</tr>
+					</thead>
+					<tbody>
+					<tr class="odd">
+					<td>lineshape</td>
+					<td>{string}</td>
+					<td>Sets the standard lineshape</td>
+					</tr>
+					<tr class="even">
+					<td>derivative</td>
+					<td>{int}</td>
+					<td>Sets the standard derivative, available values are 0, 1, 2</td>
+					</tr>
+					<tr class="odd">
+					<td>transparency</td>
+					<td>{float}</td>
+					<td>Sets the standard transparency</td>
+					</tr>
+					<tr class="odd">
+					<td>maxfwhm</td>
+					<td>{float}</td>
+					<td>Sets the standard value for the maximum FWHM of the lines</td>
+					</tr>
+					<tr class="odd">
+					<td>polynom</td>
+					<td>{int}</td>
+					<td>Rank of baseline polynom</td>
+					</tr>
+					<tr class="odd">
+					<td>showbaseline</td>
+					<td>True, False</td>
+					<td>Visibility of baseline</td>
+					</tr>
+					</tbody>
+					</table>
+				</div>
 				
 				<p>The <strong>[Files]</strong> section of the file will only be available, if <em>View > Save Files</em> is checked. Then the saved files will be reloaded at the next startup.</p>
 				
-				<table>
-				<thead>
-				<tr class="header">
-				<th>Parameter</th>
-				<th>Values</th>
-				<th>Description</th>
-				</tr>
-				</thead>
-				<tbody>
-				<tr class="odd">
-				<td>reload</td>
-				<td>True, False</td>
-				<td>If specified files should be reloaded at the next start</td>
-				</tr>
-				<tr class="even">
-				<td>experimental</td>
-				<td>{json-dict}</td>
-				<td>Spectra Files</td>
-				</tr>
-				<tr class="odd">
-				<td>lin</td>
-				<td>{json-dict}</td>
-				<td>.cat Files</td>
-				</tr>
-				<tr class="even">
-				<td>assigned</td>
-				<td>{json-dict}</td>
-				<td>.lin Files</td>
-				</tr>
-				<tr class="odd">
-				<td>table</td>
-				<td>{json-array}</td>
-				<td>Values from <em>Assigned Lines</em> table</td>
-				</tr>
-				</tbody>
-				</table>
-				
+				<div class="table-wrapper">
+					<table>
+					<thead>
+					<tr class="header">
+					<th>Parameter</th>
+					<th>Values</th>
+					<th>Description</th>
+					</tr>
+					</thead>
+					<tbody>
+					<tr class="odd">
+					<td>reload</td>
+					<td>True, False</td>
+					<td>If specified files should be reloaded at the next start</td>
+					</tr>
+					<tr class="even">
+					<td>experimental</td>
+					<td>{json-dict}</td>
+					<td>Spectra Files</td>
+					</tr>
+					<tr class="odd">
+					<td>lin</td>
+					<td>{json-dict}</td>
+					<td>.cat Files</td>
+					</tr>
+					<tr class="even">
+					<td>assigned</td>
+					<td>{json-dict}</td>
+					<td>.lin Files</td>
+					</tr>
+					<tr class="odd">
+					<td>table</td>
+					<td>{json-array}</td>
+					<td>Values from <em>Assigned Lines</em> table</td>
+					</tr>
+					</tbody>
+					</table>
+				</div>
 
 			</section>
 			
 			<section class="js-section">
 				<h2 id="shortcuts">Shortcuts</h2>
-				<table>
-				<thead>
-				<tr class="header">
-				<th>Shortcut</th>
-				<th>Command</th>
-				</tr>
-				</thead>
-				<tbody>
-				<tr class="odd">
-				<td><span class="keybinding__label">+</span></td>
-				<td>add plot</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">-</span></td>
-				<td>delete plot</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">W</span></td>
-				<td>zoom in</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">S</span></td>
-				<td>zoom out</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">A</span></td>
-				<td>go to lower frequency</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">D</span></td>
-				<td>go to higher frequency</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Shift+W</span></td>
-				<td>fine zoom in</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Shift+S</span></td>
-				<td>fine zoom out</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Shift+A</span></td>
-				<td>go to lower frequency (fine)</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Shift+D</span></td>
-				<td>go to higher frequency (fine)</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Shift+K</span></td>
-				<td>open console input</td>
-				</tr>
-				<tr class="even">
-				<td></td>
-				<td></td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Shift+Space</span></td>
-				<td>apply Series</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Shift+Q</span></td>
-				<td>decrease QNs</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Shift+E</span></td>
-				<td>increase QNs</td>
-				</tr>
-				<tr class="even">
-				<td></td>
-				<td></td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Mousewheel Up</span></td>
-				<td>zoom in</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Mousewheel Down</span></td>
-				<td>zoom out</td>
-				</tr>
-				<tr class="odd">
-				<td></td>
-				<td></td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Ctrl+O</span></td>
-				<td>open spectrum(s)</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Shift+O</span></td>
-				<td>add spectrum(s)</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Ctrl+L</span></td>
-				<td>open cat file(s)</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Shift+L</span></td>
-				<td>add cat file(s)</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Ctrl+I</span></td>
-				<td>open lin file(s)</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Shift+I</span></td>
-				<td>add lin file(s)</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Ctrl+E</span></td>
-				<td>save assigned lines as cat</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Ctrl+R</span></td>
-				<td>save assigned lines as lin</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Shift+R</span></td>
-				<td>reread all files</td>
-				</tr>
-				<tr class="odd">
-				<td></td>
-				<td></td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Shift+1</span></td>
-				<td>toggle plot toolbar</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Shift+2</span></td>
-				<td>toggle configure plots window</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Shift+3</span></td>
-				<td>toggle define series window</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Shift+4</span></td>
-				<td>toggle assigned lines window</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Shift+5</span></td>
-				<td>toggle log window</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Shift+6</span></td>
-				<td>open spectra options window</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Shift+7</span></td>
-				<td>open cat files options window</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Shift+8</span></td>
-				<td>open lin files options window</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Shift+9</span></td>
-				<td>open lineshape window</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Shift+P</span></td>
-				<td>pathfinder window</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Shift+B</span></td>
-				<td>blended lines window</td>
-				</tr>
-				<tr class="even">
-				<td></td>
-				<td></td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Ctrl+G</span></td>
-				<td>go to frequency</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Ctrl+W</span></td>
-				<td>set view width</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Ctrl+N</span></td>
-				<td>set number of plots</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Ctrl+D</span></td>
-				<td>save options</td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Ctrl+F</span></td>
-				<td>change fit function</td>
-				</tr>
-				<tr class="even">
-				<td><span class="keybinding__label">Ctrl+Enter</span></td>
-				<td>manual assign</td>
-				</tr>
-				<tr class="even">
-				<td></td>
-				<td></td>
-				</tr>
-				<tr class="odd">
-				<td><span class="keybinding__label">Ctrl+P</span></td>
-				<td>run pipe command</td>
-				</tr>
-				</tbody>
-				</table>
+				<div class="table-wrapper">
+					<table>
+					<thead>
+					<tr class="header">
+					<th>Shortcut</th>
+					<th>Command</th>
+					</tr>
+					</thead>
+					<tbody>
+					<tr class="odd">
+					<td><span class="keybinding__label">+</span></td>
+					<td>add plot</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">-</span></td>
+					<td>delete plot</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">W</span></td>
+					<td>zoom in</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">S</span></td>
+					<td>zoom out</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">A</span></td>
+					<td>go to lower frequency</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">D</span></td>
+					<td>go to higher frequency</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Shift+W</span></td>
+					<td>fine zoom in</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Shift+S</span></td>
+					<td>fine zoom out</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Shift+A</span></td>
+					<td>go to lower frequency (fine)</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Shift+D</span></td>
+					<td>go to higher frequency (fine)</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Shift+K</span></td>
+					<td>open console input</td>
+					</tr>
+					<tr class="even">
+					<td></td>
+					<td></td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Shift+Space</span></td>
+					<td>apply Series</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Shift+Q</span></td>
+					<td>decrease QNs</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Shift+E</span></td>
+					<td>increase QNs</td>
+					</tr>
+					<tr class="even">
+					<td></td>
+					<td></td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Mousewheel Up</span></td>
+					<td>zoom in</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Mousewheel Down</span></td>
+					<td>zoom out</td>
+					</tr>
+					<tr class="odd">
+					<td></td>
+					<td></td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Ctrl+O</span></td>
+					<td>open spectrum(s)</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Shift+O</span></td>
+					<td>add spectrum(s)</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Ctrl+L</span></td>
+					<td>open cat file(s)</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Shift+L</span></td>
+					<td>add cat file(s)</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Ctrl+I</span></td>
+					<td>open lin file(s)</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Shift+I</span></td>
+					<td>add lin file(s)</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Ctrl+E</span></td>
+					<td>save assigned lines as cat</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Ctrl+R</span></td>
+					<td>save assigned lines as lin</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Shift+R</span></td>
+					<td>reread all files</td>
+					</tr>
+					<tr class="odd">
+					<td></td>
+					<td></td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Shift+1</span></td>
+					<td>toggle plot toolbar</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Shift+2</span></td>
+					<td>toggle configure plots window</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Shift+3</span></td>
+					<td>toggle define series window</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Shift+4</span></td>
+					<td>toggle assigned lines window</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Shift+5</span></td>
+					<td>toggle log window</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Shift+6</span></td>
+					<td>open spectra options window</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Shift+7</span></td>
+					<td>open cat files options window</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Shift+8</span></td>
+					<td>open lin files options window</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Shift+9</span></td>
+					<td>open lineshape window</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Shift+P</span></td>
+					<td>pathfinder window</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Shift+B</span></td>
+					<td>blended lines window</td>
+					</tr>
+					<tr class="even">
+					<td></td>
+					<td></td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Ctrl+G</span></td>
+					<td>go to frequency</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Ctrl+W</span></td>
+					<td>set view width</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Ctrl+N</span></td>
+					<td>set number of plots</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Ctrl+D</span></td>
+					<td>save options</td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Ctrl+F</span></td>
+					<td>change fit function</td>
+					</tr>
+					<tr class="even">
+					<td><span class="keybinding__label">Ctrl+Enter</span></td>
+					<td>manual assign</td>
+					</tr>
+					<tr class="even">
+					<td></td>
+					<td></td>
+					</tr>
+					<tr class="odd">
+					<td><span class="keybinding__label">Ctrl+P</span></td>
+					<td>run pipe command</td>
+					</tr>
+					</tbody>
+					</table>
+				</div>
 			</section>
 			
 			<section class="js-section">
