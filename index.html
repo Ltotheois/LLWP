@@ -60,10 +60,13 @@
 
 <script>
 	var video = document.getElementsByTagName("video")[0];
-	video.addEventListener("loadeddata", function(){
-		video.play();
-		console.log("Done");
-	});
+	if ('connection' in navigator){
+		if (!navigator.connection.saveData){
+			video.addEventListener('canplaythrough', function() {
+				video.play();
+			});
+		}
+	}
 	<!-- document.addEventListener("DOMContentLoaded", function(){ -->
 		<!-- var video = document.getElementsByTagName("video")[0]; -->
 		
@@ -71,15 +74,7 @@
 			<!-- source.src = source.dataset.src; -->
 		<!-- } -->
 		<!-- video.load(); -->
-		
-		<!-- if('connection' in navigator){ -->
-			<!-- if(navigator.connection.saveData){ -->
-				<!-- video.addEventListener('loadeddata', function() { -->
-					<!-- video.play(); -->
-				<!-- }); -->
-			<!-- } -->
-		<!-- } -->
-	<!-- }) -->
+	<!-- }); -->
 </script>
 		
 	<footer class="footer">
