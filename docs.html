@@ -9,8 +9,8 @@
 	<meta name="description" content="Documentation for LLWP Loomis-Wood Plots">
 </head>
 <body>
-<button id="bars">
-	<a id="nav-toggle" href="#"><span></span></a>
+<button id="bars" aria-label="toggle navigation visibility">
+	<div id="nav-toggle"><span></span></div>
 </button>
 	<nav class="sideheader">
 		<a href="index.html">
@@ -83,11 +83,12 @@
 				<p>The program requires python version 3.6 or higher.</p>
 				<p>The required libraries are included in the <i>.exe</i> file but have to be installed manually for the <i>.pyw</i> file. Two scripts for windows and ubuntu are available to help you install the needed dependencies. The ubuntu version does not need any user support and will compile <i>PyQt5</i>, which is needed for the GUI, on its own.</p>
 				<div class="alert alert-warning">
-					Please check that your python version and pip are updated, as the script will not update them if they are already installed. This is done, so that other software, that might rely on specific versions, will not run into problems. Also be aware, that you might have to run the script as root.
+					Please check that your python version and pip are updated, as the script will not update them if they are already installed. This is done, so that other software, that might rely on specific versions, will not run into problems. Also be aware, that you might have to run the script as root.<br/>
+					The latest numpy versions are not supported due to some internal problems. If you should see error messages related to this, try reverting to numpy version 1.19.3.
 				</div>
-				<p>The windows version only installs the correct python libraries, this means Python and pip have to be installed and <i>PyQt5</i> has to be compiled manually. The easiest way is to go to their <a class="link link--light" href="https://www.riverbankcomputing.com/software/pyqt/download5" target="_blank">website</a> and download the newest version, the executable will compile <i>PyQt5</i> for you.</p>
+				<p>The windows version only installs the correct python libraries, this means Python and pip have to be installed and <i>PyQt5</i> has to be compiled manually. The easiest way is to go to their <a class="link link--light" href="https://www.riverbankcomputing.com/software/pyqt/download5" target="_blank" rel="noreferrer">website</a> and download the newest version, the executable will compile <i>PyQt5</i> for you.</p>
 				<div class="alert alert-primary">
-					The download folder also provides sample data for testing the program. The spectrum is a downsampled version of ethyl cyanide's spectrum, which was recorded in the <a class="link link--light" href="https://astro.uni-koeln.de/schlemmer" target="_blank">Schlemmer Group</a> @ University of Cologne. The <em>.cat</em> file is from the <a class="link link--light" href="https://cdms.astro.uni-koeln.de/" target="_blank">Cologne Database for Molecular Spectroscopy</a>.
+					The download folder also provides sample data for testing the program. The spectrum is a downsampled version of ethyl cyanide's spectrum, which was recorded in the <a class="link link--light" href="https://astro.uni-koeln.de/schlemmer" target="_blank" rel="noreferrer">Schlemmer Group</a> @ University of Cologne. The <em>.cat</em> file is from the <a class="link link--light" href="https://cdms.astro.uni-koeln.de/" target="_blank" rel="noreferrer">Cologne Database for Molecular Spectroscopy</a>.
 				</div>
 			</section>
 			
@@ -107,9 +108,6 @@
 				<p><em>.lin</em> files hold already assigned lines, so that they can be marked in the plots and the format is according to the SPFIT specifications.</p>
 				<p>For the three file types, there are two actions each, which are located in the menubar under <em>File</em>. The <em>load</em> action replaces the old files, whereas <em>add</em> keeps already loaded files of the same type.</p>
 				<p>To delete specific files, hide them or to customize the colours, refer to the three actions in the menu <em>Files &gt; Edit Spectrum Files</em>, <em>Files &gt; Edit Cat Files</em> and <em>Files &gt; Edit Lin Files</em>. Additionally, there is an option to turn the spectra upside down, as all transitions should be indicated by positive peaks.</p>
-				<div class="alert alert-warning">
-					Please note, that hiding files is not perfectly implemented as of now. Certain additional functions might include the hidden data, even though they are not visible in the plot.
-				</div>
 				<p>Additionally, project files can be saved and loaded. They are identified by the <em>.llwp</em> extension and have the same structure as <em>.ini</em> files. A project consists of the paths to all spectrum, <em>.cat</em> and <em>.lin</em> files as well as the current dataset in the <em>Assigned Lines</em> window.</p>
 			</section>
 		 			
@@ -131,15 +129,15 @@
 				<p>If you have already assigned transitions and are using the <em>Transitions</em> method, you can use the fitted frequency instead of the predicted frequency by checking <em>Zero Assigned</em>. This option is only viable in some rare cases and more gimmicky.</p>
 				<p><em>List</em> allows for lists of frequencies, the list should contain frequencies that are separated by whitespace, comma or semicolon. Whitespace includes space, newline and tab. The provided lines will be sorted automatically in frequency. With <em>Min Index</em> you can set the first frequency that will be used. If the index of the plot is higher than the number of frequencies the plot will be set to a frequency of 0.</p>
 				<p><em>Apply</em> updates the series definition and recenters the plots to the predicted frequency, as you are still able to move inside the plots to higher or lower frequencies.</p>
-				<div class="alert alert-warning">
-					It is a common problem, that your series looks weird and you cannot see any cat lines in the center, because accidentally one moved away from the initial center frequency. By pressing <em>Apply</em> the shift is set to zero and the series can be seen again.
+				<div class="alert alert-primary">
+					If you follow a transition series but do not see predictions in the center of each plot, there is a nonzero offset. By pressing <em>Apply</em> the offset is set to zero and the predictions should now be in the center of your plots.
 				</div>
 			</section>
 			
 			<section class="js-section">
 				<h2 id="navigating-the-plots">Navigating the Plots</h2>
 				<p>Plots can be added or deleted with <em>add plot</em> and <em>delete plot</em>. With <em>in</em> and <em>out</em> the zoom can be altered and with <em>left</em> and <em>right</em> the current view can be shifted to lower or higher frequencies. By default, selecting a range of the plot with the mouse will zoom to this range. All these actions are also connected to keyboard shortcuts. Additionally, under <em>Plot &gt; Go to …</em> the center frequency can be set manually and under <em>Plot &gt; Set Zoom</em> a specific width can be set.</p>
-				<div class="alert alert-warning">
+				<div class="alert alert-primary">
 					If you want to add or delete a lot of plots with huge datasets, it is usually faster to select the desired number of plots under <em>Plot &gt; # Plots</em> instead of pressing <em>add plot</em> or <em>del plot</em> multiple times.
 				</div>
 			</section>
@@ -174,7 +172,7 @@
 			
 			<section class="js-section">
 				<h2 id="more-features">More Features</h2>
-				<h3 id="save-options">Blend Window</h3>
+				<h3 id="blend-window">Blend Window</h3>
 				<p>When using the <em>Transition</em> method to define a series and selecting the <em>Blend Dialog</em> checkbox, everytime a peak is fitted, lines within the distance of the input field below the <em>Blend Dialog</em> are presented in a dialog and the user can choose which lines he wants to assign to the peak. The dialog will not be shown, if there is only a single predicted line in this range.
 				This is useful for blends of series, but the width should be set to a sensible value.
 				<h3 id="save-options">Save Options</h3>
@@ -183,6 +181,9 @@
 				<p>Under <em>Modules &gt; Lineshape Window</em> is the option to open a second plot window with lineshapes instead of a stick spectrum for the cat values. The last clicked plot will be opened. It automatically updates to the current view of the main window and allows for fitting like the main window. This is useful. to get an idea, of if a certain arrangement of sticks corresponds with a certain lineshape.</p>
 				<h3 id="blended-lines">Blended Lines</h3>
 				<p>Under <em>Modules &gt; Blended Lines</em> is the option to open the current section of the plot and fit various lineshapes to it. Possible lineshapes are Gaussian, Lorentzian , Voigt and the first and second derivative of the previous. By clicking in the spectrum or by pressing <em>Add Peak</em> an additional peak can be added, the resulting sum is shown in blue and with <em>Transp</em> the transparency of the single lineshapes can be changed. A baseline polynom can be added and made visible with the checkbox. Resulting middle positions can be directly assigned with the <em>Assign</em> button. This is useful if a line is clearly blended, as it results in a more accurate center frequency (if performed in a sensible way).</p>
+				<h3 id="peakfinder-window">Peakfinder Window</h3>
+				<p>To find peaks in your experimental spectrum you can use the peakfinder window, which is found under <em>Modules &gt; Peakfinder</em>. On top a plot is shown, to verify the found peaks. Beneath are the buttons to run the peakfinder, a button to export all found peaks, an uncertainty input and the <em>Only unassigned Lines</em> checkbox. If it is checked, all peaks that are within the uncertainty value from an allready assigned line are excluded from the output.</p>
+				<p>The arguments for the peakfinder are found beneath the buttons. Always check if the found peaks are sensible in the plot after running the peakfinder.</p>
 				<h3 id="matplotlib-toolbox">Matplotlib Toolbox</h3>
 				<p>There is an option to show the matplotlib toolbox under <em>View</em>, if you want to fine tune the plots, save a picture of the figure or do any other matplotlib related tasks.</p>
 				<h3 id="manual-drawing">Manual Drawing</h3>
@@ -192,7 +193,7 @@
 				<div class="alert alert-warning">
 					The pathfinder module is still in an early stadium, feedback is especially welcomed, see <a href="#questions-and-feedback">Feedback</a>.
 				</div>
-				<p>The pathfinder window, which can be found under <em>Modules &gt; Show Pathfinder</em> helps to find a sensible starting point in your spectrum. It helps search the .cat file for a sensible starting point, the user can specify a range and an additional condition, then the matches with the highest intensity will be shown in a table.</p>
+				<p>The pathfinder window, which can be found under <em>Modules &gt; Show Pathfinder</em> helps to find a sensible starting point in your spectrum. It allows to find transitions from the .cat files within a user can specified range and an additional condition. The matches are ordered by intensity and shown in a table.</p>
 				<p>By clicking start in the according row, the transition is transferred to the main window. Please doublecheck, which QNs you want to increase, as the values for the increase checkboxes are guessed by the program and might be wrong. Also be aware, that the transition might be at the upper limit of your spectrum and therefore you might want to shift to lower QNs with <em>Decr</em>.</p>
 				<p>For the additional condition all properties of the .cat file can be used, as there are “freq”, “error”, “lgint”, “degfreed”, “elower”, “usd”, “tag”, “qnfmt”, ‘qnu1’, ‘qnu2’, ‘qnu3’, ‘qnu4’, ‘qnu5’, ‘qnu6’, ‘qnl1’, ‘qnl2’, ‘qnl3’, ‘qnl4’, ‘qnl5’, ‘qnl6’ and the operators “+”, “-”, “==”, “&lt;”, “&gt;”, “&gt;=”, “&lt;=” and all sensible combinations out of these.</p>
 				<p>Additionally there are three checkboxes, to limit on certain transitions for asymmetric tops, as other molecule classes are straight forward. If you select none, no filter will be applied, otherwise only selected transitions will be shown.</p>
@@ -210,8 +211,8 @@
 				<h3 id="pipe">Pipe</h3>
 				<p>To allow for fitting the data and creating new predictions from inside the program, the pipe feature was introduced. Set up a pipe command under <em>Modules &gt; Set up Pipe</em>, choose if the loaded files, being spectra, <em>.cat</em> and <em>.lin</em> files, should be reloaded after the command has finished, save the command and run it as a test.</p>
 				<p>The pipe command is the same command you would use from the command line to generate your predictions. In short, everything that goes in the shell, goes here. Newline characters are replaced by ’ &amp;&amp; ’, allowing the user to use new lines for new commands.</p>
-				<div class="alert alert-warning">
-					Please keep in mind, that the working directory might differ from your usual routine. Maybe add the folders to your path environment variable or start your pipe command with something like <em>cd /path/to/my/folder</em>.
+				<div class="alert alert-primary">
+					Please keep in mind, that the working directory might differ from your usual routine. Maybe add the desired folders to your path environment variable or change your working directory by entering <em>cd /path/to/my/folder</em> before your pipe command .
 				</div>
 				<h3 id="console-input">Console Input</h3>
 				<p>By pressing <span class="keybinding__label">Shift+K</span> a field opens, in which you can write python console code. This options is very powerful and is only useful, if you have some understanding of the underlying structure and a clear goal in mind.</p>
@@ -222,7 +223,7 @@
 				<p>The configuration object can be inspected under <em>View &gt; Show Config</em>. Not all their shown values are updated in realtime and certain values are only read on startup, meaning changing them life in the program has no effect. Press <em>Refresh</em> to update the config and press <em>Save</em> (or <em>View &gt; Save Options</em>) to save the config. When saving the options a config file with the name <em>LLWP.ini</em> will be created, which can be edited either by hand or by changing the according value in the graphical user interface and saving afterwards.
 				When changing values life in the config window, readonly lines are indicated by an <em>(RO)</em> suffix and a <em>fixed</em> label at the end of the line. When changing editable values the label at the end of the row indicates if the new value is understood or not. The following paragraphs describe the configuration parameters, their allowed values and meanings.</p>
 				
-				<div class="alert alert-primary">
+				<div class="alert alert-warning">
 					Only very few parameters of the config cannot be changed in the graphical user interface, e.g. the layout direction. Thus, beginners can mostly ignore the rest of this chapter. Also note, that certain self explaining parameters are not explained explicitly.
 				</div>
 				<p>The <strong>[Layout]</strong> section of the file provides parameters to configure the layout and styling of the software.</p>
@@ -1058,121 +1059,85 @@
 				<p>Please note, that using this technique will open a new instance on every doubleclick, if you want to open a project in an already running instance of LLWP you can drag and drop the project into this instance or use the <em>Load Project</em> action.</p>
 				
 				<h3>Where do I find the <span class="unimportant">great </span>Video Series<span class="unimportant"> a friend recommended</span>?<span class="unimportant"> It is not in the header!1!!</span></h3>
-				<p>The video series can be found <a class="link link--light" href="videos.html">here</a>. It gives an introduction of the basic concepts, covering you with all the knowledge to start your first project.</p>
+				<p>Go to the <a class="link link--light" href="videos.html">video series</a> to get an introduction of the basic concepts, providing you with all the knowledge to start your first project.</p>
 			</section>
 			
 	  </article>
 	</div>
 		
 	<footer class="footer">
-		<span>
-			<p>LLWP is a Loomis-Wood Plotting tool based on Python that tries to be efficient and fun while being easy to pick up. As the software is still under development, <script>document.write('<n pynff="yvax yvax--yvtug" uers="znvygb:obanu@cu1.hav-xbrya.qr">srrqonpx</n>'.replace(/[a-zA-Z]/g,function(c){return String.fromCharCode((c<="Z"?90:122)>=(c=c.charCodeAt(0)+13)?c:c-26);}));</script> is highly appreciated.</p>			
-			<p class="license">Visit the <a class="link link--light" href="https://github.com/Ltotheois/LLWP">github page <svg aria-hidden="true" focusable="false" data-prefix="fab" data-icon="github" class="svg-inline--fa fa-github fa-w-16" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><path fill="currentColor" d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"></path></svg></a>. The software is licensed under <a class="link link--light" href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL v3</a>. Icons on this website are from <a class="link link--light" href="https://fontawesome.com">Font Awesome</a> Free 5.15.1 (<a class="link link--light" href="https://fontawesome.com/license/free">CC BY 4.0 License</a>). The font is <a class="link link--light" href="https://fonts.google.com/specimen/Nunito+Sans">Nunito Sans</a> by Vernon Adams and Jacques Le Bailly (<a class="link link--light" href="https://scripts.sil.org/cms/scripts/page.php?site_id=nrsi&id=OFL">Open Font License</a>).</p>
-		</span>
+		<p>LLWP is a Loomis-Wood Plotting tool based on Python that tries to be efficient and fun while being easy to pick up. As the software is still under development, <script>document.write('<n pynff="yvax yvax--yvtug" uers="znvygb:obanu@cu1.hav-xbrya.qr">srrqonpx</n>'.replace(/[a-zA-Z]/g,function(c){return String.fromCharCode((c<="Z"?90:122)>=(c=c.charCodeAt(0)+13)?c:c-26);}));</script> is highly appreciated.</p>			
+		<p class="license">Visit the <a class="link link--light" href="https://github.com/Ltotheois/LLWP">github page <svg aria-hidden="true" focusable="false" data-prefix="fab" data-icon="github" class="svg-inline--fa fa-github fa-w-16" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><path fill="currentColor" d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"></path></svg></a><span class="footer_special">. </span><br class="footer_special"/>The software is licensed under <a class="link link--light" href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL v3</a><span class="footer_special">. </span><br class="footer_special"/>Icons on this website are from <a class="link link--light" href="https://fontawesome.com">Font Awesome</a> Free 5.15.1 (<a class="link link--light" href="https://fontawesome.com/license/free">CC BY 4.0 License</a>)<span class="footer_special">. </span><br class="footer_special"/>The font is <a class="link link--light" href="https://fonts.google.com/specimen/Nunito+Sans">Nunito Sans</a> by Vernon Adams and Jacques Le Bailly (<a class="link link--light" href="https://scripts.sil.org/cms/scripts/page.php?site_id=nrsi&id=OFL">Open Font License</a>)<span class="footer_special">.</span></p>
 	</footer>
 <script>
-// utilities
-var get = function (selector, scope) {
-	scope = scope ? scope : document;
-	return scope.querySelector(selector);
-};
-
-var getAll = function (selector, scope) {
-	scope = scope ? scope : document;
-	return scope.querySelectorAll(selector);
-};
-
-
-//in page scrolling for documentaiton page
-var btns = getAll('.js-btn');
-var sections = getAll('.js-section');
-
-function setActiveLink(event) {
-	// remove all active tab classes
-	for (var i = 0; i < btns.length; i++) {
-		btns[i].classList.remove('selected');
+	// Functions
+	function setActiveLink(elem) {
+		for (var i = 0; i < btns.length; i++) {
+			btns[i].classList.remove('selected');
+		}
+		elem.classList.add('selected');
 	}
 
-	event.target.classList.add('selected');
-}
-
-function smoothScrollTo(element, event, top=false) {
-	var position = element.offsetTop;
-	if (top){ position = 0};
-
-	if ( (document.body.offsetHeight-window.pageYOffset) == window.innerHeight && (document.body.offsetHeight-element.offsetTop) < window.innerHeight){
-		setActiveLink(event);
-	}else{
-		window.scrollTo({
-			'behavior': 'smooth',
-			'top': position,
-			'left': 0
-		});
-		if ( (document.body.offsetHeight-element.offsetTop) < window.innerHeight){
-			setTimeout(function () {
-				setActiveLink(event);
-			}, 1000);
+	function isInViewport(element){
+		var position = element.getBoundingClientRect();
+		if(position.top < window.innerHeight && position.bottom >= window.innerHeight*0.1) {
+			return(true);
+		}else{
+			return(false);
 		}
 	}
-}
 
-if (btns.length && sections.length > 0) {
-for (var i = 0; i<btns.length; i++) {
-	btns[i].addEventListener('click', function(event) {
-		var ind = -1;
-		for (var i=0; i<btns.length; i++){
-			if (btns[i] == this){
-				ind = i;
+	function update_navigation(){
+		for (section of sections){
+			if (isInViewport(section)){
+				let ind = sections.indexOf(section);
+				setActiveLink(btns[ind]);
 				break;
 			}
 		}
-		if (ind==0){var top=true}else{var top=false}
-		smoothScrollTo(sections[ind], event, top);
-		if (document.getElementById("bars").classList.contains("active")){
-		document.getElementById("bars").click();
+	}
+
+	function smoothScrollTo(element, button) {
+		var position = (element==sections[0]) ? 0: element.offsetTop;
+
+		if ( (document.body.offsetHeight-window.pageYOffset) == window.innerHeight && (document.body.offsetHeight-element.offsetTop) < window.innerHeight){
+			setActiveLink(button);
+		}else{
+			window.scrollTo({
+				'behavior': 'smooth',
+				'top': position,
+				'left': 0
+			});
+			if ( (document.body.offsetHeight-element.offsetTop) < window.innerHeight){
+				setTimeout(function () {
+					setActiveLink(button);
+				}, 1000);
+			}
 		}
+	}
+
+	// Event Handlers
+	var btns = Array.from(document.querySelectorAll('.js-btn'));
+	var sections = Array.from(document.querySelectorAll('.js-section'));
+
+	document.getElementById("bars").addEventListener("click", function(){
+		for (var id of ["bars", "navbar", "doc__content"]){
+			document.getElementById(id).classList.toggle("active"); 
+		}
+	})
+
+	document.addEventListener("scroll", function(event){
+		update_navigation();
 	});
-}
-}
 
-function isInViewport(element){
-	var position = element.getBoundingClientRect();
-	if(position.top < window.innerHeight && position.bottom >= 0) {
-		return(true);
-	}else{
-		return(false);
-	}
-}
-
-// own Additions
-document.getElementById("bars").addEventListener("click", function(){
-	this.classList.toggle("active");
-	document.getElementById("navbar").classList.toggle("active"); 
-	document.getElementById("doc__content").classList.toggle("active");
-})
-
-
-document.body.onscroll =function(event){update_navigation()}
-	
-function update_navigation(){
-	for (section of sections){
-		if (isInViewport(section)){
-			var ind = -1;
-			for (var i=0; i<sections.length; i++){
-				if (sections[i] == section){
-					ind = i;
-					break;
-				}
+	for (let i = 0; i < Math.min(btns.length, sections.length); i++) {
+		btns[i].addEventListener('click', function(i) {
+			smoothScrollTo(sections[i], btns[i]);
+			if (document.getElementById("bars").classList.contains("active")){
+				document.getElementById("bars").click();
 			}
-			
-			for (var i = 0; i < btns.length; i++) {
-				btns[i].classList.remove('selected');
-			}
-			btns[ind].classList.add('selected');
-			break;
-		}
+		}.bind(null, i));
 	}
-}
 </script>
 
 </body>

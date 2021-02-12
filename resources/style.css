@@ -430,12 +430,9 @@ table td:first-child {
 
 .footer p {
 	color: inherit;
-}
-
-.footer span {
 	max-width: min(800px, 80vw);
-	display: block;
-	margin: auto;
+	margin-left: auto;
+	margin-right: auto;
 }
 
 .footer .license svg {
@@ -780,6 +777,9 @@ table td:first-child {
 	display: inline;
 }
 
+br.footer_special {
+	display: none;
+}
 /* Media Queries*/
 
 @media screen and (max-width: 600px) {
@@ -796,9 +796,14 @@ table td:first-child {
 	.video-card-wrapper {
 		grid-template-columns: 100%;
 	}
-
 	.video-card {
 		width: 100%;
+	}
+	br.footer_special {
+		display: initial;
+	}
+	span.footer_special {
+		display: none;
 	}
 }
 
