@@ -70,7 +70,7 @@
 	}
 	
 	if ('serviceWorker' in navigator) {
-		navigator.serviceWorker.register('sw.js', {scope: "/LLWP/"})
+		navigator.serviceWorker.register('sw.js', {scope: "/LLWP"})
 			.then(function(registration) {
 				console.log('Service Worker Registered');
 			});
