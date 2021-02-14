@@ -5,6 +5,7 @@
 	<meta name="viewport" content="width=device-width">
 	<link rel="manifest" href="/LLWP/manifest.json">
 	<link rel="icon" type="image/ico" href="LLWP.svg" />
+	<link rel="apple-touch-icon" href="LLWP.png">
 	<link rel="stylesheet" href="resources/style.css">
 	<title>LLWP Loomis-Wood Plots</title>
 	<meta name="description" content="LLWP Loomis-Wood Plots Overview">
@@ -68,7 +69,6 @@
 		video.autoplay = "true";
 		video.preload = "metadata";	
 	}
-	
 	if ('serviceWorker' in navigator) {
 		navigator.serviceWorker.register('sw.js', {scope: "/LLWP/"})
 			.then(function(registration) {
