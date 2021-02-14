@@ -1,7 +1,7 @@
 var cacheName = 'LLWP-cache';
 var filesToCache = [
   // '/LLWP/',
-  '/docs.html',
+  '/LLWP/docs.html',
   // '/LLWP/contact.html',
   // '/LLWP/download.html',
   // '/LLWP/videos.html',
