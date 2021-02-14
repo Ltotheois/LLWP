@@ -1,6 +1,6 @@
 {
   "name": "LLWP",
-  "start_url": "LLWP/",
+  "start_url": "/",
   "display": "fullscreen",
   "background_color": "#ffffff",
   "description": "Fast, efficient and easy Loomis-Wood Plots",
