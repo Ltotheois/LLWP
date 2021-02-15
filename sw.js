@@ -1,4 +1,4 @@
-// version 1.0
+// version 1.1
 // change version to reinstall service worker and update Files
 
 var cacheName = 'cache_llwp';
@@ -12,7 +12,6 @@ var filesToCache = [
 	'/LLWP/LLWP.svg',
 	'/LLWP/manifest.json',
 	'/LLWP/resources/style.css',
-	'/LLWP/resources/download/LLWPvideo.mp4',
 	'/LLWP/resources/download/LLWPvideo.jpg',
 	'/LLWP/resources/download/InstallScripts/ubuntu_install.sh',
 	'/LLWP/resources/download/InstallScripts/windows_install.bat',
