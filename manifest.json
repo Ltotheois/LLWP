@@ -11,12 +11,6 @@
       "src": "LLWP.svg",
       "sizes": "512x512",
       "purpose": "maskable any"
-    },
-    {
-      "src": "LLWP_splash.png",
-      "type": "image/png",
-      "sizes": "512x512",
-      "purpose": "maskable any"
     }
   ]
 }
