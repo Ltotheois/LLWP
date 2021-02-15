@@ -1,11 +1,11 @@
 {
   "name": "LLWP",
+  "short_name": "LLWP",
+  "description": "Fast, efficient and easy Loomis-Wood Plots",
   "start_url": "index.html",
-  "display": "fullscreen",
+  "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#ffffff",
-  "description": "Fast, efficient and easy Loomis-Wood Plots",
-  "short_name": "LLWP",
   "icons": [
     {
       "src": "LLWP.svg",
@@ -15,7 +15,7 @@
       "src": "LLWP_splash.png",
       "type": "image/png",
       "sizes": "512x512",
-	  "purpose": "maskable any"
+      "purpose": "maskable any"
     }
   ]
 }

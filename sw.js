@@ -1,3 +1,6 @@
+// version 1.0
+// change version to reinstall service worker and update Files
+
 var cacheName = 'cache_llwp';
 var filesToCache = [
 	'/LLWP/',
@@ -7,7 +10,6 @@ var filesToCache = [
 	'/LLWP/download.html',
 	'/LLWP/videos.html',
 	'/LLWP/LLWP.svg',
-	'/LLWP/sw.js',
 	'/LLWP/manifest.json',
 	'/LLWP/resources/style.css',
 	'/LLWP/resources/download/LLWPvideo.mp4',
@@ -25,30 +27,21 @@ var filesToCache = [
 ];
 
 /* Start the service worker and cache all of the app's content */
-self.addEventListener('install', function(event) {
-	event.waitUntil(
-		caches.open(cacheName).then(function(cache) {
-			return cache.addAll(filesToCache);
-		})
-	);
-	self.skipWaiting();
+self.addEventListener('install', function(e) {
+  caches.delete(cacheName);
+  e.waitUntil(
+    caches.open(cacheName).then(function(cache) {
+      return cache.addAll(filesToCache);
+    })
+  );
+  self.skipWaiting();
 });
 
 /* Serve cached content when offline */
-self.addEventListener('fetch', function(event) {
-	event.respondWith(
-		caches.open(cacheName).then(function(cache){
-			cache.match(event.request).then(function(response){
-				return response || fetch(event.request);
-			});
-		});
-	);
-	
-	event.waitUntil(
-		caches.open(cacheName).then(function(cache){
-			fetch(event.request).then(function(response){
-				return cache.put(event.request, response);
-			});
-		};
-	);
+self.addEventListener('fetch', function(e) {
+  e.respondWith(
+    caches.match(e.request).then(function(response) {
+      return response || fetch(e.request);
+    })
+  );
 });
