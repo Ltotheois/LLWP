@@ -9,6 +9,7 @@ var filesToCache = [
 	'/LLWP/contact.html',
 	'/LLWP/download.html',
 	'/LLWP/videos.html',
+	'/LLWP/imprint.html',
 	'/LLWP/LLWP.svg',
 	'/LLWP/manifest.json',
 	'/LLWP/resources/style.css',
