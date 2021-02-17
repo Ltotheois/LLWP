@@ -75,8 +75,9 @@
 	var video = document.getElementsByTagName("video")[0];
 	var mobile = ( window.innerWidth <= 800 ) && ( window.innerHeight <= 600 );
 	var metered = "connection" in navigator && navigator.connection.saveData;
+	var slow = "connection" in navigator && navigator.connection.effectiveType != "4g";
 	
-	if (!metered && !mobile){
+	if (!metered && !mobile && !slow){
 		video.autoplay = "true";
 		video.preload = "metadata";	
 	}
