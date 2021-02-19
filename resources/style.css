@@ -177,6 +177,19 @@ section.js-section li {
 	color: var(--primary-color-light);
 }
 
+.anchor {
+	display: none;
+	margin-left: 4px;
+}
+.anchor svg{
+	width: auto;
+	height: 1rem;
+	vertical-align: middle;
+}
+
+:hover > .anchor {
+	display: inline-block;
+}
 
 /* code */
 

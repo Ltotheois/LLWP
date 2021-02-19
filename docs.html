@@ -72,7 +72,7 @@
 		
 		<article class="doc__content" id="doc__content">
 			<section class="js-section">
-				<h2>News</h2>
+				<h2 id="news">News</h2>
 				<p>Here you can find the newest additions in a nutshell, so that you do not miss out on any new stuff.</p>
 				<ul>
 					<li><a class="link link--light" href="videos.html">Video Series</a> introducing the basic concepts</li>
@@ -85,14 +85,14 @@
 			</section>
 			
 			<section class="js-section">
-				<h2>General</h2>
+				<h2 id="general">General</h2>
 				<p>LLWP is a software for using Loomis-Wood plots to efficiently assign lines in spectra. It is published under <b>GNU GPL v3</b> as it is based on a GUI library with the same copyright.</p>
 				<p>The program does not require specific units, thus all units can be used. However, be aware that the output files will use the input units and therefore might not be sensible in the SPFIT/SPCAT universe.</p>
 				<p>If you want to acknowledge LLWP, please cite this webpage as <em>LLWP Loomis-Wood Plots, Luis BONAH, https://ltotheois.github.io/LLWP</em><p>
 			</section>
 			
 			<section class="js-section">
-				<h2>Installation</h2>
+				<h2 id="installation">Installation</h2>
 				<p>The program requires python version 3.6 or higher.</p>
 				<p>The required libraries are included in the <i>.exe</i> file but have to be installed manually for the <i>.pyw</i> file. Two scripts for windows and ubuntu are available to help you install the needed dependencies. The ubuntu version does not need any user support and will compile <i>PyQt5</i>, which is needed for the GUI, on its own.</p>
 				<div class="alert alert-warning">
@@ -106,7 +106,7 @@
 			</section>
 			
 			<section class="js-section">
-				<h2>User Interface</h2>
+				<h2 id="user-interface">User Interface</h2>
 				<p>The centerpiece of the program is the plot canvas with its subplots. Above the plot is a toolbar with controls for navigating the plot, and even further up is the menubar. The subplots center frequencies can be provided by different methods, which can be selected in the <em><a class="link link--light" href="#define-series">Define Series</a></em> window. To change the appearance of the plots use the <em><a class="link link--light" href="#configure-plots">Configure Plots</a></em> window, it provides options for the scaling, annotations and more. When a line is assigned, it is added to the <em><a class="link link--light" href="#assigned-lines">Assigned Lines</a></em> window, which also allows to edit the values and to delete all or specific assignments.</p>
 				<p>Additionally, there is a <em>Log</em> window for notifications, and windows for additional features, which can be accessed by selecting <em>Modules</em> in the menu bar.</p>
 				<p>The user interface can be set up in three different modes, being <em>horizontal</em>, <em>vertical</em> and <em>window</em>. To do so, please refer to the <em><a class="link link--light" href="#flags">Flags</a></em> section. <em>horizontal</em> places the plot canvas on the left side over the full height and puts the other windows to the right. In <em>vertical</em> mode the plot canvas takes the full width with the other windows being beneath. <em>window</em> mode detaches the other windows from the main window, so they can be freely positioned.</p>
@@ -114,7 +114,7 @@
 			</section>
 			
 			<section class="js-section">
-				<h2>Loading Data and accepted Filetypes</h2>
+				<h2 id="filetypes">Loading Data and accepted Filetypes</h2>
 				<p>The first step to using LLWP is loading data. The software distinguishes between three different kinds of files, being spectrum files, <em>.cat</em> files and <em>.lin</em> files.</p>
 				<p>Spectrum files are experimental measurements. By default they are tab separated and the frequencies are in the first column, the intensities in the second. To change the default behaviour refer to the <em><a class="link link--light" href="#flags">Flags</a></em> section. The program expects data with upwards facing peaks.</p>
 				<p><em>.cat</em> files are catalogue files, they hold predictions for transitions. The format is according to the SPCAT specifications.</p>
@@ -169,7 +169,7 @@
 			</section>
 			
 			<section class="js-section">
-				<h2 id="y-scaling-and-view-of-plots">Configure Plots</h2>
+				<h2 id="configure-plots">Configure Plots</h2>
 				<p>This tab controls how the plots are displayed. The scale of the experimental files and the cat files can be chosen independently. The options are <em>Full Scale</em> which uses the global minimum and maximum, <em>Dynamic Scale</em> which uses the minimum and maximum of the current view, meaning that all currently displayed data is considered, and <em>Per Plot Scale</em> scales each plots data individually.</p>
 				<p>Above the scale options is an input field for a numeric value, this can be used to zoom the current scale. This is useful, if you want to assign especially weak lines, that are hard to identify next to stronger lines. The zoom value does not have any function for the <em>Per Plot Scale</em> option, for the other two options it mutliplies the original range with -exp(<em>zoomvalue</em>). This allows for big changes in scale in the upper range of the complete range and fine changes in the lower range.</p>
 				<p>Furthermore the axes can be en- or disabled, the plots can be decoupled to allow for individual shifts and the plots can be annotated, displaying the current transition or frequency of each plot, depending on which series method is used.</p>
@@ -185,7 +185,7 @@
 			
 			<section class="js-section">
 				<h2 id="more-features">More Features</h2>
-				<h3 id="blend-window">Blend Window</h3>
+				<h3 id="blends">Blend Window</h3>
 				<p>When using the <em>Transition</em> method to define a series and selecting the <em>Blend Dialog</em> checkbox, everytime a peak is fitted, lines within the distance of the input field below the <em>Blend Dialog</em> are presented in a dialog and the user can choose which lines he wants to assign to the peak. The dialog will not be shown, if there is only a single predicted line in this range.
 				This is useful for blends of series, but the width should be set to a sensible value.
 				<h3 id="save-options">Save Options</h3>
@@ -194,7 +194,7 @@
 				<p>Under <em>Modules &gt; Lineshape Window</em> is the option to open a second plot window with lineshapes instead of a stick spectrum for the cat values. The last clicked plot will be opened. It automatically updates to the current view of the main window and allows for fitting like the main window. This is useful. to get an idea, of if a certain arrangement of sticks corresponds with a certain lineshape.</p>
 				<h3 id="blended-lines">Blended Lines</h3>
 				<p>Under <em>Modules &gt; Blended Lines</em> is the option to open the current section of the plot and fit various lineshapes to it. Possible lineshapes are Gaussian, Lorentzian , Voigt and the first and second derivative of the previous. By clicking in the spectrum or by pressing <em>Add Peak</em> an additional peak can be added, the resulting sum is shown in blue and with <em>Transp</em> the transparency of the single lineshapes can be changed. A baseline polynom can be added and made visible with the checkbox. Resulting middle positions can be directly assigned with the <em>Assign</em> button. This is useful if a line is clearly blended, as it results in a more accurate center frequency (if performed in a sensible way).</p>
-				<h3 id="peakfinder-window">Peakfinder Window</h3>
+				<h3 id="peakfinder">Peakfinder Window</h3>
 				<p>To find peaks in your experimental spectrum you can use the peakfinder window, which is found under <em>Modules &gt; Peakfinder</em>. On top a plot is shown, to verify the found peaks. Beneath are the buttons to run the peakfinder, a button to export all found peaks, an uncertainty input and the <em>Only unassigned Lines</em> checkbox. If it is checked, all peaks that are within the uncertainty value from an allready assigned line are excluded from the output.</p>
 				<p>The arguments for the peakfinder are found beneath the buttons. Always check if the found peaks are sensible in the plot after running the peakfinder.</p>
 				<h3 id="matplotlib-toolbox">Matplotlib Toolbox</h3>
@@ -202,7 +202,7 @@
 				<h3 id="manual-drawing">Manual Drawing</h3>
 				<p>To reduce stress from your system, there is an option to disable automatic drawing of the plots under <em>Plot &gt; Automatic Draw</em> and an option to draw manually <em>Plot &gt; Manual Draw</em>. Then the canvas will be only redrawn on manual draw and not on each update to the plots. This might be especially handy for huge datasets or huge amounts of plots, as those can make the underlying matplotlib library slow.</p>
 				<p>If your experience suffers from poor performance, consider changing your binning parameter, if it is set to a value higher than the magnitude of your screen resolution, try reducing it.</p>
-				<h3 id="pathfinder-experimental">Pathfinder [<em>Experimental</em>]</h3>
+				<h3 id="pathfinder">Pathfinder [<em>Experimental</em>]</h3>
 				<div class="alert alert-warning">
 					The pathfinder module is still in an early stadium, feedback is especially welcomed, see <a href="#questions-and-feedback">Feedback</a>.
 				</div>
@@ -210,7 +210,7 @@
 				<p>By clicking start in the according row, the transition is transferred to the main window. Please doublecheck, which QNs you want to increase, as the values for the increase checkboxes are guessed by the program and might be wrong. Also be aware, that the transition might be at the upper limit of your spectrum and therefore you might want to shift to lower QNs with <em>Decr</em>.</p>
 				<p>For the additional condition all properties of the .cat file can be used, as there are “freq”, “error”, “lgint”, “degfreed”, “elower”, “usd”, “tag”, “qnfmt”, ‘qnu1’, ‘qnu2’, ‘qnu3’, ‘qnu4’, ‘qnu5’, ‘qnu6’, ‘qnl1’, ‘qnl2’, ‘qnl3’, ‘qnl4’, ‘qnl5’, ‘qnl6’ and the operators “+”, “-”, “==”, “&lt;”, “&gt;”, “&gt;=”, “&lt;=” and all sensible combinations out of these.</p>
 				<p>Additionally there are three checkboxes, to limit on certain transitions for asymmetric tops, as other molecule classes are straight forward. If you select none, no filter will be applied, otherwise only selected transitions will be shown.</p>
-				<h3 id="seriesfit-experimental">Series Fit[<em>Experimental</em>]</h3>
+				<h3 id="seriesfit">Series Fit[<em>Experimental</em>]</h3>
 				<div class="alert alert-warning">
 					The series fit module is still in an early stadium, feedback as well as feature requests are especially welcomed, see <a href="#questions-and-feedback">Feedback</a>.
 				</div>
@@ -232,7 +232,7 @@
 			</section>
 			
 			<section class="js-section">
-				<h2 id="use-the-config">Configuration</h2>
+				<h2 id="configuration">Configuration</h2>
 				<p>The configuration object can be inspected under <em>View &gt; Show Config</em>. Not all their shown values are updated in realtime and certain values are only read on startup, meaning changing them life in the program has no effect. Press <em>Refresh</em> to update the config and press <em>Save</em> (or <em>View &gt; Save Options</em>) to save the config. When saving the options a config file with the name <em>LLWP.ini</em> will be created, which can be edited either by hand or by changing the according value in the graphical user interface and saving afterwards.
 				When changing values life in the config window, readonly lines are indicated by an <em>(RO)</em> suffix and a <em>fixed</em> label at the end of the line. When changing editable values the label at the end of the row indicates if the new value is understood or not. The following paragraphs describe the configuration parameters, their allowed values and meanings.</p>
 				
@@ -1058,7 +1058,7 @@
 
 			<section class="js-section">
 				<h2 id="faq" onclick="this.parentNode.classList.toggle('rage');">FAQ - Frequently Asked Questions</h2>
-				<h3>Can I doubleclick projects to open?<span class="unimportant"> Like in excel, I mean I am not a programmer, but it cant be that hard!!1!!</span></h3>
+				<h3 id="double-click">Can I doubleclick projects to open?<span class="unimportant"> Like in excel, I mean I am not a programmer, but it cant be that hard!!1!!</span></h3>
 				<p>You can open projects by doubleclicking a project file on windows with the <em>.exe</em> version. To do so right click a <em>.llwp</em> project file and selct <em>Open with</em> and then <em>Choose another app</em>. Be sure to check <em>Always use this app to open .llwp files</em>.</p>
 				<p>For the <em>.pyw</em> version a little workaround is needed. Create a batch file in the same folder with the name <em>LLWP.bat</em> and the following content:</p>
 				<div>
@@ -1071,7 +1071,7 @@
 				<p>Then repeat the same steps as for the <em>.exe</em> version but choose the <em>LLWP.bat</em> file.</p>
 				<p>Please note, that using this technique will open a new instance on every doubleclick, if you want to open a project in an already running instance of LLWP you can drag and drop the project into this instance or use the <em>Load Project</em> action.</p>
 				
-				<h3>Where do I find the <span class="unimportant">great </span>Video Series<span class="unimportant"> a friend recommended</span>?<span class="unimportant"> It is not in the header!1!!</span></h3>
+				<h3 id="video-series">Where do I find the <span class="unimportant">great </span>Video Series<span class="unimportant"> a friend recommended</span>?<span class="unimportant"> It is not in the header!1!!</span></h3>
 				<p>Go to the <a class="link link--light" href="videos.html">video series</a> to get an introduction of the basic concepts, providing you with all the knowledge to start your first project.</p>
 			</section>
 			
@@ -1150,6 +1150,10 @@
 				document.getElementById("bars").click();
 			}
 		}.bind(null, i));
+	}
+	
+	for (var elem of document.querySelectorAll('h2, h3')){
+		elem.innerHTML = elem.innerHTML+'<a class="anchor" aria-hidden="true" href="#'+elem.id+'"><svg aria-hidden="true" focusable="false" data-prefix="fas" data-icon="link" class="svg-inline--fa fa-link fa-w-16" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path fill="currentColor" d="M326.612 185.391c59.747 59.809 58.927 155.698.36 214.59-.11.12-.24.25-.36.37l-67.2 67.2c-59.27 59.27-155.699 59.262-214.96 0-59.27-59.26-59.27-155.7 0-214.96l37.106-37.106c9.84-9.84 26.786-3.3 27.294 10.606.648 17.722 3.826 35.527 9.69 52.721 1.986 5.822.567 12.262-3.783 16.612l-13.087 13.087c-28.026 28.026-28.905 73.66-1.155 101.96 28.024 28.579 74.086 28.749 102.325.51l67.2-67.19c28.191-28.191 28.073-73.757 0-101.83-3.701-3.694-7.429-6.564-10.341-8.569a16.037 16.037 0 0 1-6.947-12.606c-.396-10.567 3.348-21.456 11.698-29.806l21.054-21.055c5.521-5.521 14.182-6.199 20.584-1.731a152.482 152.482 0 0 1 20.522 17.197zM467.547 44.449c-59.261-59.262-155.69-59.27-214.96 0l-67.2 67.2c-.12.12-.25.25-.36.37-58.566 58.892-59.387 154.781.36 214.59a152.454 152.454 0 0 0 20.521 17.196c6.402 4.468 15.064 3.789 20.584-1.731l21.054-21.055c8.35-8.35 12.094-19.239 11.698-29.806a16.037 16.037 0 0 0-6.947-12.606c-2.912-2.005-6.64-4.875-10.341-8.569-28.073-28.073-28.191-73.639 0-101.83l67.2-67.19c28.239-28.239 74.3-28.069 102.325.51 27.75 28.3 26.872 73.934-1.155 101.96l-13.087 13.087c-4.35 4.35-5.769 10.79-3.783 16.612 5.864 17.194 9.042 34.999 9.69 52.721.509 13.906 17.454 20.446 27.294 10.606l37.106-37.106c59.271-59.259 59.271-155.699.001-214.959z"></path></svg></a>';
 	}
 </script>
 
