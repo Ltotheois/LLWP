@@ -200,7 +200,7 @@ class Main():
 	def loadoptions(self, fname=None):
 		if not fname:
 			self.config.update({key: value[0] for key, value in config_specs.items()})
-			fname = f"{APP_TAG}.ini"
+			fname = llwpfile(".ini")
 
 		config_parser = configparser.ConfigParser(interpolation=None)
 		config_parser.read(fname)
@@ -246,7 +246,7 @@ class Main():
 			for key in output_dict[section]:
 				config_parser.set(section, key, str(output_dict[section][key]))
 
-		with open(f"{APP_TAG}.ini", "w+", encoding="utf-8") as file:
+		with open(llwpfile(".ini"), "w+", encoding="utf-8") as file:
 			config_parser.write(file)
 		self.notification("Options were saved successfully!")
 
@@ -307,7 +307,7 @@ class Main():
 		if keep_old == False:
 			with lock:
 				df = self.return_df(type)
-				df.drop(df.index, inplace = True)
+				df.drop(df.index, inplace=True)
 				if reread == False:
 					self.config[f"files_{type}"].clear()
 
@@ -433,7 +433,7 @@ class Main():
 			results.put(data)
 		except Exception as E:
 			self.notification(f"<span style='color:#ff0000;'>ERROR</span>: There occurred an error when loading the {type.capitalize()} File {fname}. Please check the file.")
-			if self.config["flag_debug"] == True:
+			if self.config["flag_debug"]:
 				tb.print_exc()
 			errors.put(fname)
 			raise
@@ -459,7 +459,7 @@ class Main():
 			if not path:
 				return
 
-		catalogue = self.new_df
+		catalog = self.new_df
 		output = []
 
 		handle = "a+" if append and  not force_noappend else "w+"
@@ -467,9 +467,9 @@ class Main():
 		with open(path, handle, encoding="utf-8") as file:
 			custom_format = self.config["flag_assignmentsavefmt"]
 			if custom_format and not force_lin:
-				np.savetxt(file, catalogue[custom_format["names"]], delimiter=custom_format.get("delimiter", " "), fmt=custom_format.get("format", '%.18e'))
+				np.savetxt(file, catalog[custom_format["names"]], delimiter=custom_format.get("delimiter", " "), fmt=custom_format.get("format", '%.18e'))
 			else:
-				file.write(pyckett.df_to_lin(catalogue))
+				file.write(pyckett.df_to_lin(catalog))
 		self.notification(f"Newly assigned lines were saved to the file {path}.")
 
 	@synchronized_d(locks["pipe"])
@@ -523,10 +523,19 @@ class Main():
 			x_stop  = df["x"].searchsorted(xrange[1], side="right")
 			df = df.iloc[x_start:x_stop].copy()
 
+		if force_all != True:
+			visible_files = {file for file in fd.keys() if not fd[file].get("hidden", False)}
+			# Special Case Hide/Show catalog files
+			if type == "lin" and self.config["flag_hidecatalog"] == False:
+				visible_files.add("__lin_own_df__")
+
+			if len(visible_files) != len(fd) + (type == "lin"):
+				df.query("filename in @visible_files", inplace=True)
+
 		df_len = len(df.index)
 		if df_len > main.config["plot_skipbinning"]:
 			if binning != None and xrange != None:
-				if binning == True:
+				if binning:
 					bins = self.config["plot_bins"]
 				bin_width = (xrange[1]-xrange[0])/bins
 				if bin_width == 0:
@@ -535,27 +544,20 @@ class Main():
 				df.loc[:,"binning"] = (df.loc[:,"x"]-xrange[0])//bin_width
 				df = df.loc[df.sort_values(["y"]).drop_duplicates("binning", keep="last").sort_values(["x"]).index]
 
-		if force_all != True:
-			visible_files = {file for file in fd.keys() if not fd[file].get("hidden", False)}
-			# Special Case Hide/Show catalogue files
-			if type == "lin" and self.config["flag_hidecatalogue"] == False:
-				visible_files.add("__lin_own_df__")
-
-			if len(visible_files) != len(fd) + (type == "lin"):
-				df.query("filename in @visible_files", inplace=True)
 		return(df)
 
 	def return_df(self, type):
-		if type == "exp":
-			return(self.exp_df)
-		elif type == "cat":
-			return(self.cat_df)
-		elif type == "lin":
-			return(self.lin_df)
-		elif type == "new":
-			return(self.new_df)
-		elif type == "ser":
-			return(self.ser_df)
+		with locks[f"{type}_df"]:
+			if type == "exp":
+				return(self.exp_df)
+			elif type == "cat":
+				return(self.cat_df)
+			elif type == "lin":
+				return(self.lin_df)
+			elif type == "new":
+				return(self.new_df)
+			elif type == "ser":
+				return(self.ser_df)
 
 	def change_style(self, style=None):
 		styles = ["light", "dark", "custom"]
@@ -658,9 +660,9 @@ class Main():
 		return(self.open_windows[window])
 
 	@synchronized_d(locks["lin_df"])
-	def catalogue_table_delete(self, all=False):
-		table = main.mainwindow.cataloguewindow.catalogueTable
-		model = main.mainwindow.cataloguewindow.catalogueModel
+	def catalog_table_delete(self, all=False):
+		table = main.mainwindow.catalogwindow.catalogTable
+		model = main.mainwindow.catalogwindow.catalogModel
 		if all:
 			self.new_df.drop(self.new_df.index, inplace=True)
 		else:
@@ -684,7 +686,7 @@ class MainWindow(QMainWindow):
 			self.setGeometry(*json.loads(geometry))
 
 		try:
-			main.app.setWindowIcon(QIcon(f"{APP_TAG}.svg"))
+			main.app.setWindowIcon(QIcon(llwpfile(".svg")))
 			import ctypes
 			ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_TAG)
 		except Exception as E:
@@ -716,7 +718,7 @@ class MainWindow(QMainWindow):
 	def loaddockables(self):
 		self.configureplotswindow = ConfigurePlotsWindow()
 		self.referenceserieswindow = ReferenceSeriesWindow()
-		self.cataloguewindow = CatalogueWindow()
+		self.catalogwindow = CatalogWindow()
 		self.logwindow = LogWindow()
 		self.quotewindow = QuoteWindow()
 
@@ -738,12 +740,16 @@ class MainWindow(QMainWindow):
 
 		toggleaction_configureplots = self.configureplotswindow.toggleViewAction()
 		toggleaction_configureplots.setShortcut("Shift+2")
+		toggleaction_configureplots.setToolTip("Toggle the visibility of the Configure Plots window")
 		toggleaction_referenceseries = self.referenceserieswindow.toggleViewAction()
 		toggleaction_referenceseries.setShortcut("Shift+3")
-		toggleaction_catalogue = self.cataloguewindow.toggleViewAction()
-		toggleaction_catalogue.setShortcut("Shift+4")
+		toggleaction_referenceseries.setToolTip("Toggle the visibility of the Reference Series window")
+		toggleaction_catalog = self.catalogwindow.toggleViewAction()
+		toggleaction_catalog.setShortcut("Shift+4")
+		toggleaction_catalog.setToolTip("Toggle the visibility of the Catalog of newly assigned Lines window")
 		toggleaction_log = self.logwindow.toggleViewAction()
 		toggleaction_log.setShortcut("Shift+5")
+		toggleaction_log.setToolTip("Toggle the visibility of the Log window")
 
 		actions_to_menus = {
 			"Files": (
@@ -762,10 +768,10 @@ class MainWindow(QMainWindow):
 				None,
 				QQ(QAction, parent=self, text="&Save current values as default", shortcut="Ctrl+D", tooltip="Save current configuration as default", change=lambda x: main.saveoptions()),
 				None,
-				QQ(QAction, parent=self, text="&Save Project", change=lambda x: main.saveproject(), shortcut="Ctrl+S"),
-				QQ(QAction, parent=self, text="&Load Project", change=lambda x: main.loadproject(), shortcut="Ctrl+O"),
+				QQ(QAction, parent=self, text="&Save Project", change=lambda x: main.saveproject(), shortcut="Ctrl+S", tooltip="Save the references to the currently opened files as a project"),
+				QQ(QAction, parent=self, text="&Load Project", change=lambda x: main.loadproject(), shortcut="Ctrl+O", tooltip="Load a project file"),
 				None,
-				QQ(QAction, parent=self, text="&Quit", change=self.close),
+				QQ(QAction, parent=self, text="&Quit", change=self.close, tooltip="Close the program"),
 			),
 			"View": (
 				QQ(QAction, parent=self, text="&Change Style", tooltip="Change between light, dark and custom theme", change=lambda x: main.change_style()),
@@ -773,7 +779,7 @@ class MainWindow(QMainWindow):
 				QQ(QAction, "layout_mpltoolbar", parent=self, text="&Show MPL Toolbar", shortcut="Shift+1", tooltip="Show or hide toolbar to edit or save the plot canvas", checkable=True),
 				toggleaction_configureplots,
 				toggleaction_referenceseries,
-				toggleaction_catalogue,
+				toggleaction_catalog,
 				toggleaction_log,
 				None,
 				QQ(QAction, "layout_limitannotationtosingleline", parent=self, text="&Annotate is Single Line", tooltip="Switch between the onhover annotation line being one line (for consistent width and height) or multiple lines (if many lines are at the same position and you want to see all of them)", checkable=True),
@@ -809,7 +815,7 @@ class MainWindow(QMainWindow):
 				QQ(QAction, parent=self, text="&Show Lineshape", shortcut="Ctrl+8", tooltip="Press to open the lineshape module, which allows to simulate different line profiles from the .cat stick spectrum", change=lambda x: main.open_window(LineshapeWindow)),
 				QQ(QAction, parent=self, text="&Series Fit", shortcut="Ctrl+9", tooltip="Open Series Fit Window, which allows to try out different combinations of transitions as a series", change=lambda x: main.open_window(SeriesFitWindow)),
 				QQ(QAction, parent=self, text="&Create Report", tooltip="Open Report Window, which allows to summarise your analysis", change=lambda x: main.open_window(ReportWindow)),
-				QQ(QAction, parent=self, text="&Create Figure", tooltip="Create publication quality figure", change=lambda x: main.open_window(FigureWindow)),
+				QQ(QAction, parent=self, text="&Create Figure", tooltip="Open Figure Window, which allows to create publication quality figures", change=lambda x: main.open_window(FigureWindow)),
 				None,
 				QQ(QAction, parent=self, text="&Pipe", shortcut="Ctrl+0", tooltip="Set up or execute the pipe command", change=lambda x: main.open_window(PipeWindow)),
 				QQ(QAction, parent=self, text="&Run Pipe", tooltip="Run the pipe command", change=lambda x: main.run_pipe(), shortcut="Ctrl+P"),
@@ -928,7 +934,7 @@ class MainWindow(QMainWindow):
 
 	def closeEvent(self, *args, **kwargs):
 		if not main.new_df.empty:
-			main.save_lines_lin(f"{APP_TAG}.lin", force_noappend=True, force_lin=True)
+			main.save_lines_lin(llwpfile(".lin"), force_noappend=True, force_lin=True)
 		for window in list(main.open_windows.values()):
 			window.close()
 		return super().closeEvent(*args, **kwargs)
@@ -944,6 +950,8 @@ class PlotWidget(QGroupBox):
 		super().__init__(parent)
 
 		self.fig = figure.Figure(dpi=main.config["plot_dpi"])
+		self.cid = self.fig.canvas.mpl_connect('button_press_event', self.on_click)
+
 		main.config.register("plot_dpi", lambda: self.fig.set_dpi(main.config["plot_dpi"]))
 		self.plotcanvas = FigureCanvas(self.fig)
 		self.plotcanvas.setMinimumHeight(200)
@@ -1011,7 +1019,7 @@ class PlotWidget(QGroupBox):
 		self.fitline = None
 
 		main.signalclass.updateplot.connect(lambda: self.set_data())
-		main.config.register(("series_annotate_xs", "plot_annotate", "plot_bins"), lambda: self.set_data())
+		main.config.register(("series_annotate_xs", "plot_annotate", "plot_bins", "plot_fortrat", "plot_fortrat_jstart"), lambda: self.set_data())
 
 	def gui(self):
 		self.create_plots().join()
@@ -1019,12 +1027,14 @@ class PlotWidget(QGroupBox):
 		main.config.register("series_references", self.set_data)
 
 	def set_offset(self, value):
-		if main.config["plot_coupled"]:
+		coupled = main.config["plot_coupled"]
+		if coupled:
 			offset = main.config["plot_offset"]
 			width = main.config["plot_width"]
 		else:
-			offset = self.axs["offset"][self.lcp]
-			width = self.axs["width"][self.lcp]
+			lcp = self.get_current_plot()
+			offset = self.axs["offset"][lcp]
+			width = self.axs["width"][lcp]
 
 		if value == "+":
 			offset += width/4
@@ -1037,10 +1047,11 @@ class PlotWidget(QGroupBox):
 		else:
 			offset = value
 
-		if main.config["plot_coupled"]:
+		if coupled:
 			main.config["plot_offset"] = offset
 		else:
-			self.axs["offset"][self.lcp] = offset
+			with locks["axs"]:
+				self.axs["offset"][lcp] = offset
 		self.set_data()
 
 	def get_offset(self, index=None):
@@ -1052,17 +1063,20 @@ class PlotWidget(QGroupBox):
 			return self.axs["offset"][index]
 
 	def reset_offsets(self):
-		shape = self.axs["ax"].shape
-		self.axs["offset"] = np.zeros(shape)
-		self.axs["width"]  = np.full(shape, main.config["plot_width"], dtype=np.float64)
+		with locks["axs"]:
+			shape = self.axs["ax"].shape
+			self.axs["offset"] = np.zeros(shape)
+			self.axs["width"]  = np.full(shape, main.config["plot_width"], dtype=np.float64)
 		main.config["plot_offset"] = 0
 		self.set_data()
 
 	def set_width(self, value, absolute=True):
-		if main.config["plot_coupled"]:
+		coupled = main.config["plot_coupled"]
+		if coupled:
 			width = main.config["plot_width"]
 		else:
-			width = self.axs["width"][self.lcp]
+			lcp = self.get_current_plot()
+			width = self.axs["width"][lcp]
 
 		if value == "+":
 			width *= 3/4
@@ -1077,14 +1091,19 @@ class PlotWidget(QGroupBox):
 		else:
 			width *= value
 
-		if main.config["plot_coupled"]:
+		if coupled:
 			main.config["plot_width"] = width
 		else:
-			self.axs["width"][self.lcp] = width
+			with locks["axs"]:
+				self.axs["width"][lcp] = width
 		self.set_data()
 
 	def get_widths(self):
-		if main.config["plot_coupled"]:
+		if main.config["plot_fortrat"]:
+			offset, shape, width = main.config["plot_fortrat_jstart"], self.axs["ax"].shape, main.config["plot_width"]
+			jvalues = np.arange(offset, shape[0] + offset)[::-1]
+			return np.tile(width * 2 * jvalues, (shape[1], 1)).T
+		elif main.config["plot_coupled"]:
 			return np.full(self.axs["ax"].shape, main.config["plot_width"])
 		else:
 			return self.axs["width"]
@@ -1112,7 +1131,7 @@ class PlotWidget(QGroupBox):
 				xs_all = reference["list"]["xs"]
 
 				xs = np.zeros(shape[0])
-				if xs_all:
+				if xs_all and i0 < len(xs_all):
 					imax = min(len(xs), len(xs_all)-i0)
 					xs[:imax] = xs_all[i0:imax+i0]
 				positions[:, i] = xs[::-1]
@@ -1186,7 +1205,8 @@ class PlotWidget(QGroupBox):
 							annotation.remove()
 							annotation.set_visible(False) # Keep this, becaue of matplotlib bug
 							del annotation
-						self.axs["annotation"][i, j] = None
+						with locks["axs"]:
+							self.axs["annotation"][i, j] = None
 			return
 
 		for i in range(self.axs["ax"].shape[0]):
@@ -1207,9 +1227,11 @@ class PlotWidget(QGroupBox):
 
 				if not annotation:
 					ax  = self.axs["ax"][i, j]
-					self.axs["annotation"][i, j] = ax.text(**ann_dict, s=text, transform=ax.transAxes)
+					with locks["axs"]:
+						self.axs["annotation"][i, j] = ax.text(**ann_dict, s=text, transform=ax.transAxes)
 				else:
-					self.axs["annotation"][i, j].set_text(text)
+					with locks["axs"]:
+						self.axs["annotation"][i, j].set_text(text)
 				self.axs["annotation"][i, j].set_color(color)
 
 	def check_blends(self, index, dict_):
@@ -1251,16 +1273,21 @@ class PlotWidget(QGroupBox):
 						break
 					qnus = [row[f"qnu{i+1}"] for i in range(noq)]
 					qnls = [row[f"qnl{i+1}"] for i in range(noq)]
-					transitions.append(f"{', '.join(map(str, map(int, qnus)))} ← {', '.join(map(str, map(int, qnls)))}")
+					transitions.append(f"{', '.join([str(qn) for qn in qnus if qn != np.iinfo(np.int64).min])} ← {', '.join([str(qn) for qn in qnls if qn != np.iinfo(np.int64).min])}")
 
 				text += " || ".join(transitions)
 		else:
 			text = ""
 		self.toplabel.setText(text)
 
+	def on_click(self, event):
+		ax = event.inaxes
+		index = np.asarray(np.where(self.axs["ax"] == ax)).T
+		if len(index):
+			self.lcp = tuple(index[0])
+	
 	@synchronized_d(locks["axs"])
 	def on_range(self, xmin, xmax, index):
-		self.lcp = index
 		axrange = self.axs["ax"][index].get_xlim()
 		if xmax == xmin or xmax > axrange[1] or xmin < axrange[0]:
 			return
@@ -1268,6 +1295,8 @@ class PlotWidget(QGroupBox):
 		shift = (QApplication.keyboardModifiers() == Qt.ShiftModifier)
 		if shift or main.config["fit_alwaysfit"]:
 			xmiddle, xuncert = self.fit_peak(xmin, xmax, index)
+			if main.config["fit_clipboard"]:
+				QApplication.clipboard().setText(str(xmiddle))
 			xpre = self.cache_positions[index]
 
 			dict_ = {
@@ -1298,7 +1327,8 @@ class PlotWidget(QGroupBox):
 		exp_ys = data["y"].to_numpy()
 		fit_xs = np.linspace(xmin, xmax, main.config["fit_xpoints"])
 
-		if len(exp_xs) < 2:
+		fitfunction = main.config["fit_function"]
+		if len(exp_xs) < 2 and fitfunction != "Pgopher":
 			main.notification("<span style='color:#eda711;'>WARNING</span>: You did select less than two points of your spectrum, this fit will not work.")
 			raise CustomError("Too few points selected")
 
@@ -1310,7 +1340,6 @@ class PlotWidget(QGroupBox):
 			self.fitcurve = None
 
 		try:
-			fitfunction = main.config["fit_function"]
 			if fitfunction == "Pgopher":
 				ymin, ymax = np.min(exp_ys), np.max(exp_ys)
 				cutoff = ymax - (ymax-ymin)/2
@@ -1368,26 +1397,26 @@ class PlotWidget(QGroupBox):
 
 				if main.config["fit_offset"]:
 					function, p0, bounds = {
-						"Gauss":				(lambda *x: lineshape("Gauss", 0, *x[:-1])+x[-1],   (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
-						"Lorentz":				(lambda *x: lineshape("Lorentz", 0, *x[:-1])+x[-1], (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
-						"Voigt":				(lambda *x: lineshape("Voigt", 0, *x[:-1])+x[-1],   (x0, y0, w0, w0, ymean),  ((xmin, 0, 0, 0, ymin), (xmax, 3*y0, 5*w0, 5*w0, ymax))),
+						"Gauss":					(lambda *x: lineshape("Gauss", 0, *x[:-1])+x[-1],   (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
+						"Lorentz":					(lambda *x: lineshape("Lorentz", 0, *x[:-1])+x[-1], (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
+						"Voigt":					(lambda *x: lineshape("Voigt", 0, *x[:-1])+x[-1],   (x0, y0, w0, w0, ymean),  ((xmin, 0, 0, 0, ymin), (xmax, 3*y0, 5*w0, 5*w0, ymax))),
 						"Gauss 1st Derivative":		(lambda *x: lineshape("Gauss", 1, *x[:-1])+x[-1],   (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
-						"Lorentz 1st Derivative":		(lambda *x: lineshape("Lorentz", 1, *x[:-1])+x[-1], (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
+						"Lorentz 1st Derivative":	(lambda *x: lineshape("Lorentz", 1, *x[:-1])+x[-1], (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
 						"Voigt 1st Derivative":		(lambda *x: lineshape("Voigt", 1, *x[:-1])+x[-1],   (x0, y0, w0, w0, ymean),  ((xmin, 0, 0, 0, ymin), (xmax, 3*y0, 5*w0, 5*w0, ymax))),
 						"Gauss 2nd Derivative":		(lambda *x: lineshape("Gauss", 2, *x[:-1])+x[-1],   (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
-						"Lorentz 2nd Derivative":		(lambda *x: lineshape("Lorentz", 2, *x[:-1])+x[-1], (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
+						"Lorentz 2nd Derivative":	(lambda *x: lineshape("Lorentz", 2, *x[:-1])+x[-1], (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
 						"Voigt 2nd Derivative":		(lambda *x: lineshape("Voigt", 2, *x[:-1])+x[-1],   (x0, y0, w0, w0, ymean),  ((xmin, 0, 0, 0, ymin), (xmax, 3*y0, 5*w0, 5*w0, ymax))),
 					}.get(fitfunction)
 				else:
 					function, p0, bounds = {
-						"Gauss":				(lambda *x: lineshape("Gauss", 0, *x),   (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
-						"Lorentz":				(lambda *x: lineshape("Lorentz", 0, *x), (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
-						"Voigt":				(lambda *x: lineshape("Voigt", 0, *x),   (x0, y0, w0, w0),  ((xmin, 0, 0, 0), (xmax, 3*y0, 5*w0, 5*w0))),
+						"Gauss":					(lambda *x: lineshape("Gauss", 0, *x),   (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
+						"Lorentz":					(lambda *x: lineshape("Lorentz", 0, *x), (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
+						"Voigt":					(lambda *x: lineshape("Voigt", 0, *x),   (x0, y0, w0, w0),  ((xmin, 0, 0, 0), (xmax, 3*y0, 5*w0, 5*w0))),
 						"Gauss 1st Derivative":		(lambda *x: lineshape("Gauss", 1, *x),   (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
-						"Lorentz 1st Derivative":		(lambda *x: lineshape("Lorentz", 1, *x), (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
+						"Lorentz 1st Derivative":	(lambda *x: lineshape("Lorentz", 1, *x), (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
 						"Voigt 1st Derivative":		(lambda *x: lineshape("Voigt", 1, *x),   (x0, y0, w0, w0),  ((xmin, 0, 0, 0), (xmax, 3*y0, 5*w0, 5*w0))),
 						"Gauss 2nd Derivative":		(lambda *x: lineshape("Gauss", 2, *x),   (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
-						"Lorentz 2nd Derivative":		(lambda *x: lineshape("Lorentz", 2, *x), (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
+						"Lorentz 2nd Derivative":	(lambda *x: lineshape("Lorentz", 2, *x), (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
 						"Voigt 2nd Derivative":		(lambda *x: lineshape("Voigt", 2, *x),   (x0, y0, w0, w0),  ((xmin, 0, 0, 0), (xmax, 3*y0, 5*w0, 5*w0))),
 					}.get(fitfunction)
 
@@ -1446,7 +1475,7 @@ class PlotWidget(QGroupBox):
 			lin_dict["error"] = abs(lin_dict["x"] - lin_dict["xpre"])
 		elif error_value >= -2:
 			resp, rc = QInputDialog.getText(self, 'Set error', 'Error:')
-			if rc == True:
+			if rc:
 				try:
 					lin_dict["error"] = float(resp)
 				except ValueError:
@@ -1477,7 +1506,7 @@ class PlotWidget(QGroupBox):
 			ax = self.axs["ax"][index]
 
 			annotation = self.axs["annotation"][index]
-			if annotation:
+			if annotation and main.config["series_references"][index[1]]["method"] == "Transition":
 				annotation.set_color(main.config["color_lin"])
 				ax.draw_artist(annotation)
 
@@ -1544,7 +1573,7 @@ class PlotWidget(QGroupBox):
 			for i, row in enumerate(tmp):
 				for j, ax in enumerate(row):
 					self.axs["ax"][i, j] = ax
-					self.axs["lin_plot"][i, j] = ax.scatter([], [], color=main.config["color_lin"], marker="*")
+					self.axs["lin_plot"][i, j] = ax.scatter([], [], color=main.config["color_lin"], marker="*", zorder=100)
 					self.axs["span"][i, j] = matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax, i=i, j=j:self.on_range(xmin, xmax, (i, j)), 'horizontal')
 					ax.yaxis.set_visible(False)
 					ax.xaxis.set_visible(False)
@@ -1563,9 +1592,8 @@ class PlotWidget(QGroupBox):
 
 	def manual_draw(self):
 		self.set_data().join()
-		if not main.config["flag_automatic_draw"]:
-			with locks["axs"]:
-				self.plotcanvas.draw()
+		with locks["axs"]:
+			self.plotcanvas.draw_idle()
 
 	def set_data(self):
 		thread = threading.Thread(target=self.set_data_core)
@@ -1593,7 +1621,7 @@ class PlotWidget(QGroupBox):
 				for j in range(self.axs["ax"].shape[1]):
 					ax = self.axs["ax"][i, j]
 					offset = self.get_offset((i, j))
-					x, width = xpos[i, j]+offset, widths[i, j]/2
+					x, width = xpos[i, j]+offset, widths[i, j]/2 or 10
 					xrange = (x-width, x+width)
 					ax.set_xlim(*xrange)
 
@@ -1657,7 +1685,10 @@ class PlotWidget(QGroupBox):
 									yrange_exp = [dataframe["y"].min(), dataframe["y"].max()]
 								else:
 									yrange_exp = [-1, 1]
-							segs = (((xs[i], ys[i]),(xs[i+1], ys[1+i])) for i in range(len(xs)-1))
+							if main.config["plot_expasstickspectrum"]:
+								segs = (((xs[i], ys[i]),(xs[i], 0)) for i in range(len(xs)))
+							else:
+								segs = (((xs[i], ys[i]),(xs[i+1], ys[1+i])) for i in range(len(xs)-1))
 							colors = create_colors(dataframe, files)
 							coll = matplotlib.collections.LineCollection(segs, colors=colors)
 							if self.axs["exp_plot"][i, j]:
@@ -1702,8 +1733,7 @@ class PlotWidget(QGroupBox):
 
 			breakpoint(ownid, self.set_data_id)
 			if main.config["flag_automatic_draw"]:
-				with locks["axs"]:
-					self.plotcanvas.draw()
+				self.plotcanvas.draw_idle()
 		except CustomError as E:
 			pass
 
@@ -1741,11 +1771,14 @@ class PlotWidget(QGroupBox):
 		except ValueError:
 			main.notification("<span style='color:#eda711;'>WARNING</span>: The entered value could not be interpreted as a number.")
 			return
+		
+		if main.config["plot_relativegoto"]:
+			self.set_offset(xnew)
+		else:
+			index = self.get_current_plot()
+			xpos  = self.cache_positions[index]
 
-		index = self.get_current_plot()
-		xpos  = self.cache_positions[index]
-
-		self.set_offset(xnew - xpos)
+			self.set_offset(xnew - xpos)
 
 	def width_dialog(self):
 		resp, rc = QInputDialog.getText(self, 'Set view width', 'Width:')
@@ -1916,21 +1949,21 @@ class ReferenceSeriesWindow(EQDockWidget):
 	def changed(self):
 		main.config["series_references"] = self.get_state()
 
-class CatalogueWindow(EQDockWidget):
+class CatalogWindow(EQDockWidget):
 	def __init__(self, parent=None):
 		super().__init__(parent)
-		self.setWindowTitle("Catalogue of newly assigned Lines")
+		self.setWindowTitle("Catalog of newly assigned Lines")
 
 		mainwidget = QGroupBox()
 		layout = QVBoxLayout()
 		self.setWidget(mainwidget)
 		mainwidget.setLayout(layout)
 
-		button_savecatalogue = QQ(QToolButton, text="Save", change=lambda: main.save_lines_lin())
-		button_delete = QQ(QToolButton, text="X", change=main.catalogue_table_delete)
-		button_deleteall = QQ(QToolButton, text="Del All", change=lambda: main.catalogue_table_delete(all=True))
-		button_addrow = QQ(QToolButton, text="+", change=lambda x: addemptyrow_inplace(main.new_df, self.catalogueModel))
-		button_tight = QQ(QToolButton, text="Tight", change=lambda x: self.catalogueTable.resizeColumnsToContents())
+		button_savecatalog = QQ(QToolButton, text="Save", change=lambda: main.save_lines_lin())
+		button_delete = QQ(QToolButton, text="X", change=main.catalog_table_delete)
+		button_deleteall = QQ(QToolButton, text="Del All", change=lambda: main.catalog_table_delete(all=True))
+		button_addrow = QQ(QToolButton, text="+", change=lambda x: addemptyrow_inplace(main.new_df, self.catalogModel))
+		button_tight = QQ(QToolButton, text="Tight", change=lambda x: self.catalogTable.resizeColumnsToContents())
 		checkbox_appendonsave = QQ(QCheckBox, "flag_appendonsave", text="Append", tooltip="Append to file if checked or overwrite content if unchecked")
 		errorlabel = QQ(QLabel, text="Default Uncertainty: ", tooltip="Positive Values are absolute Values, -1 for obs-calc, -2 for dialog, -3 for StdDev from Fit")
 		errorfield = QQ(QDoubleSpinBox, "fit_error", range=(-3, None), minWidth=120, singlestep=main.config["fit_uncertaintystep"])
@@ -1938,10 +1971,10 @@ class CatalogueWindow(EQDockWidget):
 		headers = ["U1", "U2", "U3", "U4", "U5", "U6", "L1", "L2", "L3", "L4", "L5", "L6", "Freq", "Unc.", "Weight", "Comment"]
 		str_columns = [headers.index("Comment")]
 
-		self.catalogueTable = QTableView()
-		self.catalogueModel = CustomTableModel(main.new_df, headers, ["filename"])
-		self.catalogueTable.setModel(self.catalogueModel)
-		self.catalogueTable.resizeColumnsToContents()
+		self.catalogTable = QTableView()
+		self.catalogModel = CustomTableModel(main.new_df, headers, ["filename"])
+		self.catalogTable.setModel(self.catalogModel)
+		self.catalogTable.resizeColumnsToContents()
 
 		main.signalclass.assignment.connect(self.scroll_bottom)
 
@@ -1950,24 +1983,24 @@ class CatalogueWindow(EQDockWidget):
 
 		buttonsBox = QHBoxLayout()
 		[buttonsBox.addWidget(button_delete), buttonsBox.addWidget(button_deleteall), buttonsBox.addWidget(button_addrow),
-		 buttonsBox.addStretch(2), buttonsBox.addWidget(checkbox_appendonsave), buttonsBox.addWidget(button_savecatalogue),
+		 buttonsBox.addStretch(2), buttonsBox.addWidget(checkbox_appendonsave), buttonsBox.addWidget(button_savecatalog),
 		 buttonsBox.addWidget(button_tight)]
 		layout.addLayout(buttonsBox)
-		layout.addWidget(self.catalogueTable)
+		layout.addWidget(self.catalogTable)
 		buttonsBox = QHBoxLayout()
 		[buttonsBox.addWidget(errorlabel), buttonsBox.addStretch(1), buttonsBox.addWidget(errorfield)]
 		layout.addLayout(buttonsBox)
 
 	def scroll_bottom(self):
-		self.catalogueTable.selectRow(len(self.catalogueModel.data)-1)
-		self.catalogueModel.update()
-		self.catalogueTable.scrollToBottom()
+		self.catalogTable.selectRow(len(self.catalogModel.data)-1)
+		self.catalogModel.update()
+		self.catalogTable.scrollToBottom()
 
 	def update_columns_visibility(self):
 		qns = main.config["series_qns"]
 		for i in range(6):
-			self.catalogueTable.setColumnHidden(i,   i>=qns)
-			self.catalogueTable.setColumnHidden(i+6, i>=qns)
+			self.catalogTable.setColumnHidden(i,   i>=qns)
+			self.catalogTable.setColumnHidden(i+6, i>=qns)
 
 class LogWindow(EQDockWidget):
 	def __init__(self, parent=None):
@@ -2327,7 +2360,7 @@ class LinWindow(FilesWindow):
 
 	def gui_top(self):
 		file = "__lin_own_df__"
-		hidden = main.config["flag_hidecatalogue"]
+		hidden = main.config["flag_hidecatalog"]
 		rowdict = {
 			"label":			QQ(QLabel, text="Newly Assigned Lines"),
 			"hide":				QQ(QPushButton, text="Show" if hidden else "Hide", change=lambda x, file=file: self.hide_new_df(file)),
@@ -2341,8 +2374,8 @@ class LinWindow(FilesWindow):
 
 	@synchronized_d(locks["axs"])
 	def hide_new_df(self, file, inp = False):
-		hidden = not main.config.get("flag_hidecatalogue", False)
-		main.config["flag_hidecatalogue"] = hidden
+		hidden = not main.config.get("flag_hidecatalog", False)
+		main.config["flag_hidecatalog"] = hidden
 		if hidden:
 			self.files_dict[file]["button_hide"].setText("Show")
 			self.files_dict[file]["label"].setDisabled(True)
@@ -2798,7 +2831,6 @@ class SeriesfinderWindow(EQWidget):
 		rightLayout.addWidget(QQ(QCheckBox, "seriesfinderwindow_ctype", text="c-type"))
 		rightLayout.addStretch(1)
 
-		leftLayout.addWidget(QQ(QLabel, text="Frequency Range:"), 0, 0)
 		leftLayout.addWidget(QQ(QLabel, text="Start Frequency: "), 1, 0)
 		leftLayout.addWidget(QQ(QLineEdit, "seriesfinderwindow_start"), 1, 1)
 		leftLayout.addWidget(QQ(QLabel, text="Stop Frequency: "), 2, 0, 1, 1)
@@ -2806,13 +2838,14 @@ class SeriesfinderWindow(EQWidget):
 		leftLayout.addWidget(QQ(QLabel, text="Number of Results: "), 3, 0, 1, 1)
 		leftLayout.addWidget(QQ(QSpinBox, "seriesfinderwindow_results", range=(0, None)), 3, 1, 1, 1)
 		leftLayout.addWidget(QQ(QLabel, text="Additional Condition: "), 4, 0, 1, 1)
-		leftLayout.addWidget(QQ(QLineEdit, "seriesfinderwindow_condition"), 4, 1, 1, 1)
+		leftLayout.addWidget(QQ(QLineEdit, "seriesfinderwindow_condition", placeholder="Hover for tooltip", tooltip="Use qnu1, ..., qnu6, qnl1, ..., qnl6 for the quantum numbers. Additionally, x, error, y, degfreed, elower, usd, tag, qnfmt, and filename are allowed."), 4, 1, 1, 1)
 		leftLayout.addWidget(QQ(QCheckBox, "seriesfinderwindow_onlyunassigned", text = "Only unassigned Lines"), 5, 1, 1, 1)
 		leftLayout.addWidget(QQ(QPushButton, text="Run", change=lambda x: self.run()), 6, 1, 1, 1)
 
+		leftLayout.setColumnStretch(1, 1)
+
 		vertLayout.addLayout(leftLayout)
 		vertLayout.addLayout(rightLayout)
-		vertLayout.addStretch(1)
 		layout.addLayout(vertLayout)
 		layout.addWidget(self.messageLabel)
 		layout.addWidget(self.outputTable, 1)
@@ -2883,7 +2916,7 @@ class SeriesfinderWindow(EQWidget):
 		self.messageLabel.setHidden(False)
 
 		table = self.outputTable
-		headers = ["Start", "Intensity", "Frequency"] + qns_visible
+		headers = ["Start", "Log. Intensity", "Frequency"] + qns_visible
 
 		table.setRowCount(0)
 		table.setColumnCount(len(headers))
@@ -2977,7 +3010,7 @@ class BlendWindow(EQWidget):
 		self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
 		self.table.setRowCount(0)
 		self.table.setColumnCount(len(self.cols)+1)
-		self.table.setHorizontalHeaderLabels(["Y/N", "x", "y", "Dist"] +  [f"{ul}{i+1}" for ul in ("U", "L") for i in range(6)] + ["Filename"])
+		self.table.setHorizontalHeaderLabels(["Y/N", "x", "log. y", "Dist"] +  [f"{ul}{i+1}" for ul in ("U", "L") for i in range(6)] + ["Filename"])
 		layout.addWidget(self.table)
 
 		buttons_layout = QHBoxLayout()
@@ -3064,7 +3097,7 @@ class PipeWindow(EQWidget):
 		if not command:
 			command = ""
 
-		layout.addWidget(QQ(QPlainTextEdit, value=command, change=lambda: self.update_pipe_command(), placeholder="Write your command line commando here"))
+		layout.addWidget(QQ(QPlainTextEdit, value=command, change=lambda: self.update_pipe_command(), placeholder="Write your command line command here"))
 		layout.addWidget(QQ(QCheckBox, text="Reread Exp Files after command finished", value=exp_checked, change=lambda x: self.update_pipe_command()))
 		layout.addWidget(QQ(QCheckBox, text="Reread Cat Files after command finished", value=cat_checked, change=lambda x: self.update_pipe_command()))
 		layout.addWidget(QQ(QCheckBox, text="Reread Lin Files after command finished", value=lin_checked, change=lambda x: self.update_pipe_command()))
@@ -3147,9 +3180,9 @@ class PeakfinderWindow(EQWidget):
 		tmp_layout.addWidget(self.run_button)
 		tmp_layout.addWidget(QQ(QPushButton, text="Export Peaks", change=lambda x: self.export_peaks()))
 
-		tmp_layout.addWidget(QQ(QLabel, text="Uncertainty: "))
-		uncert_input = QQ(QDoubleSpinBox, "peakfinderwindow_width", range=(0, None))
+		uncert_input = QQ(QDoubleSpinBox, "peakfinderwindow_width", range=(0, None), enabled=main.config["peakfinderwindow_onlyunassigned"], minWidth=80)
 		tmp_layout.addWidget(QQ(QCheckBox, "peakfinderwindow_onlyunassigned", text="Only unassigned Lines", change=uncert_input.setEnabled))
+		tmp_layout.addWidget(QQ(QLabel, text="Uncertainty unassigned lines: ", tooltip="Max distance between peak and closest predicted line to count as assigned"))
 		tmp_layout.addWidget(uncert_input)
 
 		tmp_layout.addStretch(1)
@@ -3314,7 +3347,6 @@ class PeakfinderWindow(EQWidget):
 				peak_df.loc[((x-u) < peak_df["x"]) & (peak_df["x"] < (x+u)), "assigned"] = True
 
 			peak_df.drop(peak_df[peak_df["assigned"]==True].index, inplace=True)
-			peak_df.sort_values("y", ascending=False, inplace=True)
 			del peak_df["assigned"]
 
 		peak_df.sort_values("y", ascending=False, inplace=True)
@@ -3347,10 +3379,10 @@ class SeriesFitWindow(EQWidget):
 		self.pred_params = {}
 		self.pred_freqs = []
 
-		self.catalogueTable = QTableView()
-		self.catalogueModel = CustomTableModel(main.ser_df, list(main.ser_df.columns))
-		self.catalogueTable.setModel(self.catalogueModel)
-		self.catalogueTable.resizeColumnsToContents()
+		self.catalogTable = QTableView()
+		self.catalogModel = CustomTableModel(main.ser_df, list(main.ser_df.columns))
+		self.catalogTable.setModel(self.catalogModel)
+		self.catalogTable.resizeColumnsToContents()
 
 		class CustomSeriesSelector(SeriesSelector):
 			def changed(self):
@@ -3362,14 +3394,14 @@ class SeriesFitWindow(EQWidget):
 
 		layout = QVBoxLayout()
 		buttonsBox = QHBoxLayout()
-		buttonsBox.addWidget(QQ(QToolButton, text="X", change=lambda x: self.catalogueTableDelete()))
-		buttonsBox.addWidget(QQ(QToolButton, text="+", change=lambda x: addemptyrow_inplace(main.ser_df, self.catalogueModel)))
+		buttonsBox.addWidget(QQ(QToolButton, text="X", change=lambda x: self.catalogTableDelete()))
+		buttonsBox.addWidget(QQ(QToolButton, text="+", change=lambda x: addemptyrow_inplace(main.ser_df, self.catalogModel)))
 		buttonsBox.addWidget(QQ(QToolButton, text="Copy Lines From Main Window", change=lambda x: self.copyMWLines()))
 		buttonsBox.addWidget(QQ(QCheckBox, "seriesfitwindow_greedy", text="Add Newly Assigned Lines here"))
 		buttonsBox.addStretch(1)
-		buttonsBox.addWidget(QQ(QToolButton, text="Tight", change=lambda x: self.catalogueTable.resizeColumnsToContents()))
+		buttonsBox.addWidget(QQ(QToolButton, text="Tight", change=lambda x: self.catalogTable.resizeColumnsToContents()))
 		layout.addLayout(buttonsBox)
-		layout.addWidget(self.catalogueTable)
+		layout.addWidget(self.catalogTable)
 		layout.addWidget(self.series_selector)
 		layout.addWidget(QQ(QPlainTextEdit, "seriesfitwindow_function", minHeight=50, placeholder="Write formula for the fit here. The formula can include the six upper quantum numbers (as qnu1, ..., qnu6) and six lower quantum numbers (as qnl1, ..., qnl6). E.g. try 2*B*qnu1 for a molecule with equidistant peaks of about 8000 units."))
 
@@ -3385,17 +3417,17 @@ class SeriesFitWindow(EQWidget):
 		main.signalclass.assignment.connect(self.scroll_bottom)
 
 	def scroll_bottom(self):
-		self.catalogueTable.selectRow(len(self.catalogueModel.data)-1)
-		self.catalogueModel.update()
-		self.catalogueTable.scrollToBottom()
+		self.catalogTable.selectRow(len(self.catalogModel.data)-1)
+		self.catalogModel.update()
+		self.catalogTable.scrollToBottom()
 
 	@synchronized_d(locks["ser_df"])
-	def catalogueTableDelete(self):
-		selected = [index.row() for index in self.catalogueTable.selectionModel().selectedRows()]
+	def catalogTableDelete(self):
+		selected = [index.row() for index in self.catalogTable.selectionModel().selectedRows()]
 		for index in sorted(selected, reverse = True):
 			main.ser_df.drop(index, inplace =True)
 			main.ser_df.reset_index(inplace = True, drop = True)
-		self.catalogueModel.update()
+		self.catalogModel.update()
 
 	def copyMWLines(self):
 		main.ser_df.reset_index(drop=True, inplace=True)
@@ -3407,7 +3439,7 @@ class SeriesFitWindow(EQWidget):
 			tmp_dict = tmp_df.loc[i]
 			tmp_dict = {key: main.ser_dtypes[key](value) for key, value in tmp_dict.items()}
 			main.ser_df.loc[length+i] = tmp_dict
-		self.catalogueModel.update()
+		self.catalogModel.update()
 
 	def fit(self):
 		state = main.config["seriesfitwindow_series"]
@@ -3530,8 +3562,8 @@ class ResidualsWindow(EQWidget):
 		hlayout.addWidget(QQ(QCheckBox, "residualswindow_autoscale", text="Autoscale on Update"))
 		layout.addLayout(hlayout)
 		layout.addWidget(self.mpl_toolbar)
-		layout.addWidget(QQ(QPlainTextEdit, "residualswindow_query", maxHeight=40, placeholder="Query text to filter shown lines. Use qnu1, ..., qnu6 and qnl1, ..., qnl6 for the quantum numbers."))
-		layout.addWidget(QQ(QPlainTextEdit, "residualswindow_colorinput", maxHeight=40, placeholder="Enter custom color and query to color specific lines differently. E.g. enter '#ff0000; qnu1 < 20' to color all transitions with the first upper quantum number below 20 red."))
+		layout.addWidget(QQ(QPlainTextEdit, "residualswindow_query", maxHeight=60, placeholder="Query text to filter shown lines. Use qnu1, ..., qnu6 and qnl1, ..., qnl6 for the quantum numbers. Other possible values are x_lin, x_cat, error_lin, error_cat, filename_lin, filename_cat, y, degfreed, elower, usd, tag, qnfmt, weight, and comment."))
+		layout.addWidget(QQ(QPlainTextEdit, "residualswindow_colorinput", maxHeight=60, placeholder="Enter custom color and query to color specific lines differently. E.g. enter '#ff0000; qnu1 < 20' to color all transitions with the first upper quantum number below 20 red."))
 
 		buttonslayout = QHBoxLayout()
 		layout.addLayout(buttonslayout)
@@ -3580,7 +3612,7 @@ class ResidualsWindow(EQWidget):
 				if row.strip():
 					color, query = row.split(";")
 					indices = df.query(query).index
-					df.iloc[indices, df.columns.get_loc("color")] = color
+					df.loc[indices, "color"] = color
 					message.append(f"{len(indices)} lines are colored in <span style='color:{color};'>{color}</span>.")
 
 			self.df = df
@@ -3595,8 +3627,16 @@ class ResidualsWindow(EQWidget):
 			self.points.set_offsets(tuples)
 			self.points.set_color(colors)
 			if len(xs) and main.config["residualswindow_autoscale"]:
-				self.ax.set_xlim([np.min(xs), np.max(xs)])
-				y_range = [np.min(ys), np.max(ys)]
+				xmin, xmax = np.min(xs), np.max(xs)
+				if xmin == xmax:
+					xmin -= 1
+					xmax += 1
+				self.ax.set_xlim([xmin, xmax])
+				ymin, ymax = np.min(ys), np.max(ys)
+				if ymin == ymax:
+					ymin -= 1
+					ymax += 1
+				y_range = [ymin, ymax]
 				self.ax.set_ylim(y_range[0]-main.config["plot_ymargin"]*(y_range[1]-y_range[0]), y_range[1]+main.config["plot_ymargin"]*(y_range[1]-y_range[0]))
 			self.fig.canvas.draw_idle()
 			main.notification("<br/>".join(message))
@@ -3673,12 +3713,12 @@ class EnergyLevelsWindow(EQWidget):
 		self.file_label = QQ(QLabel, text="No File loaded")
 		hlayout.addWidget(self.file_label)
 		hlayout.addWidget(QLabel("x-axis: "))
-		hlayout.addWidget(QQ(QLineEdit, "residualswindow_xvariable", placeholder="Choose the x-variable, e.g. qn1"))
+		hlayout.addWidget(QQ(QLineEdit, "energylevelswindow_xvariable", placeholder="Choose the x-variable, e.g. qn1"))
 		hlayout.addWidget(QLabel("y-axis: "))
-		hlayout.addWidget(QQ(QLineEdit, "residualswindow_yvariable", placeholder="Choose the x-variable, e.g. egy"))
-		hlayout.addWidget(QQ(QCheckBox, "residualswindow_autoscale", text="Autoscale on Update"))
+		hlayout.addWidget(QQ(QLineEdit, "energylevelswindow_yvariable", placeholder="Choose the x-variable, e.g. egy"))
+		hlayout.addWidget(QQ(QCheckBox, "energylevelswindow_autoscale", text="Autoscale on Update"))
 		layout.addLayout(hlayout)
-		layout.addWidget(QQ(QPlainTextEdit, "energylevelswindow_query", maxHeight=40, placeholder="Query text to filter shown levels. Use qn1, ..., qn6 for the quantum numbers."))
+		layout.addWidget(QQ(QPlainTextEdit, "energylevelswindow_query", maxHeight=40, placeholder="Query text to filter shown levels. Use qn1, ..., qn6 for the quantum numbers. Other possible values are iblk, indx, egy, err, pmix, and we."))
 		layout.addWidget(QQ(QPlainTextEdit, "energylevelswindow_colorinput", maxHeight=40, placeholder="Enter custom color and query to color specific lines differently. E.g. enter '#ff0000; qn1 < 20' to color all levels with the first quantum number below 20 red."))
 
 		buttonslayout = QHBoxLayout()
@@ -3687,26 +3727,6 @@ class EnergyLevelsWindow(EQWidget):
 		self.update_button = QQ(QPushButton, text="Update", change=self.plot_energylevels)
 		buttonslayout.addWidget(self.update_button)
 		buttonslayout.addStretch(1)
-
-	def get_energylevels(self, fname):
-		## Egy Dataframe Format
-		_egy_df_columns = ['iblk', 'indx', 'egy', 'err', 'pmix', 'we', ':', 'qn1', 'qn2', 'qn3', 'qn4', 'qn5', 'qn6']
-		_egy_df_dtypes = [np.int64, np.int64, np.float64, np.float64, np.float64, np.int64, str]+[np.int64]*6
-		_egy_df_widths = [0,6,11,29,47,58,63,64,67,70,73,76,79,82]
-
-		dtypes_dict = {_egy_df_columns[i]: _egy_df_dtypes[i] for i in range(len(_egy_df_columns))}
-
-		data = []
-		with open(fname, "r") as file:
-			for line in file:
-				if line.strip() == "" or line.startswith("#"):
-					continue
-				data.append([column_to_numeric(line[i:j]) for i,j in zip(_egy_df_widths[:-1], _egy_df_widths[1:])])
-		data = pd.DataFrame(data)
-		data.columns = _egy_df_columns
-		data = data.astype(dtypes_dict)
-		data.reset_index(drop=True, inplace=True)
-		return(data)
 
 	def load_file(self):
 		fname = QFileDialog.getOpenFileName(None, 'Choose Egy File to load',"")[0]
@@ -3720,33 +3740,43 @@ class EnergyLevelsWindow(EQWidget):
 			return
 		self.update_button.setDisabled(True)
 		main.app.processEvents()
+		self.noq = main.config["series_qns"]
 		try:
-			df = self.get_energylevels(self.fname)
+			df = pyckett.egy_to_df(self.fname)
 			query = main.config["energylevelswindow_query"]
 			if query:
-				df = df.query(query, inplace=True)
+				df.query(query, inplace=True)
+
 			df["color"] = main.config["energylevelswindow_defaultcolor"]
 
 			colorquerytext = main.config["energylevelswindow_colorinput"].split("\n")
 			for row in colorquerytext:
 				if row.strip():
 					color, query = row.split(";")
-					df.iloc[df.query(query).index, df.columns.get_loc("color")] = color
+					df.loc[df.query(query).index, "color"] = color
 
 			self.df = df
 
-			yvariable = main.config["energylevelswindow_xvariable"].strip() or "egy"
 			xvariable = main.config["energylevelswindow_xvariable"].strip() or "qn1"
-			ys = df.eval(yvariable).to_numpy()
+			yvariable = main.config["energylevelswindow_yvariable"].strip() or "egy"
 			xs = df.eval(xvariable).to_numpy()
+			ys = df.eval(yvariable).to_numpy()
 			colors = df["color"].to_numpy()
 			tuples = list(zip(xs,ys))
 			tuples = tuples if len(tuples)!=0 else [[None,None]]
 			self.points.set_offsets(tuples)
 			self.points.set_color(colors)
-			if len(xs) and self.autoscale.isChecked():
-				self.ax.set_xlim([np.min(xs), np.max(xs)])
-				y_range = [np.min(ys), np.max(ys)]
+			if len(xs) and main.config["energylevelswindow_autoscale"]:
+				xmin, xmax = np.min(xs), np.max(xs)
+				if xmin == xmax:
+					xmin -= 1
+					xmax += 1
+				self.ax.set_xlim([xmin, xmax])
+				ymin, ymax = np.min(ys), np.max(ys)
+				if ymin == ymax:
+					ymin -= 1
+					ymax += 1
+				y_range = [ymin, ymax]
 				self.ax.set_ylim(y_range[0]-main.config["plot_ymargin"]*(y_range[1]-y_range[0]), y_range[1]+main.config["plot_ymargin"]*(y_range[1]-y_range[0]))
 			self.fig.canvas.draw_idle()
 		except:
@@ -3763,8 +3793,7 @@ class EnergyLevelsWindow(EQWidget):
 				tmp_levels = self.df.iloc[ind["ind"]]
 				text = []
 				for i, row in tmp_levels.iterrows():
-					qns = row[self.qns_visible].to_numpy()
-					text.append(",".join(str(int(row[f"qn{i+1}"])) for i in range(main.config["series_qns"])))
+					text.append(",".join(str(int(row[f"qn{i+1}"])) for i in range(self.noq)))
 				text = "\n".join(text)
 				self.annot.set_text(text)
 				self.annot.set_visible(True)
@@ -3824,8 +3853,7 @@ class SpectraResolverWindow(EQWidget):
 		main.app.processEvents()
 		self.label.setText("Working")
 		try:
-			with locks["exp_df"]:
-				df = main.exp_df.copy()
+			df = main.get_visible_data("exp", force_all=True)
 			df["keep"] = 1
 			i_keep = df.columns.get_loc("keep")
 
@@ -3859,7 +3887,7 @@ class ReportWindow(EQWidget):
 		layout = QVBoxLayout()
 		self.setLayout(layout)
 
-		layout.addWidget(QQ(QPlainTextEdit, "reportwindow_query", maxHeight=40, placeholder="Query text to filter assignments. Use qnu1, ..., qnu6 and qnl1, ..., qnl6 for the quantum numbers."))
+		layout.addWidget(QQ(QPlainTextEdit, "reportwindow_query", maxHeight=40, placeholder="Query text to filter assignments. Use qnu1, ..., qnu6 and qnl1, ..., qnl6 for the quantum numbers. Other possible values are x, error, weight, comment, and filename."))
 		layout.addWidget(QQ(QCheckBox, "reportwindow_blends", text="Blends"))
 		layout.addWidget(QQ(QPushButton, text="Create Report", change=self.create_report))
 		self.reportfield = QQ(QTextEdit, readonly=True)
@@ -3964,9 +3992,9 @@ class FigureWindow(EQWidget):
 
 		tmplayout.addWidget(QQ(QLabel, text="Size:"), 0, 0)
 		tmplayout2 = QHBoxLayout()
-		tmplayout2.addWidget(QQ(QDoubleSpinBox, "figurewindow_width", range=(0, None)))
+		tmplayout2.addWidget(QQ(QDoubleSpinBox, "figurewindow_width", range=(0, None), minWidth=60))
 		tmplayout2.addWidget(QQ(QLabel, text=" x "))
-		tmplayout2.addWidget(QQ(QDoubleSpinBox, "figurewindow_height", range=(0, None)))
+		tmplayout2.addWidget(QQ(QDoubleSpinBox, "figurewindow_height", range=(0, None), minWidth=60))
 		tmplayout2.addWidget(QQ(QComboBox, "figurewindow_unit", options=("cm", "inch")))
 		tmplayout.addLayout(tmplayout2, 0, 1)
 
@@ -4117,7 +4145,7 @@ class FigureWindow(EQWidget):
 					ax.yaxis.set_visible(False)
 					ax.xaxis.set_visible(False)
 					offset = main.plotwidget.get_offset((i, j))
-					x, width = xpos[i, j]+offset, widths[i, j]/2
+					x, width = xpos[i, j]+offset, widths[i, j]/2 or 10
 					xrange = (x-width, x+width)
 					ax.set_xlim(*xrange)
 
@@ -4327,14 +4355,14 @@ class ConfigWindow(EQWidget):
 		if self.updating:
 			return
 		converter = config_specs.get(key)
-		if not converter:
-			return
-		else:
+		if converter:
 			converter = converter[1]
 		input, oklab, label = self.widgets[key]
 
 		try:
-			if converter in (dict, list, tuple):
+			if converter is None:
+				pass
+			elif converter in (dict, list, tuple):
 				value = json.loads(value)
 			elif converter == bool:
 				value = True if value in ["True", "1"] else False
@@ -4624,13 +4652,14 @@ class ReferenceSelector(QTabWidget):
 		self.xsTable.setHorizontalHeaderLabels(["#", "Frequency"])
 		layout.addWidget(self.xsTable)
 		if self.state["list"]["xs"]:
-			self.load_xs_list(values = self.state["list"]["xs"])
+			self.load_xs_list(values=self.state["list"]["xs"])
 
 		button_open = QQ(QToolButton, text="Open List", change=lambda x: self.load_xs_list(temp=False))
 		button_write = QQ(QToolButton, text="Write List", change=lambda x: self.load_xs_list(temp=True))
 
 		label_startat = QLabel("Start at Index: ")
 		spinbox_startat = QQ(QSpinBox, value=self.state["list"]["i0"], range=(0, None), singlestep=1, change=lambda: self.state["list"].__setitem__("i0", spinbox_startat.value()))
+		self.spinbox_startat = spinbox_startat
 		button_apply = QQ(QPushButton, text="Apply", change=lambda x: main.plotwidget.reset_offsets())
 
 		hbox = QHBoxLayout()
@@ -4669,8 +4698,8 @@ class ReferenceSelector(QTabWidget):
 
 	def load_xs_list(self, values=None, temp=False):
 		if values:
-			self.state["list"]["xs"] = values
 			xs = values
+			self.state["list"]["xs"] = values
 
 		elif temp:
 			line, ok = QInputDialog().getMultiLineText(self, "Specify Custom List",
@@ -4686,11 +4715,11 @@ class ReferenceSelector(QTabWidget):
 				except ValueError:
 					main.notification(f"<span style='color:#eda711;'>WARNING</span>: Could not convert the string '{x}' to a numerical value.")
 
-			self.state["list"] = {
+			self.state["list"].update({
 				"qns":		None,
 				"xs":		xs,
-				"i0":	0,
-			}
+			})
+			self.spinbox_startat.setValue(0)
 
 		else:
 			fnames = QFileDialog.getOpenFileNames(self, 'Open Positions List(s)',)[0]
@@ -4711,12 +4740,11 @@ class ReferenceSelector(QTabWidget):
 							except ValueError:
 								main.notification(f"<span style='color:#eda711;'>WARNING</span>: Could not convert the string '{x}' to a numerical value.")
 
-			self.state["list"] = {
+			self.state["list"].update({
 				"qns":		None,
 				"xs":		xs,
-				"i0":	0,
-			}
-
+			})
+			self.spinbox_startat.setValue(0)
 
 
 		table = self.xsTable
@@ -4927,7 +4955,7 @@ class ProtPlot(QWidget):
 			yrange = (ymin-margin, ymax+margin)
 		self.ax.set_ylim(yrange)
 
-		self.plot_canvas.draw()
+		self.plot_canvas.draw_idle()
 
 	def move_plot(self, dir, factor=None):
 		if dir == "in":
@@ -5216,7 +5244,9 @@ class QDoubleSpinBox(QDoubleSpinBox):
 			np.float64(text)
 			return(2, text, position)
 		except ValueError:
-			if re.match(r"^[+-]?\d+\.?\d*[Ee][+-]?\d?$", text):
+			if text.strip() in ["+", "-", ""]:
+				return(1, text, position)
+			elif re.match(r"^[+-]?\d+\.?\d*[Ee][+-]?\d?$", text):
 				return(1, text, position)
 			else:
 				return(0, text, position)
@@ -5226,7 +5256,7 @@ class QDoubleSpinBox(QDoubleSpinBox):
 		if tmp:
 			return(tmp[0])
 		else:
-			return(0)
+			return(str(0))
 
 class QTableWidget(QTableWidget):
 	def keyPressEvent(self, event):
@@ -5276,6 +5306,8 @@ class CustomTableModel(QAbstractTableModel):
 				return str(self.headers[section])
 
 			if orientation == Qt.Vertical:
+				if section >= len(self.data.index):
+					return ""
 				return str(self.data.index[section])
 
 	def flags(self, index):
@@ -5469,8 +5501,8 @@ def csv_copypaste(self, event):
 		data = [row.split("\t") for row in text.split("\n")]
 		i_0, j_0 = cells[0].row(), cells[0].column()
 
-		j_hidden = 0
 		for i, row in enumerate(data):
+			j_hidden = 0
 			for j, value in enumerate(row):
 				while self.isColumnHidden(j_0+j+j_hidden):
 					j_hidden += 1
@@ -5540,12 +5572,12 @@ def symmetric_ticklabels(ticks):
 
 def except_hook(cls, exception, traceback):
 	sys.__excepthook__(cls, exception, traceback)
-	with open(f"{APP_TAG}.err", "a+", encoding="utf-8") as file:
+	with open(llwpfile(".err"), "a+", encoding="utf-8") as file:
 		time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 		file.write(f"{time_str}: \n{exception}\n{''.join(tb.format_tb(traceback))}\n\n")
 	try:
 		if not main.new_df.empty:
-			main.save_lines_lin(f"{APP_TAG}.lin", force_noappend=True, force_lin=True)
+			main.save_lines_lin(llwpfile(".lin"), force_noappend=True, force_lin=True)
 		if main.config["flag_debug"]:
 			main.self.notification(f"{exception}\n{''.join(tb.format_tb(traceback))}")
 	except Exception as E:
@@ -5581,18 +5613,15 @@ def commandline(showdialog=True):
 	main.notification("\n".join(message))
 
 def send_mail_to_author():
-	quotes = json.loads(quotes_str)
-	quote = quotes[random.randint(0,len(quotes)-1)]
-	quote = quote.replace("\n", "%0d%0a")
-	webbrowser.open(f"mailto:bonah@ph1.uni-koeln.de?subject={APP_TAG} &body=%0d%0a%0d%0a%0d%0a%0d%0a{quote}")
+	webbrowser.open(f"mailto:bonah@ph1.uni-koeln.de?subject={APP_TAG}")
 
 def restart():
 	dir = os.path.dirname(os.path.realpath(__file__))
-	fname = os.path.join(dir, f"{APP_TAG}.llwp")
+	fname = os.path.join(dir, llwpfile(".llwp"))
 	main.saveproject(fname)
 	main.saveoptions()
 	if not main.new_df.empty:
-		main.save_lines_lin(f"{APP_TAG}.lin", force_noappend=True, force_lin=True)
+		main.save_lines_lin(llwpfile(".lin"), force_noappend=True, force_lin=True)
 	os.execv(sys.executable, [sys.executable, sys.argv[0], fname])
 
 def lineshape(shape, derivative, *args):
@@ -5665,6 +5694,10 @@ def shared_labels(fig, xlabel, ylabel, xlabelpad=15, ylabelpad=0, **kwargs):
 	ax.set_ylabel(ylabel, labelpad=ylabelpad, **kwargs)
 	return(ax)
 
+def llwpfile(extension):
+	return(os.path.join(os.path.dirname(os.path.realpath(__file__)), f"{APP_TAG}{extension}"))
+
+
 ##
 ## Global Variables
 ##
@@ -5700,6 +5733,7 @@ config_specs = {
 	"fit_xpoints":							[1000, int],
 	"fit_offset":							[True, bool],
 	"fit_comment":							["", str],
+	"fit_clipboard":						[True, bool],
 
 	"plot_dpi":								[100, float],
 	"plot_annotations_dict":				[{"x": 1, "y": 1, "horizontalalignment": "right", "verticalalignment": "top"}, dict],
@@ -5723,6 +5757,10 @@ config_specs = {
 	"plot_width":							[100, float],
 	"plot_bins":							[4000, int],
 	"plot_skipbinning":						[1000, int],
+	"plot_expasstickspectrum":				[False, bool],
+	"plot_relativegoto":					[False, bool],
+	"plot_fortrat":							[False, bool],
+	"plot_fortrat_jstart":					[0, int],
 
 	"series_qns":							[3, int],
 	"series_annotate_xs":					[False, bool],
@@ -5734,7 +5772,7 @@ config_specs = {
 
 	"flag_automatic_draw":					[True, bool],
 	"flag_appendonsave":					[True, bool],
-	"flag_hidecatalogue":					[False, bool],
+	"flag_hidecatalog":						[False, bool],
 	"flag_xcolumn":							[0, int],
 	"flag_ycolumn":							[1, int],
 	"flag_separator":						[9, int],
