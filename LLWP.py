@@ -1019,7 +1019,7 @@ class PlotWidget(QGroupBox):
 		self.fitline = None
 
 		main.signalclass.updateplot.connect(lambda: self.set_data())
-		main.config.register(("series_annotate_xs", "plot_annotate", "plot_bins", "plot_fortrat", "plot_fortrat_jstart"), lambda: self.set_data())
+		main.config.register(("series_annotate_xs", "plot_annotate", "plot_bins"), lambda: self.set_data())
 
 	def gui(self):
 		self.create_plots().join()
@@ -1028,11 +1028,16 @@ class PlotWidget(QGroupBox):
 
 	def set_offset(self, value):
 		coupled = main.config["plot_coupled"]
-		if coupled:
+		lcp = self.get_current_plot()
+
+		reference = self.get_series_reference()
+		if reference["method"] == "Fortrat":
+			offset = reference["fortrat"]["center"]
+			width = main.config["plot_width"]
+		elif coupled:
 			offset = main.config["plot_offset"]
 			width = main.config["plot_width"]
 		else:
-			lcp = self.get_current_plot()
 			offset = self.axs["offset"][lcp]
 			width = self.axs["width"][lcp]
 
@@ -1045,9 +1050,15 @@ class PlotWidget(QGroupBox):
 		elif value == "--":
 			offset -= width/2
 		else:
+			if (not main.config["plot_relativegoto"]) and reference["method"] != "Fortrat":
+				xpos  = self.cache_positions[lcp]
+				value = value - xpos
 			offset = value
+			
 
-		if coupled:
+		if reference["method"] == "Fortrat":
+			reference["fortrat"]["center"] = offset
+		elif coupled:
 			main.config["plot_offset"] = offset
 		else:
 			with locks["axs"]:
@@ -1099,14 +1110,21 @@ class PlotWidget(QGroupBox):
 		self.set_data()
 
 	def get_widths(self):
-		if main.config["plot_fortrat"]:
-			offset, shape, width = main.config["plot_fortrat_jstart"], self.axs["ax"].shape, main.config["plot_width"]
-			jvalues = np.arange(offset, shape[0] + offset)[::-1]
-			return np.tile(width * 2 * jvalues, (shape[1], 1)).T
-		elif main.config["plot_coupled"]:
-			return np.full(self.axs["ax"].shape, main.config["plot_width"])
+		references = main.config["series_references"]
+		is_fortrat = [reference["method"] == "Fortrat" for reference in references]
+		
+		if main.config["plot_coupled"]:
+			widths = np.full(self.axs["ax"].shape, main.config["plot_width"])
 		else:
-			return self.axs["width"]
+			widths = self.axs["width"]
+		
+		for i, do_fortrat in zip(range(widths.shape[1]), is_fortrat):
+			if do_fortrat:
+				reference = references[i]
+				jstart, center = reference["fortrat"]["jstart"], reference["fortrat"]["center"]
+				widths[:, i] *= (np.arange(0, len(widths[:, i]))[::-1] + jstart)*2
+		
+		return widths
 
 	def get_positions(self, return_qns=False):
 		shape = self.axs["ax"].shape
@@ -1150,6 +1168,9 @@ class PlotWidget(QGroupBox):
 					positions[:, i] = 0
 					main.notification("<span style='color:#eda711;'>WARNING</span>: Could not evaluate your expression.")
 					raise
+			elif method == "Fortrat":
+				jstart, center = reference["fortrat"]["jstart"], reference["fortrat"]["center"]
+				positions[:, i] = (np.arange(0, shape[0])[::-1] + jstart)*2*center
 
 			self.cache_positions = positions
 		if return_qns:
@@ -1157,11 +1178,16 @@ class PlotWidget(QGroupBox):
 		else:
 			return(positions)
 
-	def get_seriesmethods(self):
-		shape = self.axs["ax"].shape
+	def get_series_reference(self, column=None):
+		if not column:
+			column = self.get_current_plot()[1]
 		references = main.config["series_references"]
-		seriesmethods = [reference["method"] for reference in references]
-		return(seriesmethods)
+		
+		if column < len(references):
+			return(references[column])
+		else:
+			return({"method": None})
+
 
 	def get_qns(self, transition):
 		nop = self.axs["ax"].shape[0]
@@ -1235,7 +1261,7 @@ class PlotWidget(QGroupBox):
 				self.axs["annotation"][i, j].set_color(color)
 
 	def check_blends(self, index, dict_):
-		if main.config["series_blenddialog"] and self.get_seriesmethods()[index[1]]:
+		if main.config["series_blenddialog"] and self.get_series_reference(index[1])["method"] == "Transition":
 			blendwidth = main.config["series_blendwidth"]
 			xrange = (dict_["xpre"]-blendwidth/2, dict_["xpre"]+blendwidth/2)
 			entries = main.get_visible_data("cat", xrange=xrange)
@@ -1304,7 +1330,8 @@ class PlotWidget(QGroupBox):
 				"error":	xuncert,
 				"xpre":		xpre
 			}
-			reference = main.config["series_references"][index[1]]
+
+			reference = self.get_series_reference(index[1])
 			if reference["method"] == "Transition":
 				qns = self.get_qns(reference["transition"])[index[0]]
 				for i, qnu, qnl in zip(range(6), qns[0], qns[1]):
@@ -1506,7 +1533,8 @@ class PlotWidget(QGroupBox):
 			ax = self.axs["ax"][index]
 
 			annotation = self.axs["annotation"][index]
-			if annotation and main.config["series_references"][index[1]]["method"] == "Transition":
+			reference = self.get_series_reference(index[1])
+			if annotation and reference["method"] == "Transition":
 				annotation.set_color(main.config["color_lin"])
 				ax.draw_artist(annotation)
 
@@ -1632,7 +1660,11 @@ class PlotWidget(QGroupBox):
 			for j in range(self.axs["ax"].shape[1]):
 				ax = self.axs["ax"][i, j]
 				ticks = np.linspace(xmin[i, j], xmax[i, j], main.config["plot_ticks"])
-				if main.config["plot_offsetticks"] == 1:
+				
+				reference = self.get_series_reference(j)
+				if reference["method"] == "Fortrat":
+					ticklabels = symmetric_ticklabels(ticks/2/reference["fortrat"]["jstart"])
+				elif main.config["plot_offsetticks"] == 1:
 					ticklabels = symmetric_ticklabels(ticks-xpos[i, j])
 				elif main.config["plot_offsetticks"] == 0:
 					ticklabels = symmetric_ticklabels(ticks)
@@ -1772,13 +1804,7 @@ class PlotWidget(QGroupBox):
 			main.notification("<span style='color:#eda711;'>WARNING</span>: The entered value could not be interpreted as a number.")
 			return
 		
-		if main.config["plot_relativegoto"]:
-			self.set_offset(xnew)
-		else:
-			index = self.get_current_plot()
-			xpos  = self.cache_positions[index]
-
-			self.set_offset(xnew - xpos)
+		self.set_offset(xnew)
 
 	def width_dialog(self):
 		resp, rc = QInputDialog.getText(self, 'Set view width', 'Width:')
@@ -1887,13 +1913,13 @@ class ReferenceSeriesWindow(EQDockWidget):
 		self.tabs.tabBarDoubleClicked.connect(self.renameoradd_tab)
 		self.tabs.setCurrentIndex(main.config["series_currenttab"])
 		self.tabs.currentChanged.connect(lambda x: main.config.__setitem__("series_currenttab", x))
-		self.tabs.currentChanged.connect(lambda x: self.changed())
+		main.signalclass.createdplots.connect(self.min_series)
 
 		self.set_state(main.config["series_references"])
 		if not self.tabs.count():
 			self.add_tab()
 
-		main.signalclass.createdplots.connect(self.min_series)
+		self.tabs.currentChanged.connect(lambda x: self.changed())
 
 	def close_tab(self, index):
 		if self.tabs.count() == 1:
@@ -1901,6 +1927,7 @@ class ReferenceSeriesWindow(EQDockWidget):
 		tab = self.tabs.widget(index)
 		tab.deleteLater()
 		self.tabs.removeTab(index)
+		self.get_state()
 
 	def renameoradd_tab(self, index):
 		if index == -1:
@@ -1947,6 +1974,7 @@ class ReferenceSeriesWindow(EQDockWidget):
 		return(values)
 
 	def changed(self):
+		tmp = self.get_state()
 		main.config["series_references"] = self.get_state()
 
 class CatalogWindow(EQDockWidget):
@@ -2783,7 +2811,7 @@ class BlendedLinesWindow(EQWidget):
 			else:
 				return
 		else:
-			reference = main.config["series_references"][index[1]]
+			reference = main.plotwidget.get_series_reference(index[1])
 			if reference["method"] == "Transition":
 				qns = main.plotwidget.get_qns(reference["transition"])[index[0]]
 				for i, qnu, qnl in zip(range(6), qns[0], qns[1]):
@@ -3674,6 +3702,7 @@ class ResidualsWindow(EQWidget):
 			self.fig.canvas.draw_idle()
 
 			if click and noq:
+				# Luis: can this be out of range
 				reference = main.config["series_references"][main.config["series_currenttab"]]
 				reference["method"] = "Transition"
 				reference["transition"]["qnus"][:noq] = qnus
@@ -4157,7 +4186,11 @@ class FigureWindow(EQWidget):
 				ax = self.axs[i, j]
 				ax.xaxis.set_visible(True)
 				ticks = np.linspace(xmin[i, j], xmax[i, j], main.config["plot_ticks"])
-				if main.config["plot_offsetticks"] == 1:
+
+				reference = main.plotwidget.get_series_reference(j)
+				if reference["method"] == "Fortrat":
+					ticklabels = symmetric_ticklabels(ticks/2/reference["fortrat"]["jstart"])
+				elif main.config["plot_offsetticks"] == 1:
 					ticklabels = symmetric_ticklabels(ticks-xpos[i, j])
 				elif main.config["plot_offsetticks"] == 0:
 					ticklabels = symmetric_ticklabels(ticks)
@@ -4185,7 +4218,7 @@ class FigureWindow(EQWidget):
 					color = matplotlib.rcParams['text.color']
 
 					if main.config["figurewindow_annotation"] == "Custom":
-						reference = main.config["series_references"][j]
+						reference = main.plotwidget.get_series_reference(j)
 						if reference["method"] == "Transition":
 							qn_dict = {f"qn{ul}{i+1}": qns[0 + (ul=="l")][i] for ul in "ul" for i in range(len(qns[0]))}
 						else:
@@ -4571,13 +4604,17 @@ class ReferenceSelector(QTabWidget):
 			  "expression":	"",
 			  "N0":			0,
 			}),
+			"fortrat": CDict(lambda: parent.changed(), {
+			  "jstart": 	1,
+			  "center": 	8000,
+			}),
 		})
 
 		if initial_values:
 			self.state.update(initial_values)
 
 		plotwidgets = {}
-		self.methods = ("Transition", "List", "Expression")
+		self.methods = ("Transition", "List", "Expression", "Fortrat")
 		for label in self.methods:
 			plotwidgets[label] = QWidget()
 			self.addTab(plotwidgets[label], label)
@@ -4684,7 +4721,18 @@ class ReferenceSelector(QTabWidget):
 		layout.addLayout(hbox)
 
 		plotwidgets["Expression"].setLayout(layout)
-
+		
+		# Tab 4: Fortrat
+		layout = QVBoxLayout()
+		
+		layout.addWidget(QQ(QLabel, text="J of lowest Plot: "))
+		self.jstart = QQ(QSpinBox, value=self.state["fortrat"]["jstart"], range=(1, None), change=lambda: self.state["fortrat"].__setitem__("jstart", self.jstart.value()))
+		layout.addWidget(self.jstart)
+		layout.addStretch(1)
+		layout.addWidget(QQ(QPushButton, text="Apply", change=lambda x: main.plotwidget.reset_offsets()))
+		
+		plotwidgets["Fortrat"].setLayout(layout)
+		
 	def get_values(self):
 		return(self.state)
 
@@ -5016,8 +5064,8 @@ class ProtPlot(QWidget):
 				"error":	xuncert,
 				"xpre":		xpre
 			}
-
-			reference = main.config["series_references"][index[1]]
+			
+			reference = reference = main.plotwidget.get_series_reference(index[1])
 			if reference["method"] == "Transition":
 				qns = main.plotwidget.get_qns(reference["transition"])[index[0]]
 				for i, qnu, qnl in zip(range(6), qns[0], qns[1]):
@@ -5561,6 +5609,8 @@ def column_to_numeric(val, force_int=False):
 def symmetric_ticklabels(ticks):
 	tick_labels = []
 	for a, o in zip(ticks, ticks[::-1]):
+		if not (np.isfinite(a) and np.isfinite(o)):
+			continue
 		dec_a = len(f"{a:.4f}".rstrip("0").split(".")[1])
 		dec_o = len(f"{o:.4f}".rstrip("0").split(".")[1])
 		if dec_a == dec_o:
@@ -5759,8 +5809,6 @@ config_specs = {
 	"plot_skipbinning":						[1000, int],
 	"plot_expasstickspectrum":				[False, bool],
 	"plot_relativegoto":					[False, bool],
-	"plot_fortrat":							[False, bool],
-	"plot_fortrat_jstart":					[0, int],
 
 	"series_qns":							[3, int],
 	"series_annotate_xs":					[False, bool],
