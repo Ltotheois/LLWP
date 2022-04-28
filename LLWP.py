@@ -101,25 +101,20 @@ def synchronized_d(lock):
 
 def working_d(func):
 	def wrapper(self, *args, **kwargs):
-		rite = True
-		q = main.plotwidget.working
-		ind = main.plotwidget.indicator
-		if q.empty():
-			ind.setText("<span style='font-weight: 600;'>Working...</span>")
-		q.put(1)
+		queue_ = main.plotwidget.working
+		queue_.put(1)
+		if not queue_.empty():
+			main.signalclass.setindicator.emit("<span style='font-weight: 600;'>Working...</span>")
+		
 		try:
-			res = func(self, *args, **kwargs)
+			return(func(self, *args, **kwargs))
 		except Exception as E:
-			res = str(E)
-			rite = False
 			raise
 		finally:
-			q.get()
-			q.task_done()
-			if q.empty():
-				ind.setText("Ready")
-			if rite:
-				return(res)
+			queue_.get()
+			queue_.task_done()
+			if queue_.empty():
+				main.signalclass.setindicator.emit("Ready")
 	return(wrapper)
 
 locks = {key: threading.RLock() for key in (
@@ -136,13 +131,15 @@ class Main():
 	def __init__(self):
 		self.open_windows = {}
 		self.signalclass = SignalClass()
-		self.config = Config(self.signalclass.updateconfig.emit)
+		self.config = Config(self.signalclass.updateconfig)
 
 		self.setup_dfs()
 		self.loadoptions()
 
 	def gui(self):
 		sys.excepthook = except_hook
+		threading.excepthook = lambda args: except_hook(*args[:3])
+
 		self.app = QApplication(sys.argv)
 		self.app.setStyle("Fusion")
 
@@ -164,6 +161,13 @@ class Main():
 		if self.messages:
 			main.notification("\n".join(self.messages))
 		self.change_style(self.config["layout_theme"])
+		
+		self.autosavetimer = QTimer(self.app)
+		self.autosavetimer.timeout.connect(lambda: main.save_lines_lin(llwpfile(".lin"), force_noappend=True, force_lin=True, quiet=True))
+		if main.config["flag_autosave"]:
+			self.autosavetimer.start(main.config["flag_autosave"]*1000)
+		main.config.register("flag_autosave", lambda: self.autosavetimer.start(main.config["flag_autosave"]*1000) if main.config["flag_autosave"] > 0 else self.autosavetimer.stop())
+		
 		sys.exit(self.app.exec_())
 
 	def setup_dfs(self):
@@ -378,7 +382,7 @@ class Main():
 		self.signalclass.updatewindows.emit()
 		if skip_update != True:
 			self.plotwidget.set_data()
-		if len(fnames) != 0:
+		if len(fnames):
 			error_text = f"<span style='color:#ff0000;'>ERROR</span>: Reading {type.capitalize()} files not successful. " if len(errors) != 0 else ''
 			self.notification(f"{error_text}Read {str(len(fnames)-len(errors))+'/' if len(errors) != 0 else ''}{len(fnames)} {type.capitalize()} files successfully.")
 
@@ -440,7 +444,7 @@ class Main():
 
 	@threading_d
 	def reread_files(self, do_QNs=False):
-		kwargs = {"reread": True, "skip_update":True, "do_QNs": do_QNs}
+		kwargs = {"reread": True, "skip_update": True, "do_QNs": do_QNs}
 		threads = []
 		for type in ("exp", "cat", "lin"):
 			threads.append(self.load_file(type, **kwargs))
@@ -450,7 +454,7 @@ class Main():
 		self.plotwidget.set_data()
 
 	@synchronized_d(locks["lin_df"])
-	def save_lines_lin(self, path = None, force_noappend=False, force_lin=False):
+	def save_lines_lin(self, path = None, force_noappend=False, force_lin=False, quiet=False):
 		append = self.config["flag_appendonsave"]
 		options = {"options": QFileDialog.DontConfirmOverwrite} if append else {}
 
@@ -470,7 +474,8 @@ class Main():
 				np.savetxt(file, catalog[custom_format["names"]], delimiter=custom_format.get("delimiter", " "), fmt=custom_format.get("format", '%.18e'))
 			else:
 				file.write(pyckett.df_to_lin(catalog))
-		self.notification(f"Newly assigned lines were saved to the file {path}.")
+		if not quiet:
+			self.notification(f"Newly assigned lines were saved to the file {path}.")
 
 	@synchronized_d(locks["pipe"])
 	def run_pipe(self, index=None):
@@ -496,8 +501,7 @@ class Main():
 
 			for type, reread in zip(("exp", "cat", "lin"), (exp_rr, cat_rr, lin_rr)):
 				if reread:
-					for file in self.config[f"files_{type}"].keys():
-						self.load_file(type, add_files=[file], keep_old=True)
+					self.load_file(type, reread=True, do_QNs=False)
 
 		except Exception as E:
 			self.notification(f"The command '{command}' failed with the Exception '{E}'.")
@@ -927,8 +931,7 @@ class MainWindow(QMainWindow):
 			thread.join()
 
 		for project in files_by_class["project"]:
-			t = main.loadproject(project)
-			t.join()
+			main.loadproject(project)
 
 		main.plotwidget.set_data()
 
@@ -980,6 +983,7 @@ class PlotWidget(QGroupBox):
 		self.toplabel = QQ(QLabel, text="", wordwrap=True, maxHeight=(12 if main.config["layout_limitannotationtosingleline"] else 10000))
 		self.indicator = QQ(QLabel, text="Ready", textFormat=Qt.RichText)
 		self.working = queue.Queue()
+		main.signalclass.setindicator.connect(self.indicator.setText)
 
 		main.config.register("layout_limitannotationtosingleline", lambda: self.toplabel.setMaximumHeight(12 if main.config["layout_limitannotationtosingleline"] else 16777215))
 
@@ -1019,7 +1023,7 @@ class PlotWidget(QGroupBox):
 		self.fitline = None
 
 		main.signalclass.updateplot.connect(lambda: self.set_data())
-		main.config.register(("series_annotate_xs", "plot_annotate", "plot_bins"), lambda: self.set_data())
+		main.config.register(("series_annotate_xs", "plot_annotate", "plot_bins", "flag_automatic_draw"), lambda: self.set_data())
 
 	def gui(self):
 		self.create_plots().join()
@@ -1637,6 +1641,9 @@ class PlotWidget(QGroupBox):
 			ownid = threading.current_thread().ident
 
 		try:
+			if not main.config["flag_automatic_draw"]:
+				return
+			
 			# set x-ranges
 			# @Luis: Think about optimizations
 			xpos, qns = self.get_positions(return_qns=True)
@@ -1764,8 +1771,7 @@ class PlotWidget(QGroupBox):
 			self.plot_annotations(xpos, qns)
 
 			breakpoint(ownid, self.set_data_id)
-			if main.config["flag_automatic_draw"]:
-				self.plotcanvas.draw_idle()
+			self.plotcanvas.draw_idle()
 		except CustomError as E:
 			pass
 
@@ -2231,7 +2237,6 @@ class FilesWindow(EQWidget):
 
 		main.signalclass.updateplot.emit()
 
-	@threading_d
 	@working_d
 	@synchronized_d(locks["exp_df"])
 	@synchronized_d(locks["cat_df"])
@@ -2247,20 +2252,18 @@ class FilesWindow(EQWidget):
 				if file in main.config[f"files_{self.type}"]:
 					del main.config[f"files_{self.type}"][file]
 				df.drop(df[df["filename"]==file].index, inplace=True)
-
+		
 		main.load_file(self.type, keep_old=True, do_QNs=False)
 
-	@threading_d
 	@working_d
 	@synchronized_d(locks["exp_df"])
 	@synchronized_d(locks["cat_df"])
 	@synchronized_d(locks["lin_df"])
 	def reread_file(self, file=None):
 		if not file:
-			for file in main.config[f"files_{self.type}"]:
-				main.load_file(self.type, add_files=[file], keep_old=True)
+			main.load_file(self.type, reread=True, do_QNs=False)
 		else:
-			main.load_file(self.type, add_files=[file], keep_old=True)
+			main.load_file(self.type, add_files=[file], keep_old=True, do_QNs=False)
 
 class CatWindow(FilesWindow):
 	def __init__(self, id, parent=None):
@@ -2505,12 +2508,13 @@ class BlendedLinesWindow(EQWidget):
 				self.cat_line = None
 				self.plot_parts = []
 
+			@synchronized_d(locks["fitting"])
 			def fit_peaks(self):
 				with locks["currThread"]:
 					ownid = threading.current_thread().ident
 
 				try:
-					self.parent.label.setText("<span style='color:#eda711;'>Working ...</span>")
+					main.signalclass.fitindicator.emit("<span style='color:#eda711;'>Working ...</span>")
 					peaks = self.parent.peaks.copy()
 					profile = main.config["blendedlineswindow_lineshape"]
 					derivative = main.config["blendedlineswindow_derivative"]
@@ -2652,12 +2656,12 @@ class BlendedLinesWindow(EQWidget):
 					breakpoint(ownid, self.fit_thread_id)
 
 					main.signalclass.blwfit.emit()
-					self.parent.label.setText("Ready")
+					main.signalclass.fitindicator.emit("Ready")
 					super().update_plot()
 				except CustomError as E:
 					pass
 				except Exception as E:
-					self.parent.label.setText("<span style='color:#ff0000;'>Fit failed</span>")
+					main.signalclass.fitindicator.emit("<span style='color:#ff0000;'>Fit failed</span>")
 					raise
 
 			def update_plot(self):
@@ -2700,6 +2704,7 @@ class BlendedLinesWindow(EQWidget):
 		layout.addLayout(tmplayout)
 
 		self.label = QQ(QLabel, text="Ready", textFormat=Qt.RichText)
+		main.signalclass.fitindicator.connect(self.label.setText)
 		tmp_layout = QHBoxLayout()
 		layout.addLayout(tmp_layout)
 		row = (
@@ -3180,19 +3185,19 @@ class PeakfinderWindow(EQWidget):
 		self.setWindowTitle("Peakfinder")
 
 		self.peaks = []
-		self.peaks_df = pd.DataFrame(columns=["x", "y", "go to"])
 		main.signalclass.updatetable.connect(self.update_table)
 
 		class CustomPlotWidget(ProtPlot):
 			def gui(self):
 				super().gui()
-				self.peaks_line = self.ax.scatter([], [], color = main.config["peakfinderwindow_peakcolor"], marker="*")
+				self.peaks_line = self.ax.scatter([], [], color=main.config["peakfinderwindow_peakcolor"], marker="*")
 
 			def update_plot(self):
 				xmin, xmax = self.center-self.width/2, self.center+self.width/2
 				tuples = list(filter(lambda x: xmin < x[0] < xmax, self.parent.peaks))
 				tuples = tuples if len(tuples)!=0 else [[None,None]]
 				self.peaks_line.set_offsets(tuples)
+				self.peaks_line.set_color(main.config["peakfinderwindow_peakcolor"])
 				super().update_plot()
 
 		layout = QVBoxLayout()
@@ -3204,9 +3209,9 @@ class PeakfinderWindow(EQWidget):
 		tmp_layout = QHBoxLayout()
 		layout.addLayout(tmp_layout)
 
-		self.run_button = QQ(QPushButton, text="Run Peakfinder", change=lambda x: self.find_peaks())
+		self.run_button = QQ(QPushButton, text="Run Peakfinder", change=lambda: self.find_peaks())
 		tmp_layout.addWidget(self.run_button)
-		tmp_layout.addWidget(QQ(QPushButton, text="Export Peaks", change=lambda x: self.export_peaks()))
+		tmp_layout.addWidget(QQ(QPushButton, text="Export Peaks", change=lambda: self.export_peaks()))
 
 		uncert_input = QQ(QDoubleSpinBox, "peakfinderwindow_width", range=(0, None), enabled=main.config["peakfinderwindow_onlyunassigned"], minWidth=80)
 		tmp_layout.addWidget(QQ(QCheckBox, "peakfinderwindow_onlyunassigned", text="Only unassigned Lines", change=uncert_input.setEnabled))
@@ -3248,29 +3253,27 @@ class PeakfinderWindow(EQWidget):
 						input_max.setValue(value[1])
 						input_type.setCurrentIndex(1)
 					else:
-						input_min.setValue(value[0])
+						input_min.setValue(value)
 						input_type.setCurrentIndex(0)
 				except:
 					pass
 			else:
-				if key == "distance":
-					input_type.setCurrentIndex(1)
-				else:
-					input_type.setCurrentIndex(2)
+				input_type.setCurrentIndex(len(items)-1)
 			self.change_type(key)
 
 		self.infolabel = QQ(QLabel, wordwrap=True, text="Press 'Run Peakfinder' to find peaks.")
 		layout.addWidget(self.infolabel)
 
-		self.table = QTableView()
+		self.table = QTableWidget()
 		self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
 		self.table.setHidden(True)
-		self.table.clicked.connect(self.go_to)
-		self.tableModel = CustomTableModel(self.peaks_df, ["x", "y", "Go to"], editable=False)
-		self.table.setModel(self.tableModel)
+		self.table.doubleClicked.connect(self.go_to)
+		
 		layout.addWidget(self.table)
 
-		main.signalclass.peakfinderend.connect(self.update_table)
+		main.signalclass.peakfinderstart.connect(lambda: self.run_button.setEnabled(False))
+		main.signalclass.peakfinderstart.connect(lambda: self.infolabel.setText("Finding peaks ..."))
+		main.signalclass.peakfinderend.connect(self.after_find_peaks)
 
 	def change_type(self, key):
 		input_min, input_max, input_type, label = self.row_dict[key]
@@ -3303,9 +3306,7 @@ class PeakfinderWindow(EQWidget):
 	@threading_d
 	@synchronized_d(locks["peaks"])
 	def find_peaks(self):
-		self.run_button.setEnabled(False)
-		self.infolabel.setText("Finding peaks ...")
-
+		main.signalclass.peakfinderstart.emit()
 		kwargs = self.get_kwargs()
 
 		with locks["exp_df"]:
@@ -3318,80 +3319,59 @@ class PeakfinderWindow(EQWidget):
 				del kwargs["frequency"]
 			else:
 				exp_df = main.get_visible_data("exp")
-			xs = exp_df["x"].to_numpy()
-			ys = exp_df["y"].to_numpy()
+			xs, ys = exp_df["x"].to_numpy(), exp_df["y"].to_numpy()
 
-		peaks = signal.find_peaks(ys, **kwargs)[0]
-
-		if len(peaks) == 0:
-			tuples = []
-		else:
-			px, py = xs[peaks], ys[peaks]
-			tuples = list(zip(px, py))
-
-		self.peaks = tuples
+		peaks, props = signal.find_peaks(ys, **kwargs)
+		self.peaks = np.array((xs[peaks], ys[peaks])).T
 		self.plotWidget.update_plot()
 
-		peak_df = self.get_peaks()
-		if len(peak_df) > main.config["peakfinderwindow_maxentries"]:
-			self.infolabel.setText(f"Found {len(peak_df)} peaks. Only the highest {main.config['peakfinderwindow_maxentries']} entries are shown in the table for a better performance. You can see all peaks by exporting the peaks or increasing the maximum number of displayed peaks in the configuration.")
-			peak_df.sort_values("y", ascending=False, inplace=True)
-			peak_df = peak_df.head(main.config["peakfinderwindow_maxentries"])
-		else:
-			self.infolabel.setText(f"Found {len(peak_df)} peaks.")
-
-		self.peaks_df.drop(self.peaks_df.index, inplace=True)
-		self.peaks_df.reset_index(drop=True, inplace=True)
-		peak_df.reset_index(drop=True, inplace=True)
-		for i in range(len(peak_df)):
-			self.peaks_df.loc[i] = peak_df.loc[i]
-
+		if main.config["peakfinderwindow_onlyunassigned"]:
+			assigned_xs = main.get_visible_data("lin")["x"]
+			uncertainty = main.config["peakfinderwindow_width"]
+			
+			peaks_xs = self.peaks[:, 0]
+			peaks_assigned = np.zeros(self.peaks.shape[0])
+			
+			for x in assigned_xs:
+				peaks_assigned += (abs(peaks_xs - x) < uncertainty)
+			self.peaks = self.peaks[peaks_assigned == 0]
+		
+		self.peaks = self.peaks[self.peaks[:, 1].argsort()[::-1]]
 		main.signalclass.peakfinderend.emit()
 
 	@synchronized_d(locks["peaks"])
-	def update_table(self):
+	def after_find_peaks(self):
+		self.table.setRowCount(0)
+		self.table.setColumnCount(2)
+		self.table.setHorizontalHeaderLabels(["x", "y"])
+		for x, y in self.peaks[:main.config["peakfinderwindow_maxentries"]]:
+			currRowCount = self.table.rowCount()
+			self.table.insertRow(currRowCount)
+			self.table.setItem(currRowCount, 0, QTableWidgetItem(f'{x:.4f}'))
+			self.table.setItem(currRowCount, 1, QTableWidgetItem(f'{y:.4f}'))
+		self.table.resizeColumnsToContents()
 		self.table.setHidden(False)
-		self.tableModel.update()
+		
 		self.run_button.setEnabled(True)
+
+		if len(self.peaks) > main.config["peakfinderwindow_maxentries"]:
+			self.infolabel.setText(f"Found {len(self.peaks)} peaks. Only the highest {main.config['peakfinderwindow_maxentries']} entries are shown in the table for better performance. You can see all peaks by exporting or increasing the maximum number of displayed peaks in the configuration.")
+		else:
+			self.infolabel.setText(f"Found {len(self.peaks)} peaks.")
 
 	@synchronized_d(locks["peaks"])
 	def export_peaks(self):
-		peak_df = self.get_peaks()[["x", "y"]]
 		fname = QFileDialog.getSaveFileName(None, 'Choose file to save peaks to',"","CSV Files (*.csv);;All Files (*)")[0]
 		if fname:
-			peak_df.to_csv(fname, header=None, index=None, sep='\t')
-
-	@synchronized_d(locks["peaks"])
-	def get_peaks(self):
-		peaks = self.peaks
-		peak_df = pd.DataFrame(peaks, columns=["x", "y"])
-
-		if main.config["peakfinderwindow_onlyunassigned"]:
-			u = main.config["peakfinderwindow_width"]
-			peak_df["assigned"] = False
-
-			assigned_xs = main.get_visible_data("lin")["x"]
-			for x in assigned_xs:
-				peak_df.loc[((x-u) < peak_df["x"]) & (peak_df["x"] < (x+u)), "assigned"] = True
-
-			peak_df.drop(peak_df[peak_df["assigned"]==True].index, inplace=True)
-			del peak_df["assigned"]
-
-		peak_df.sort_values("y", ascending=False, inplace=True)
-		peak_df.reset_index(drop=True, inplace=True)
-		peak_df["go to"] = "Go here"
-
-		return(peak_df)
+			np.savetxt(fname, self.peaks, delimiter="\t")
 
 	@synchronized_d(locks["peaks"])
 	def go_to(self, event):
 		for idx in self.table.selectionModel().selectedIndexes():
 			row_number = idx.row()
-			column_number = idx.column()
 
-		if column_number == 2 and type(row_number) == int and len(self.peaks_df) > row_number:
-			x = self.peaks_df.loc[row_number, "x"]
-			self.plotWidget.center = x
+		if type(row_number) == int and len(self.peaks) > row_number:
+			self.plotWidget.center = self.peaks[row_number, 0]
 			self.plotWidget.update_plot()
 
 	def activateWindow(self):
@@ -3851,6 +3831,9 @@ class SpectraResolverWindow(EQWidget):
 
 		self.fill_list()
 		main.signalclass.updatewindows.connect(self.fill_list)
+		main.signalclass.overlapend.connect(lambda: self.label.setText(f"Ready"))
+		main.signalclass.overlapend.connect(lambda: self.apply_order_button.setEnabled(True))
+		main.signalclass.overlapindicator.connect(self.label.setText)
 
 	def fill_list(self):
 		self.apply_order_button.setEnabled(False)
@@ -3874,13 +3857,12 @@ class SpectraResolverWindow(EQWidget):
 		fname_savefile = QFileDialog.getSaveFileName(None, 'Choose File to Save to',"")[0]
 		if fname_savefile == "" or len(main.exp_df) == 0 or len(main.config["files_exp"]) == 0:
 			return
+		self.apply_order_button.setEnabled(False)
+		self.label.setText("Working")
 		self.solveoverlap_core(fname_savefile)
 
 	@threading_d
 	def solveoverlap_core(self, fname_savefile):
-		self.apply_order_button.setEnabled(False)
-		main.app.processEvents()
-		self.label.setText("Working")
 		try:
 			df = main.get_visible_data("exp", force_all=True)
 			df["keep"] = 1
@@ -3890,7 +3872,7 @@ class SpectraResolverWindow(EQWidget):
 			results = []
 
 			for i, fname in enumerate(ranked_files):
-				self.label.setText(f"Working on file {i+1} of {len(ranked_files)}")
+				main.signalclass.overlapindicator.emit(f"Working on file {i+1} of {len(ranked_files)}")
 				min, max = main.config["files_exp"][fname]["xrange"]
 				i_start, i_stop = df["x"].searchsorted(min, side="left"), df["x"].searchsorted(max, side="right")
 
@@ -3900,13 +3882,12 @@ class SpectraResolverWindow(EQWidget):
 				results.append(tmp_df.copy())
 				df = df[df["keep"] == 1]
 
-			self.label.setText(f"Working on saving the results")
+			main.signalclass.overlapindicator.emit(f"Working on saving the results")
 			df = pd.concat(results, ignore_index=True)
 			df.sort_values("x", inplace=True, kind="merge")
 			df[["x", "y"]].to_csv(fname_savefile, header=None, index=None, sep=chr(main.config["flag_separator"]))
 		finally:
-			self.label.setText(f"Ready")
-			self.apply_order_button.setEnabled(True)
+			main.signalclass.overlapend.emit()
 
 class ReportWindow(EQWidget):
 	def __init__(self, id, parent=None):
@@ -5173,12 +5154,16 @@ class Config(dict):
 	def __init__(self, signal):
 		super().__init__()
 		self.signal = signal
+		self.signal.connect(self.callback)
 		self.callbacks = pd.DataFrame(columns=["id", "key", "widget", "function"], dtype="object").astype({"id": np.uint})
+		
 
 	def __setitem__(self, key, value, widget=None):
 		super().__setitem__(key, value)
-		self.signal()
+		self.signal.emit((key, value, widget))
 
+	def callback(self, args):
+		key, value, widget = args
 		if widget:
 			callbacks_widget = self.callbacks.query(f"key == @key and widget != @widget")
 		else:
@@ -5231,16 +5216,21 @@ class Color(str):
 			raise CustomError(f"Invalid Color: '{color}' is not a valid color.")
 
 class SignalClass(QObject):
-	updateconfig  = pyqtSignal()
-	updatewindows = pyqtSignal()
-	updatetable   = pyqtSignal()
-	assignment    = pyqtSignal()
-	updateplot    = pyqtSignal()
-	createdplots  = pyqtSignal()
-	blwfit        = pyqtSignal()
-	peakfinderend = pyqtSignal()
-	writelog      = pyqtSignal(str)
-	notification  = pyqtSignal(str)
+	updatewindows   = pyqtSignal()
+	updatetable     = pyqtSignal()
+	assignment      = pyqtSignal()
+	updateplot      = pyqtSignal()
+	createdplots    = pyqtSignal()
+	blwfit          = pyqtSignal()
+	peakfinderstart = pyqtSignal()
+	peakfinderend   = pyqtSignal()
+	overlapend      = pyqtSignal()
+	overlapindicator= pyqtSignal(str)
+	fitindicator    = pyqtSignal(str)
+	setindicator    = pyqtSignal(str)
+	writelog        = pyqtSignal(str)
+	notification    = pyqtSignal(str)
+	updateconfig    = pyqtSignal(tuple)
 	def __init__(self):
 		super().__init__()
 
@@ -5621,6 +5611,9 @@ def symmetric_ticklabels(ticks):
 	return(tick_labels)
 
 def except_hook(cls, exception, traceback):
+	if issubclass(cls, KeyboardInterrupt):
+		sys.exit(0)
+	
 	sys.__excepthook__(cls, exception, traceback)
 	with open(llwpfile(".err"), "a+", encoding="utf-8") as file:
 		time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -5841,6 +5834,7 @@ config_specs = {
 	"flag_logmaxrows":						[10000, int],
 	"flag_tableformatint":					[".0f", str],
 	"flag_tableformatfloat":				[".2f", str],
+	"flag_autosave":						[120, int],
 
 	"pipe_current":							[0, int],
 	"pipe_commands":						[[], list],
