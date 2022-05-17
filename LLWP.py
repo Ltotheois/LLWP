@@ -331,6 +331,7 @@ class Main():
 
 		else:
 			for fname in fnames:
+				# @Luis: An error in one of the files causes the remaining files to not be loaded
 				self.load_file_core(fname, type, config_updates, results, errors, do_QNs)
 
 		with lock:
@@ -379,7 +380,7 @@ class Main():
 			pass
 
 		errors = list(errors.queue)
-		self.signalclass.updatewindows.emit()
+		self.signalclass.fileschanged.emit()
 		if skip_update != True:
 			self.plotwidget.set_data()
 		if len(fnames):
@@ -401,7 +402,7 @@ class Main():
 				options["color"] = self.config[f"color_{type}"]
 
 			if type == "exp":
-				args = (chr(self.config["flag_separator"]), self.config["flag_xcolumn"], self.config["flag_ycolumn"], options.get("invert", False), False)
+				args = (chr(self.config["flag_separator"]), self.config["flag_xcolumn"], self.config["flag_ycolumn"], False)
 				data = exp_to_df(fname, *args)
 				options["xrange"] = [data["x"].min(), data["x"].max()]
 			elif type == "cat":
@@ -507,7 +508,7 @@ class Main():
 			self.notification(f"The command '{command}' failed with the Exception '{E}'.")
 			raise
 
-	def get_visible_data(self, type, xrange=None, binning=None, force_all=False):
+	def get_visible_data(self, type, xrange=None, binning=None, force_all=False, scale=True):
 		if type == "exp":
 			with locks["exp_df"]:
 				df = self.exp_df.copy()
@@ -518,7 +519,7 @@ class Main():
 				fd = self.config["files_cat"]
 		elif type == "lin":
 			with locks["lin_df"]:
-				self.new_df["filename"] = "__lin_own_df__"
+				self.new_df["filename"] = "__lin__"
 				df = pd.concat((self.lin_df, self.new_df), join="inner", ignore_index=True).sort_values("x")
 				fd = self.config["files_lin"]
 
@@ -531,7 +532,7 @@ class Main():
 			visible_files = {file for file in fd.keys() if not fd[file].get("hidden", False)}
 			# Special Case Hide/Show catalog files
 			if type == "lin" and self.config["flag_hidecatalog"] == False:
-				visible_files.add("__lin_own_df__")
+				visible_files.add("__lin__")
 
 			if len(visible_files) != len(fd) + (type == "lin"):
 				df.query("filename in @visible_files", inplace=True)
@@ -547,6 +548,10 @@ class Main():
 
 				df.loc[:,"binning"] = (df.loc[:,"x"]-xrange[0])//bin_width
 				df = df.loc[df.sort_values(["y"]).drop_duplicates("binning", keep="last").sort_values(["x"]).index]
+
+		if scale and type in ["exp", "cat"]:
+			scalingfactordict = {file: main.config[f"files_{type}"][file].get("scale", 1) for file in fd.keys()}
+			df["y"] *= df["filename"].replace(scalingfactordict)
 
 		return(df)
 
@@ -766,9 +771,7 @@ class MainWindow(QMainWindow):
 				None,
 				QQ(QAction, parent=self, text="&Reread Files", change=main.reread_files, tooltip="Reread all Exp, Cat and Lin files", shortcut="Ctrl+R"),
 				None,
-				QQ(QAction, parent=self, text="&Edit Spectrum Files", shortcut="Shift+6", tooltip="See overview of current spectrum files and their options", change=lambda x: main.open_window(ExpWindow)),
-				QQ(QAction, parent=self, text="&Edit Cat Files", shortcut="Shift+7", tooltip="See overview of current .cat files and their options", change=lambda x: main.open_window(CatWindow)),
-				QQ(QAction, parent=self, text="&Edit Lin Files", shortcut="Shift+8", tooltip="See overview of current .lin files and their options", change=lambda x: main.open_window(LinWindow)),
+				QQ(QAction, parent=self, text="&Edit Files", shortcut="Shift+6", tooltip="See current files and their options", change=lambda x: main.open_window(FileWindow)),
 				None,
 				QQ(QAction, parent=self, text="&Save current values as default", shortcut="Ctrl+D", tooltip="Save current configuration as default", change=lambda x: main.saveoptions()),
 				None,
@@ -1492,7 +1495,7 @@ class PlotWidget(QGroupBox):
 			"error":		0,
 			"weight":		1,
 			"comment":		main.config["fit_comment"],
-			"filename":		"__lin_own_df__",
+			"filename":		"__lin__",
 			"xpre":			None,
 		}
 
@@ -1636,6 +1639,7 @@ class PlotWidget(QGroupBox):
 
 	@working_d
 	@synchronized_d(locks["axs"])
+	@stopwatch_d
 	def set_data_core(self):
 		with locks["currThread"]:
 			ownid = threading.current_thread().ident
@@ -1644,6 +1648,7 @@ class PlotWidget(QGroupBox):
 			if not main.config["flag_automatic_draw"]:
 				return
 			
+			breakpoint(ownid, self.set_data_id)
 			# set x-ranges
 			# @Luis: Think about optimizations
 			xpos, qns = self.get_positions(return_qns=True)
@@ -1725,10 +1730,13 @@ class PlotWidget(QGroupBox):
 								else:
 									yrange_exp = [-1, 1]
 							if main.config["plot_expasstickspectrum"]:
-								segs = (((xs[i], ys[i]),(xs[i], 0)) for i in range(len(xs)))
+								segs = np.array(((xs, xs), (ys*0, ys))).T
+								colors = create_colors(dataframe, files)
+								# segs = (((xs[i], ys[i]),(xs[i], 0)) for i in range(len(xs)))
 							else:
-								segs = (((xs[i], ys[i]),(xs[i+1], ys[1+i])) for i in range(len(xs)-1))
-							colors = create_colors(dataframe, files)
+								segs = np.array(((xs[:-1], xs[1:]), (ys[:-1], ys[1:]))).T
+								colors = create_colors(dataframe, files)
+								# segs = (((xs[i], ys[i]),(xs[i+1], ys[1+i])) for i in range(len(xs)-1))
 							coll = matplotlib.collections.LineCollection(segs, colors=colors)
 							if self.axs["exp_plot"][i, j]:
 								self.axs["exp_plot"][i, j].remove()
@@ -1742,7 +1750,8 @@ class PlotWidget(QGroupBox):
 								ys = ys*yrange_exp[1]/yrange_cat[1]
 							elif scaling in ["Global", "Custom"]:
 								ys = ys*main.config["plot_expcat_factor"]*10**main.config["plot_expcat_exponent"]
-							segs = (((xs[i], 0),(xs[i], ys[i])) for i in range(len(xs)))
+							segs = np.array(((xs, xs), (ys*0, ys))).T
+							# segs = (((xs[i], 0),(xs[i], ys[i])) for i in range(len(xs)))
 							colors = create_colors(dataframe, files, xpos[i, j])
 							coll = matplotlib.collections.LineCollection(segs, colors=colors)
 							if self.axs["cat_plot"][i, j]:
@@ -1751,7 +1760,10 @@ class PlotWidget(QGroupBox):
 						elif datatype == "lin":
 							tuples = list(zip(xs,ys))
 							tuples = tuples if len(tuples)!=0 else [[None,None]]
+							colors = create_colors(dataframe, files, lin=True)
+							
 							self.axs["lin_plot"][i, j].set_offsets(tuples)
+							self.axs["lin_plot"][i, j].set_color(colors)
 
 					if scaling == "Per Plot":
 						yrange = yrange_exp
@@ -2128,291 +2140,260 @@ class CreditsWindow(EQWidget):
 		layout.addWidget(QQ(QLabel, text=CREDITSSTRING, align=Qt.AlignCenter, wordwrap=True, minHeight=300, minWidth=500))
 		self.setLayout(layout)
 
-class FilesWindow(EQWidget):
-	def __init__(self, id, actions, title, type, lock, parent=None):
+class FileWindow(EQWidget):
+	def __init__(self, id, parent=None):
 		super().__init__(id, parent)
-		self.setWindowTitle(title)
-		self.actions = actions
-		self.type = type
-		self.lock = lock
-		self.files_dict = {}
-		main.signalclass.updatewindows.connect(self.update)
-		self.layout = None
-		self.scrollarea = None
-		self.update()
+		self.setWindowTitle("Files Window")
+		
+		self.tabs = QTabWidget()
+		tmplayout = QVBoxLayout()
+		tmplayout.addWidget(self.tabs)
+		self.setLayout(tmplayout)
+		
+		keys = ("exp", "cat", "lin")
+		self.widgets = {key: {} for key in keys}
+		self.layouts = {key: self.create_layout(key, initial=True) for key in keys}
+		for label, layout in self.layouts.items():
+			tmpwidget = QWidget()
+			tmpwidget.setLayout(layout)
+			self.tabs.addTab(tmpwidget, label.capitalize())
 
-	def gui_top(self):
-		pass
+		main.signalclass.fileschanged.connect(self.update)
 
-	def gui_bottom(self):
-		pass
+	def update(self, type=None):
+		if type is None:
+			types = ("exp", "cat", "lin")
+		else:
+			types = (type, )
+			
+		
+		for type in types:
+			filesgrid = self.widgets[f"{type}_filesgrid"]
+			
+			scrollarea = self.widgets.get(f"{type}_scrollarea")
+			if scrollarea:
+				tmp = (scrollarea.verticalScrollBar().value(), scrollarea.horizontalScrollBar().value())
+			else:
+				tmp = (0, 0)
 
-	def gui_init(self):
-		if self.layout == None:
-			vbox = QVBoxLayout()
+			# Delete existing widgets
+			for key, value in self.widgets[type].items():
+				if not (key.startswith("__") and key.endswith("__")):
+					for widget in value.values():
+						widget.deleteLater()
+			
+			self.widgets[type] = {key: value for key, value in self.widgets[type].items() if (key.startswith("__") and key.endswith("__"))}
+			
+			if type == "exp":
+				actions = ("label", "colorinput", "colorpicker", "scale", "hide", "delete", "reread")
+			elif type == "cat":
+				actions = ("label", "colorinput", "colorpicker", "scale", "hide", "delete", "reread")
+			elif type == "lin":
+				actions = ("label", "colorinput", "colorpicker", "hide", "delete", "reread")
+		
+			row_id = 0
+			files = main.config[f"files_{type}"]
+		
+			for file in files:
+				self.add_row(filesgrid, type, file, actions, row_id)
+				row_id += 1
+			
+			filesgrid.setRowStretch(row_id, 1)
+			
+			scrollarea.verticalScrollBar().setValue(tmp[0])
+			scrollarea.horizontalScrollBar().setValue(tmp[1])
+			
 
-			self.scrollarea = QScrollArea()
+	def create_layout(self, type, initial=False):
+		if initial:
+			layout = QVBoxLayout()
+			
+			buttonsbox = QHBoxLayout()
+			scrollarea = QScrollArea()
 			widget = QWidget()
-			self.layout = QVBoxLayout()
+			
+			layout.addLayout(buttonsbox)
+			
+			buttonsbox.addWidget(QQ(QToolButton, text="Load", change=lambda x, type=type: main.load_file(type, add_files=True, keep_old=False)))
+			buttonsbox.addWidget(QQ(QToolButton, text="Add", change=lambda x, type=type: main.load_file(type, add_files=True, keep_old=True)))
+			buttonsbox.addWidget(QQ(QToolButton, text="Reread All", change=lambda x, type=type: main.load_file(type, reread=True, do_QNs=False)))
+			buttonsbox.addWidget(QQ(QToolButton, text="Reset All", change=lambda x, type=type: self.reset_all(type)))
+			buttonsbox.addWidget(QQ(QToolButton, text="Delete All", change=lambda x, type=type: self.delete_file(type)))
+			buttonsbox.addStretch(1)
+			
+			filesgrid = QGridLayout()
+			
+			scrollarea.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+			scrollarea.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+			scrollarea.setWidgetResizable(True)
+			scrollarea.setWidget(widget)
+			widget.setLayout(filesgrid)
+			
+			self.widgets[f"{type}_filesgrid"] = filesgrid
+			self.widgets[f"{type}_scrollarea"] = scrollarea
+			
+			
+			if type == "exp":
+				color = main.config.get('color_exp')
+				file = "__exp__"
+				
+				topbox = QHBoxLayout()
+				layout.addLayout(topbox)
+				
+				rowdict = {
+					"label":			QQ(QLabel, text="Initial Color"),
+					"colorinput":		QQ(QLineEdit, text=color, maxWidth=200, change=lambda x, file=file, type=type: self.change_color(type, file, inp=True)),
+					"colorpicker":		QQ(QToolButton, text="CP", change=lambda x, file=file, type=type: self.change_color(type, file), stylesheet=f"background-color: {rgbt_to_trgb(color)}"),
+				}
+				for label, widget in rowdict.items():
+					topbox.addWidget(widget)
+				self.widgets[type][file] = rowdict
+			
+			elif type == "cat":
+				labels = ("Default color", "Current transition")
+				colors = (main.config.get('color_cat'), main.config.get('color_cur'))
+				files = ("__cat__", "__cur__")
+				
+				topbox = QHBoxLayout()
+				layout.addLayout(topbox)
+				
+				for label, color, file in zip(labels, colors, files):
+					rowdict = {
+						"label":			QQ(QLabel, text=label),
+						"colorinput":		QQ(QLineEdit, text=color, maxWidth=200, change=lambda x, file=file, type=type: self.change_color(type, file, inp=True)),
+						"colorpicker":		QQ(QToolButton, text="CP", change=lambda x, file=file, type=type: self.change_color(type, file), stylesheet=f"background-color: {rgbt_to_trgb(color)}"),
+					}
+					for label, widget in rowdict.items():
+						topbox.addWidget(widget)
+					self.widgets[type][file] = rowdict
+		
+			elif type == "lin":
+				color = main.config.get('color_lin')
+				file = "__lin__"
+				hidden = main.config["flag_hidecatalog"]
+				
+				topbox = QHBoxLayout()
+				layout.addLayout(topbox)
+				
+				rowdict = {
+					"label":			QQ(QLabel, text="Assigned Markers"),
+					"colorinput":		QQ(QLineEdit, text=color, maxWidth=200, change=lambda x, file=file, type=type: self.change_color(type, file, inp=True)),
+					"colorpicker":		QQ(QToolButton, text="CP", change=lambda x, file=file, type=type: self.change_color(type, file), stylesheet=f"background-color: {rgbt_to_trgb(color)}"),
+					"hide":				QQ(QToolButton, text="Show" if hidden else "Hide", change=lambda x, file=file, type=type: self.hide_file(type, file)),
+				}
+				for label, widget in rowdict.items():
+					topbox.addWidget(widget)
+				self.widgets[type][file] = rowdict
+				
+			layout.addWidget(scrollarea, 10)
+		
+		self.update(type)
+		
+		return(layout)
 
-			self.scrollarea.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-			self.scrollarea.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-			self.scrollarea.setWidgetResizable(True)
-
-			widget.setLayout(self.layout)
-			self.scrollarea.setWidget(widget)
-			vbox.addWidget(self.scrollarea)
-
-			self.setLayout(vbox)
-
-			self.layout_files = QGridLayout()
-			self.layout_actions = QHBoxLayout()
-			self.layout.addLayout(self.layout_actions)
-			self.layout_actions.addWidget(QQ(QPushButton, text="Load", change=self.add_file))
-			self.layout_actions.addWidget(QQ(QPushButton, text="Add", change=lambda: self.add_file(True)))
-			if "reread" in self.actions:
-				self.layout_actions.addWidget(QQ(QPushButton, text="Reread All", change=lambda x: self.reread_file()))
-			self.layout_actions.addWidget(QQ(QPushButton, text="Delete All", change=lambda x: self.delete_file()))
-			self.layout_actions.addStretch(1)
-			self.setMinimumHeight(200)
-			self.setMinimumWidth(600)
-			self.layout.addLayout(self.layout_files)
-			self.layout.addStretch(1)
-
-		self.row_id = 0
-		self.gui_top()
-		for file in main.config[f"files_{self.type}"]:
-			self.add_row(file, self.actions)
-		self.gui_bottom()
-
-	def add_row(self, file, actions):
-		layout = self.layout_files
-
-		color = main.config[f"files_{self.type}"][file].get("color", None)
-		hidden = main.config[f"files_{self.type}"][file].get("hidden")
+	def add_row(self, layout, type, file, actions, row_id):
+		file_options = main.config[f"files_{type}"][file]
+		color = file_options.get("color", "#ffffff")
+		hidden = file_options.get("hidden")
+		scale = file_options.get("scale", 1)
 
 		rowdict = {
 			"label":			QQ(QLabel, text=file, enabled=not hidden),
-			"colorinput":		QQ(QLineEdit, text=color, maxWidth=200, change=lambda x, file=file: self.change_color(file, inp=True)),
-			"colorpicker":		QQ(QPushButton, text="CP", change=lambda x, file=file: self.change_color(file), stylesheet=f"background-color: {rgbt_to_trgb(color)}"),
-			"invert":			QQ(QPushButton, text="Invert", change=lambda x, file=file: self.invert_file(file)),
-			"hide":				QQ(QPushButton, text="Show" if hidden else "Hide", change=lambda x, file=file: self.hide_file(file)),
-			"delete":			QQ(QPushButton, text="X", change=lambda x, file=file: self.delete_file(file)),
-			"reread":			QQ(QPushButton, text="Reread", change=lambda x, file=file: self.reread_file(file)),
+			"scale":			QQ(QDoubleSpinBox, value=scale, range=(None, None), change=lambda x, file=file, type=type: self.scale_file(type, file, x)),
+			"colorinput":		QQ(QLineEdit, text=color, maxWidth=200, change=lambda x, file=file, type=type: self.change_color(type, file, inp=True)),
+			"colorpicker":		QQ(QToolButton, text="CP", change=lambda x, file=file, type=type: self.change_color(type, file), stylesheet=f"background-color: {rgbt_to_trgb(color)}"),
+			"hide":				QQ(QToolButton, text="Show" if hidden else "Hide", change=lambda x, type=type, file=file: self.hide_file(type, file)),
+			"delete":			QQ(QToolButton, text="×", change=lambda x, type=type, file=file: self.delete_file(type, file), tooltip="Delete file"),
+			"reread":			QQ(QToolButton, text="⟲", change=lambda x, type=type, file=file: main.load_file(type, add_files=[file], keep_old=True, do_QNs=False), tooltip="Reread File"),
 		}
 
-		layout.addWidget(rowdict["label"], self.row_id, 0)
+		for col_id, action in enumerate(actions):
+			layout.addWidget(rowdict[action], row_id, col_id)
+			layout.setRowStretch(row_id, 0)
+		
+		self.widgets[type][file] = rowdict
 
-		for col_id, action in enumerate(self.actions):
-			layout.addWidget(rowdict[action], self.row_id, col_id)
-
-		self.files_dict[file] = rowdict
-		self.row_id += 1
-
-	def update(self):
-		if self.scrollarea:
-			tmp = (self.scrollarea.verticalScrollBar().value(), self.scrollarea.horizontalScrollBar().value())
-		else:
-			tmp = (0, 0)
-		for key, value in self.files_dict.items():
-			for widget in value.values():
-				widget.deleteLater()
-		self.files_dict = {}
-		self.gui_init()
-		self.scrollarea.verticalScrollBar().setValue(tmp[0])
-		self.scrollarea.horizontalScrollBar().setValue(tmp[1])
-
-	@synchronized_d(locks["axs"])
-	def hide_file(self, file, inp=False):
-		hidden = main.config[f"files_{self.type}"][file].get("hidden", False)
-		hidden = not hidden
-		main.config[f"files_{self.type}"][file]["hidden"] = hidden
-
-		if hidden:
-			self.files_dict[file]["label"].setEnabled(False)
-			self.files_dict[file]["hide"].setText("Show")
-		else:
-			self.files_dict[file]["label"].setEnabled(True)
-			self.files_dict[file]["hide"].setText("Hide")
-
-		main.signalclass.updateplot.emit()
-
+	def scale_file(self, type, file, scale):
+		main.config[f"files_{type}"][file]["scale"] = scale
+	
+	def reset_all(self, type):
+		files = main.config[f"files_{type}"]
+		
+		for file in files:
+			if "scale" in files[file]:
+				files[file]["scale"] = 1
+			
+			if "hidden" in files[file]:
+				files[file]["hidden"] = False
+			
+			if "color" in files[file]:
+				files[file]["color"] = main.config[f"color_{type}"]
+		
+		main.signalclass.fileschanged.emit()
+	
 	@working_d
-	@synchronized_d(locks["exp_df"])
-	@synchronized_d(locks["cat_df"])
-	@synchronized_d(locks["lin_df"])
-	def delete_file(self, file=None):
-		df = main.return_df(self.type)
+	def delete_file(self, type, file=None):
+		df = main.return_df(type)
 
-		with self.lock:
-			if file == None:
-				main.config[f"files_{self.type}"].clear()
+		with locks[f"{type}_df"]:
+			if file is None:
+				main.config[f"files_{type}"].clear()
 				df.drop(df.index, inplace=True)
 			else:
-				if file in main.config[f"files_{self.type}"]:
-					del main.config[f"files_{self.type}"][file]
+				if file in main.config[f"files_{type}"]:
+					del main.config[f"files_{type}"][file]
 				df.drop(df[df["filename"]==file].index, inplace=True)
 		
-		main.load_file(self.type, keep_old=True, do_QNs=False)
-
-	@working_d
-	@synchronized_d(locks["exp_df"])
-	@synchronized_d(locks["cat_df"])
-	@synchronized_d(locks["lin_df"])
-	def reread_file(self, file=None):
-		if not file:
-			main.load_file(self.type, reread=True, do_QNs=False)
-		else:
-			main.load_file(self.type, add_files=[file], keep_old=True, do_QNs=False)
-
-class CatWindow(FilesWindow):
-	def __init__(self, id, parent=None):
-		type = "cat"
-		title = "Cat Files"
-		actions = ["label", "colorinput", "colorpicker", "hide", "delete", "reread"]
-		lock = locks["cat_df"]
-		super().__init__(id, actions, title, type, lock, parent)
-
-	def add_file(self, keep_old=False):
-		main.load_file("cat", add_files=True, keep_old=keep_old)
-
-	def gui_top(self):
-		for file, title, color in zip(("__starassigned__", "__current__"), ("Assigned Markers", "Current Transition"), (main.config["color_lin"], main.config["color_cur"])):
-			rowdict = {
-				"label":			QQ(QLabel, text=title),
-				"colorinput":		QQ(QLineEdit, text=color, maxWidth=200, change=lambda x, file=file: self.change_color(file, inp=True)),
-				"colorpicker":		QQ(QPushButton, text="CP", change=lambda x, file=file: self.change_color(file), stylesheet=f"background-color: {rgbt_to_trgb(color)}"),
-			}
-
-			for col_id, action in enumerate(("label", "colorinput", "colorpicker")):
-				self.layout_files.addWidget(rowdict[action], self.row_id, col_id)
-
-			self.files_dict[file] = rowdict
-			self.row_id += 1
-
+		main.load_file(type, keep_old=True, do_QNs=False)
+	
 	@synchronized_d(locks["axs"])
-	def change_color(self, file, inp=False):
-		if inp:
-			color = self.files_dict[file]["colorinput"].text()
+	def hide_file(self, type, file):
+		if file == "__lin__":
+			hidden = main.config["flag_hidecatalog"]
 		else:
-			color = QColorDialog.getColor(initial=QColor(rgbt_to_trgb(self.files_dict[file]["colorinput"].text())), options=QColorDialog.ShowAlphaChannel)
-			if color.isValid():
-				color = trgb_to_rgbt(color.name(QColor.HexArgb))
-			else:
-				return
-
-		try:
-			color = Color(color)
-		except CustomError:
-			return
-
-		self.files_dict[file]["colorpicker"].setStyleSheet(f"background-color: {rgbt_to_trgb(color)}")
-		if self.files_dict[file]["colorinput"].text() != color:
-			self.files_dict[file]["colorinput"].setText(color)
-
-		if file == "__starassigned__":
-			main.config["color_lin"] = color
-			for plot in main.plotwidget.axs["lin_plot"].flatten():
-				plot.set_color(color)
-		elif file == "__current__":
-			main.config["color_cur"] = color
+			hidden = main.config[f"files_{type}"][file].get("hidden", False)
+		hidden = not hidden
+		
+		if file == "__lin__":
+			main.config["flag_hidecatalog"] = hidden
 		else:
-			main.config[f"files_{self.type}"][file]["color"] = color
-		main.signalclass.updateplot.emit()
+			main.config[f"files_{type}"][file]["hidden"] = hidden
 
-class ExpWindow(FilesWindow):
-	def __init__(self, id, parent=None):
-		type = "exp"
-		title = "Exp Files"
-		actions = ["label", "colorinput", "colorpicker", "reread", "hide", "invert", "delete"]
-		lock = locks["exp_df"]
-		super().__init__(id, actions, title, type, lock, parent)
-
-	def add_file(self, keep_old=False):
-		main.load_file("exp", add_files=True, keep_old=keep_old)
-
-	def gui_top(self):
-		color = main.config.get('color_exp')
-		file = "__defaultexpcolor__"
-		rowdict = {
-			"label":			QQ(QLabel, text="Initial Color"),
-			"colorinput":		QQ(QLineEdit, text=color, maxWidth=200, change=lambda x, file=file: self.change_color(file, inp=True)),
-			"colorpicker":		QQ(QPushButton, text="CP", change=lambda x, file=file: self.change_color(file), stylesheet=f"background-color: {rgbt_to_trgb(color)}"),
-		}
-
-		for col_id, action in enumerate(("label", "colorinput", "colorpicker")):
-			self.layout_files.addWidget(rowdict[action], self.row_id, col_id)
-
-		self.files_dict[file] = rowdict
-		self.row_id += 1
-
-	def change_color(self, file, inp=False):
-		if inp:
-			color = self.files_dict[file]["colorinput"].text()
-		else:
-			color = QColorDialog.getColor(initial=QColor(rgbt_to_trgb(self.files_dict[file]["colorinput"].text())), options=QColorDialog.ShowAlphaChannel)
-			if color.isValid():
-				color = trgb_to_rgbt(color.name(QColor.HexArgb))
-			else:
-				return
-
-		try:
-			color = Color(color)
-		except CustomError:
-			return
-
-		self.files_dict[file]["colorpicker"].setStyleSheet(f"background-color: {rgbt_to_trgb(color)}")
-		if self.files_dict[file]["colorinput"].text() != color:
-			self.files_dict[file]["colorinput"].setText(color)
-
-		if file == "__defaultexpcolor__":
-			main.config["color_exp"] = color
-		else:
-			main.config[f"files_{self.type}"][file]["color"] = color
-		main.signalclass.updateplot.emit()
-
-	@synchronized_d(locks["exp_df"])
-	def invert_file(self, file):
-		main.config[f"files_{self.type}"][file]["invert"] = not main.config[f"files_{self.type}"][file].get("invert", False)
-		tmp_df = main.exp_df
-		tmp_df.loc[tmp_df.filename == file, "y"] = -tmp_df.loc[tmp_df.filename == file, "y"]
-		main.signalclass.updateplot.emit()
-
-class LinWindow(FilesWindow):
-	def __init__(self, id, parent=None):
-		type = "lin"
-		title = "Lin Files"
-		actions = ["label", "reread", "hide", "delete"]
-		lock = locks["lin_df"]
-		super().__init__(id, actions, title, type, lock, parent)
-
-	def add_file(self, keep_old=False):
-		main.load_file("lin", add_files=True, keep_old=keep_old)
-
-	def gui_top(self):
-		file = "__lin_own_df__"
-		hidden = main.config["flag_hidecatalog"]
-		rowdict = {
-			"label":			QQ(QLabel, text="Newly Assigned Lines"),
-			"hide":				QQ(QPushButton, text="Show" if hidden else "Hide", change=lambda x, file=file: self.hide_new_df(file)),
-		}
-
-		for col_id, action in enumerate(("label", "hide")):
-			self.layout_files.addWidget(rowdict[action], self.row_id, col_id)
-
-		self.files_dict[file] = rowdict
-		self.row_id += 1
-
-	@synchronized_d(locks["axs"])
-	def hide_new_df(self, file, inp = False):
-		hidden = not main.config.get("flag_hidecatalog", False)
-		main.config["flag_hidecatalog"] = hidden
 		if hidden:
-			self.files_dict[file]["button_hide"].setText("Show")
-			self.files_dict[file]["label"].setDisabled(True)
+			self.widgets[type][file]["label"].setEnabled(False)
+			self.widgets[type][file]["hide"].setText("Show")
 		else:
-			self.files_dict[file]["hide"].setText("Hide")
-			self.files_dict[file]["label"].setDisabled(False)
+			self.widgets[type][file]["label"].setEnabled(True)
+			self.widgets[type][file]["hide"].setText("Hide")
+
+		main.signalclass.updateplot.emit()
+	
+	@synchronized_d(locks["axs"])
+	def change_color(self, type, file, inp=False):
+		color_input = self.widgets[type][file]["colorinput"].text()
+		if inp:
+			color = color_input
+		else:
+			color = QColorDialog.getColor(initial=QColor(rgbt_to_trgb(color_input)), options=QColorDialog.ShowAlphaChannel)
+			if color.isValid():
+				color = trgb_to_rgbt(color.name(QColor.HexArgb))
+			else:
+				return
+
+		try:
+			color = Color(color)
+		except CustomError:
+			return
+
+		self.widgets[type][file]["colorpicker"].setStyleSheet(f"background-color: {rgbt_to_trgb(color)}")
+		if self.widgets[type][file]["colorinput"].text() != color:
+			self.widgets[type][file]["colorinput"].setText(color)
+
+		if file.startswith("__") and file.endswith("__"):
+			tmp = file.strip("_")
+			main.config[f"color_{tmp}"] = color
+		else:
+			main.config[f"files_{type}"][file]["color"] = color
 		main.signalclass.updateplot.emit()
 
 class LineshapeWindow(EQWidget):
@@ -2551,7 +2532,8 @@ class BlendedLinesWindow(EQWidget):
 						if len(exp_ys):
 							cat_ys = cat_ys*np.max(exp_ys)/np.max(cat_ys)
 
-						segs = (((cat_xs[i],0),(cat_xs[i],cat_ys[i])) for i in range(len(cat_xs)))
+						segs = np.array(((cat_xs, cat_xs), (cat_ys*0, cat_ys))).T
+						# segs = (((cat_xs[i],0),(cat_xs[i],cat_ys[i])) for i in range(len(cat_xs)))
 						colors = create_colors(df_cat, main.config["files_cat"])
 						self.cat_line = self.ax.add_collection(matplotlib.collections.LineCollection(segs, colors=colors))
 
@@ -3080,7 +3062,7 @@ class BlendWindow(EQWidget):
 				"weight":	10 ** (row["y"]-max_predicted),
 				"error":	self.error,
 				"comment":	main.config["fit_comment"],
-				"filename":	"__lin_own_df__",
+				"filename":	"__lin__",
 			}
 
 			for i in range(6):
@@ -3829,7 +3811,7 @@ class SpectraResolverWindow(EQWidget):
 		self.setLayout(self.layout)
 
 		self.fill_list()
-		main.signalclass.updatewindows.connect(self.fill_list)
+		main.signalclass.fileschanged.connect(self.fill_list)
 		main.signalclass.overlapend.connect(lambda: self.label.setText(f"Ready"))
 		main.signalclass.overlapend.connect(lambda: self.apply_order_button.setEnabled(True))
 		main.signalclass.overlapindicator.connect(self.label.setText)
@@ -4241,7 +4223,9 @@ class FigureWindow(EQWidget):
 								ys = ys*yrange_exp[1]/yrange_cat[1]
 							elif scaling in ["Global", "Custom"]:
 								ys = ys*main.config["plot_expcat_factor"]*10**main.config["plot_expcat_exponent"]
-							segs = (((xs[i], 0),(xs[i], ys[i])) for i in range(len(xs)))
+							
+							segs = np.array(((xs, xs), (ys*0, ys))).T
+							# segs = (((xs[i], 0),(xs[i], ys[i])) for i in range(len(xs)))
 							colors = create_colors(dataframe, files, xpos[i, j])
 							coll = matplotlib.collections.LineCollection(segs, **{"colors": colors, **main.config["figurewindow_catkwargs"]})
 							ax.add_collection(coll)
@@ -5215,7 +5199,7 @@ class Color(str):
 			raise CustomError(f"Invalid Color: '{color}' is not a valid color.")
 
 class SignalClass(QObject):
-	updatewindows   = pyqtSignal()
+	fileschanged   = pyqtSignal()
 	assignment      = pyqtSignal()
 	updateplot      = pyqtSignal()
 	createdplots    = pyqtSignal()
@@ -5563,7 +5547,10 @@ def encodebytes(bytes):
 def decodebytes(code):
 	return bytearray([int(x) for x in code.split(", ")])
 
-def create_colors(dataframe, files={}, xpos=None):
+def create_colors(dataframe, files={}, xpos=None, lin=False):
+	if lin:
+		files = files.copy()
+		files["__lin__"] = {"color": main.config["color_lin"]}
 	if len(files)==1 and xpos==None:
 		return(files[list(files.keys())[0]].get("color", "#ffffff"))
 	if not isinstance(dataframe, pd.DataFrame):
@@ -5576,7 +5563,7 @@ def create_colors(dataframe, files={}, xpos=None):
 
 	if xpos:
 		colors[dataframe["x"] == xpos] = main.config["color_cur"]
-
+		
 	return(colors)
 
 def column_to_numeric(val, force_int=False):
@@ -5711,7 +5698,7 @@ def addemptyrow_inplace(df, model=None):
 	if model:
 		model.update()
 
-def exp_to_df(fname, sep="\t", xcolumn=0, ycolumn=1, invert=False, sort=True):
+def exp_to_df(fname, sep="\t", xcolumn=0, ycolumn=1, sort=True):
 	data = pd.read_csv(fname, sep=sep, dtype=np.float64, header=None, engine="c", comment="#")
 	column_names = [i for i in range(len(data.columns))]
 
@@ -5722,8 +5709,6 @@ def exp_to_df(fname, sep="\t", xcolumn=0, ycolumn=1, invert=False, sort=True):
 	data = data[["x", "y",]]
 	data["filename"] = fname
 
-	if invert:
-		data["y"] = -data["y"]
 	return(data)
 
 def shared_labels(fig, xlabel, ylabel, xlabelpad=15, ylabelpad=0, **kwargs):
@@ -5762,8 +5747,8 @@ config_specs = {
 	"layout_mpltoolbar":					[False, bool],
 
 	"color_exp":							["#000000", Color],
-	"color_cat":							["#ff1a29", Color],
 	"color_lin":							["#ff38fc", Color],
+	"color_cat":							["#d91e6f", Color],
 	"color_cur":							["#71eb34", Color],
 	"color_fit":							["#bc20e3", Color],
 
