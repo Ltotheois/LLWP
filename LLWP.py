@@ -1734,9 +1734,23 @@ class PlotWidget(QGroupBox):
 								colors = create_colors(dataframe, files)
 								# segs = (((xs[i], ys[i]),(xs[i], 0)) for i in range(len(xs)))
 							else:
-								segs = np.array(((xs[:-1], xs[1:]), (ys[:-1], ys[1:]))).T
-								colors = create_colors(dataframe, files)
-								# segs = (((xs[i], ys[i]),(xs[i+1], ys[1+i])) for i in range(len(xs)-1))
+								filenames = dataframe["filename"].to_numpy()
+								unique_filenames = np.unique(filenames)
+								
+								segs = []
+								colors = []
+								for unique_filename in unique_filenames:
+									mask = (filenames == unique_filename)
+									tmp_xs, tmp_ys = xs[mask], ys[mask]
+									
+									segs.append(np.array(((tmp_xs[:-1], tmp_xs[1:]), (tmp_ys[:-1], tmp_ys[1:]))).T)
+									colors.extend([files[unique_filename]["color"]]*sum(mask))
+								
+								if segs:
+									segs = np.concatenate(segs)
+								# segs = np.array(((xs[:-1], xs[1:]), (ys[:-1], ys[1:]))).T
+								# colors = create_colors(dataframe, files)
+								# # segs = (((xs[i], ys[i]),(xs[i+1], ys[1+i])) for i in range(len(xs)-1))
 							coll = matplotlib.collections.LineCollection(segs, colors=colors)
 							if self.axs["exp_plot"][i, j]:
 								self.axs["exp_plot"][i, j].remove()
