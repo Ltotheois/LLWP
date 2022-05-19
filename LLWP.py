@@ -503,25 +503,25 @@ class Main():
 			self.notification(f"The command '{command}' failed with the Exception '{E}'.")
 			raise
 
-	def get_visible_data(self, type, xrange=None, binning=None, force_all=False, scale=True):
+	def get_visible_data(self, type, xrange=None, binning=False, force_all=False, scale=True):
 		if type == "exp":
 			with locks["exp_df"]:
-				df = self.exp_df.copy()
+				dataframe = self.exp_df.copy()
 				fd = self.config["files_exp"]
 		elif type == "cat":
 			with locks["cat_df"]:
-				df = self.cat_df.copy()
+				dataframe = self.cat_df.copy()
 				fd = self.config["files_cat"]
 		elif type == "lin":
 			with locks["lin_df"]:
 				self.new_df["filename"] = "__lin__"
-				df = pd.concat((self.lin_df, self.new_df), join="inner", ignore_index=True).sort_values("x")
+				dataframe = pd.concat((self.lin_df, self.new_df), join="inner", ignore_index=True).sort_values("x")
 				fd = self.config["files_lin"]
 
 		if xrange != None:
-			x_start = df["x"].searchsorted(xrange[0], side="left")
-			x_stop  = df["x"].searchsorted(xrange[1], side="right")
-			df = df.iloc[x_start:x_stop].copy()
+			x_start = dataframe["x"].searchsorted(xrange[0], side="left")
+			x_stop  = dataframe["x"].searchsorted(xrange[1], side="right")
+			dataframe = dataframe.iloc[x_start:x_stop].copy()
 
 		if force_all != True:
 			visible_files = {file for file in fd.keys() if not fd[file].get("hidden", False)}
@@ -530,25 +530,21 @@ class Main():
 				visible_files.add("__lin__")
 
 			if len(visible_files) != len(fd) + (type == "lin"):
-				df.query("filename in @visible_files", inplace=True)
+				dataframe.query("filename in @visible_files", inplace=True)
 
-		df_len = len(df.index)
-		if df_len > main.config["plot_skipbinning"]:
-			if binning != None and xrange != None:
-				if binning:
-					bins = self.config["plot_bins"]
-				bin_width = (xrange[1]-xrange[0])/bins
-				if bin_width == 0:
-					bin_width = df_len
-
-				df.loc[:,"binning"] = (df.loc[:,"x"]-xrange[0])//bin_width
-				df = df.loc[df.sort_values(["y"]).drop_duplicates(("binning", "filename"), keep="last").sort_values(["x"]).index]
+		if binning:
+			bins = main.config["plot_bins"]
+			nobinning = main.config["plot_skipbinning"]
+			binwidth = (xrange[1]-xrange[0]) / bins
+			
+			if len(dataframe) > max(bins, nobinning)  and binwidth != 0:
+				dataframe = bin_data(dataframe, binwidth, xrange)
 
 		if scale and type in ["exp", "cat"]:
-			scalingfactordict = {file: main.config[f"files_{type}"][file].get("scale", 1) for file in fd.keys()}
-			df["y"] *= df["filename"].replace(scalingfactordict)
+			scalingfactordict = {file: self.config[f"files_{type}"][file].get("scale", 1) for file in fd.keys()}
+			dataframe["y"] *= dataframe["filename"].replace(scalingfactordict)
 
-		return(df)
+		return(dataframe)
 
 	def return_df(self, type):
 		with locks[f"{type}_df"]:
@@ -1712,6 +1708,7 @@ class PlotWidget(QGroupBox):
 
 			# set data and set y-ranges of data
 			bins = main.config["plot_bins"]
+			nobinning = main.config["plot_skipbinning"]
 			scaling = main.config["plot_yscale"]
 			
 			timers.append(time.perf_counter())
@@ -1724,7 +1721,7 @@ class PlotWidget(QGroupBox):
 			maxindices = {type: dataframe["x"].searchsorted(xmax, side="right") for type, dataframe in zip(datatypes, dataframes)}
 
 			scalingfactordicts = {type: {file: main.config[f"files_{type}"][file].get("scale", 1) for file in main.config[f"files_{type}"].keys()} for type in ("exp", "cat")}
-
+			
 			timers.append(time.perf_counter())
 
 
@@ -1738,15 +1735,9 @@ class PlotWidget(QGroupBox):
 						minindex, maxindex = minindices[datatype][i][j], maxindices[datatype][i][j]
 						dataframe = dataframe.iloc[minindex:maxindex].copy()
 
-						tmp_length = len(dataframe.index)
-						if tmp_length > bins and datatype in ("exp", "cat"):
-							tmp_binning = (xmax[i, j]-xmin[i, j])/bins
-
-							if tmp_binning == 0:
-								tmp_binning = tmp_length
-
-							dataframe.loc[:,"binning"] = (dataframe.loc[:,"x"]-xmin[i, j])//tmp_binning
-							dataframe = dataframe.loc[dataframe.sort_values(["y"]).drop_duplicates(("binning", "filename"), keep="last").sort_values(["x"]).index]
+						binwidth = (xmax[i, j]-xmin[i, j]) / bins
+						if len(dataframe) > max(bins, nobinning)  and binwidth != 0:
+							dataframe = bin_data(dataframe, binwidth, (xmin[i, j], xmax[i, j]))
 
 						xs = dataframe["x"].to_numpy()
 						if datatype == "lin":
@@ -1763,7 +1754,6 @@ class PlotWidget(QGroupBox):
 							if main.config["plot_expasstickspectrum"]:
 								segs = np.array(((xs, xs), (ys*0, ys))).T
 								colors = create_colors(dataframe, files)
-								# segs = (((xs[i], ys[i]),(xs[i], 0)) for i in range(len(xs)))
 							else:
 								# @Luis: optimize this
 								filenames = dataframe["filename"].to_numpy()
@@ -1780,9 +1770,6 @@ class PlotWidget(QGroupBox):
 								
 								if segs:
 									segs = np.concatenate(segs)
-								# segs = np.array(((xs[:-1], xs[1:]), (ys[:-1], ys[1:]))).T
-								# colors = create_colors(dataframe, files)
-								# # segs = (((xs[i], ys[i]),(xs[i+1], ys[1+i])) for i in range(len(xs)-1))
 							coll = matplotlib.collections.LineCollection(segs, colors=colors)
 							if self.axs["exp_plot"][i, j]:
 								self.axs["exp_plot"][i, j].remove()
@@ -4179,23 +4166,14 @@ class FigureWindow(EQWidget):
 			self.fig = figure.Figure(figsize=(width, height), dpi=main.config["figurewindow_dpi"], **main.config["figurewindow_figkwargs"])
 			self.axs = self.fig.subplots(rows, cols, gridspec_kw=main.config["plot_matplotlibkwargs"], squeeze=False)
 
-			xpos, allqns = main.plotwidget.get_positions(return_qns=True)
+			cat_df = main.get_visible_data("cat", scale=False)
+			xpos, qns = main.plotwidget.get_positions(return_qns=True, cat_df=cat_df)
 			widths = main.plotwidget.get_widths()
+			widths += (widths == 0)*10
 
-			xmin = np.zeros(xpos.shape)
-			xmax = np.zeros(xpos.shape)
-
-			for i in range(rows):
-				for j in range(cols):
-					ax = self.axs[i, j]
-					ax.yaxis.set_visible(False)
-					ax.xaxis.set_visible(False)
-					offset = main.plotwidget.get_offset((i, j))
-					x, width = xpos[i, j]+offset, widths[i, j]/2 or 10
-					xrange = (x-width, x+width)
-					ax.set_xlim(*xrange)
-
-					xmin[i, j], xmax[i, j] = xrange
+			offsets = main.plotwidget.get_offset(all=True)
+			xmax = xpos + offsets + widths/2
+			xmin = xpos + offsets - widths/2
 
 			# set ticks for bottom row
 			i = -1
@@ -4223,52 +4201,71 @@ class FigureWindow(EQWidget):
 			# set data and set y-ranges of data
 			scaling = main.config["plot_yscale"]
 
-			dataframes = [main.get_visible_data(x) for x in ("exp", "cat", "lin")]
-			files_dicts = [main.config[x] for x in ("files_exp", "files_cat", "files_lin")]
+			datatypes = ("exp", "cat", "lin")
+			dataframes = [main.get_visible_data("exp", scale=False), cat_df, main.get_visible_data("lin", scale=False)]
+			files_dicts = [main.config[f"files_{type}"] for type in datatypes]
+			
+			minindices = {type: dataframe["x"].searchsorted(xmin, side="left") for type, dataframe in zip(datatypes, dataframes)}
+			maxindices = {type: dataframe["x"].searchsorted(xmax, side="right") for type, dataframe in zip(datatypes, dataframes)}
+
+			scalingfactordicts = {type: {file: main.config[f"files_{type}"][file].get("scale", 1) for file in main.config[f"files_{type}"].keys()} for type in ("exp", "cat")}
+
 			ann_dict = main.config["plot_annotations_dict"]
+
 
 			for i in range(rows):
 				for j in range(cols):
 					ax = self.axs[i, j]
+					ax.set_xlim(xmin[i, j], xmax[i, j])
 
-					qns = allqns[i, j]
+					tmp_qns = qns[i, j]
 					color = matplotlib.rcParams['text.color']
 
 					if main.config["figurewindow_annotation"] == "Custom":
 						reference = main.plotwidget.get_series_reference(j)
 						if reference["method"] == "Transition":
-							qn_dict = {f"qn{ul}{i+1}": qns[0 + (ul=="l")][i] for ul in "ul" for i in range(len(qns[0]))}
+							qn_dict = {f"qn{ul}{i+1}": tmp_qns[0 + (ul=="l")][i] for ul in "ul" for i in range(len(tmp_qns[0]))}
 						else:
 							qn_dict = {}
 						text = main.config["figurewindow_customannotation"].format(**{"x": xpos[i, j], "i": i, "j": j, "rows": rows, "cols": cols, **qn_dict})
-					elif main.config["series_annotate_xs"] or qns is None:
+					elif main.config["series_annotate_xs"] or tmp_qns is None:
 						text = f"{{:{main.config['series_annotate_fmt']}}}".format(xpos[i, j])
 					else:
-						text = f"{', '.join([str(qn) if qn != np.iinfo(np.int64).min else '-' for qn in qns[0]])} ← {', '.join([str(qn) if qn != np.iinfo(np.int64).min else '-' for qn in qns[1]])}"
+						text = f"{', '.join([str(qn) if qn != np.iinfo(np.int64).min else '-' for qn in tmp_qns[0]])} ← {', '.join([str(qn) if qn != np.iinfo(np.int64).min else '-' for qn in tmp_qns[1]])}"
 
 						lin_df = main.get_visible_data("lin")
-						if len(lin_df.query(" and ".join([f"qnu{i+1} == {qn}" for i, qn in enumerate(qns[0])] + [f"qnl{i+1} == {qn}" for i, qn in enumerate(qns[1])]))):
+						if len(lin_df.query(" and ".join([f"qnu{i+1} == {qn}" for i, qn in enumerate(tmp_qns[0])] + [f"qnl{i+1} == {qn}" for i, qn in enumerate(tmp_qns[1])]))):
 							color = main.config["color_lin"]
 
 					ax.text(**ann_dict, s=text, transform=ax.transAxes, color=color)
 
 
 					for datatype, dataframe, files in zip(("exp", "cat", "lin"), dataframes, files_dicts):
-						minindex = dataframe["x"].searchsorted(xmin[i, j], side="left")
-						maxindex = dataframe["x"].searchsorted(xmax[i, j], side="right")
-
+						minindex, maxindex = minindices[datatype][i][j], maxindices[datatype][i][j]
 						dataframe = dataframe.iloc[minindex:maxindex].copy()
 
 						xs = dataframe["x"].to_numpy()
-						ys = dataframe["y"].to_numpy() if datatype != "lin" else 0*xs
+						if datatype == "lin":
+							ys = 0*xs
+						else:
+							ys = dataframe["y"]*dataframe["filename"].replace(scalingfactordicts[datatype]).to_numpy()
 
 						if datatype == "exp":
 							if scaling == "Per Plot":
 								if len(dataframe):
-									yrange_exp = [dataframe["y"].min(), dataframe["y"].max()]
+									yrange_exp = [ys.min(), ys.max()]
 								else:
 									yrange_exp = [-1, 1]
-							ax.plot(xs, ys, **main.config["figurewindow_expkwargs"])
+							
+							filenames = dataframe["filename"].to_numpy()
+							unique_filenames = np.unique(filenames)
+							
+							for unique_filename in unique_filenames:
+								mask = (filenames == unique_filename)
+								tmp_xs, tmp_ys = xs[mask], ys[mask]
+								
+								ax.plot(tmp_xs, tmp_ys, **{"color": files[unique_filename]["color"], **main.config["figurewindow_expkwargs"]})
+							
 						elif datatype == "cat":
 							if scaling == "Per Plot":
 								if len(dataframe):
@@ -4280,12 +4277,12 @@ class FigureWindow(EQWidget):
 								ys = ys*main.config["plot_expcat_factor"]*10**main.config["plot_expcat_exponent"]
 							
 							segs = np.array(((xs, xs), (ys*0, ys))).T
-							# segs = (((xs[i], 0),(xs[i], ys[i])) for i in range(len(xs)))
 							colors = create_colors(dataframe, files, xpos[i, j])
 							coll = matplotlib.collections.LineCollection(segs, **{"colors": colors, **main.config["figurewindow_catkwargs"]})
 							ax.add_collection(coll)
 						elif datatype == "lin":
-							ax.scatter(xs, ys, **{"color": main.config["color_lin"], **main.config["figurewindow_linkwargs"]})
+							colors = create_colors(dataframe, files, lin=True)
+							ax.scatter(xs, ys, **{"color": colors, **main.config["figurewindow_linkwargs"]})
 
 					if scaling == "Per Plot":
 						yrange = yrange_exp
@@ -4993,7 +4990,8 @@ class ProtPlot(QWidget):
 		self.ax = self.fig.subplots()
 		self.ax.ticklabel_format(useOffset=False)
 
-		self.exp_line = self.ax.plot([], [], color=main.config["color_exp"])[0]
+		self.exp_line = None
+		self.ax.plot([], [], color=main.config["color_exp"])[0]
 
 	def from_current_plot(self, update=True):
 		self.i = main.plotwidget.get_current_plot()
@@ -5008,10 +5006,35 @@ class ProtPlot(QWidget):
 	def update_plot(self):
 		exp_df = main.get_visible_data("exp", xrange=(self.center-self.width/2, self.center+self.width/2), binning=True)
 
-		self.exp_xs = exp_df["x"].to_numpy()
-		self.exp_ys = exp_df["y"].to_numpy()
-
-		self.exp_line.set_data(self.exp_xs, self.exp_ys)
+		self.exp_xs = xs = exp_df["x"].to_numpy()
+		self.exp_ys = ys = exp_df["y"].to_numpy()
+		
+		if self.exp_line:
+			self.exp_line.remove()
+		
+		files = main.config[f"files_exp"]
+		if main.config["plot_expasstickspectrum"]:
+			segs = np.array(((xs, xs), (ys*0, ys))).T
+			colors = create_colors(exp_df, files)
+		else:
+			# @Luis: optimize this
+			filenames = exp_df["filename"].to_numpy()
+			unique_filenames = np.unique(filenames)
+			
+			segs = []
+			colors = []
+			for unique_filename in unique_filenames:
+				mask = (filenames == unique_filename)
+				tmp_xs, tmp_ys = xs[mask], ys[mask]
+				
+				segs.append(np.array(((tmp_xs[:-1], tmp_xs[1:]), (tmp_ys[:-1], tmp_ys[1:]))).T)
+				colors.extend([files[unique_filename]["color"]]*sum(mask))
+			
+			if segs:
+				segs = np.concatenate(segs)
+		
+		coll = matplotlib.collections.LineCollection(segs, colors=colors)
+		self.exp_line = self.ax.add_collection(coll)
 		self.ax.set_xlim([self.center-self.width/2, self.center+self.width/2])
 
 		yrange = [-1, 1]
@@ -5549,6 +5572,13 @@ def QQ(widgetclass, config_key=None, **kwargs):
 			changer(change)
 
 	return widget
+
+def bin_data(dataframe, binwidth, range):
+	length = len(dataframe)
+
+	dataframe.loc[:,"bin"] = (dataframe.loc[:,"x"]-range[0]) // binwidth
+	dataframe = dataframe.loc[dataframe.sort_values("y").drop_duplicates(("bin", "filename"), keep="last").sort_values(["x"]).index]
+	return(dataframe)
 
 def csv_copypaste(self, event):
 	if event.key() == Qt.Key_C and (event.modifiers() & Qt.ControlModifier):
