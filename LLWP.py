@@ -331,8 +331,10 @@ class Main():
 
 		else:
 			for fname in fnames:
-				# @Luis: An error in one of the files causes the remaining files to not be loaded
-				self.load_file_core(fname, type, config_updates, results, errors, do_QNs)
+				try:# @Luis: An error in one of the files causes the remaining files to not be loaded
+					self.load_file_core(fname, type, config_updates, results, errors, do_QNs)
+				except Exception as E:
+					pass
 
 		with lock:
 			for tmp_dict in list(config_updates.queue):
@@ -353,13 +355,6 @@ class Main():
 		if type == "exp":
 			self.yrange_exp = np.array((df["y"].min(), df["y"].max()))
 
-			if len(fnames) != 0:
-				xranges = [options["xrange"] for options in self.config["files_exp"].values()]
-				xranges = sorted(xranges, key=lambda x: x[0])
-				for i in range(len(xranges)-1):
-					if xranges[i][1] > xranges[i+1][0]:
-						self.notification(f"<span style='color:#eda711;'>WARNING</span>: Your spectra files are overlapping. This may cause zig-zag patterns. Think about using the Spectra Resolver module")
-						break
 		elif type == "cat":
 			self.yrange_exp = np.array((df["y"].min(), df["y"].max()))
 
@@ -547,7 +542,7 @@ class Main():
 					bin_width = df_len
 
 				df.loc[:,"binning"] = (df.loc[:,"x"]-xrange[0])//bin_width
-				df = df.loc[df.sort_values(["y"]).drop_duplicates("binning", keep="last").sort_values(["x"]).index]
+				df = df.loc[df.sort_values(["y"]).drop_duplicates(("binning", "filename"), keep="last").sort_values(["x"]).index]
 
 		if scale and type in ["exp", "cat"]:
 			scalingfactordict = {file: main.config[f"files_{type}"][file].get("scale", 1) for file in fd.keys()}
@@ -1072,10 +1067,12 @@ class PlotWidget(QGroupBox):
 				self.axs["offset"][lcp] = offset
 		self.set_data()
 
-	def get_offset(self, index=None):
+	def get_offset(self, index=None, all=False):
 		if main.config["plot_coupled"]:
 			return main.config["plot_offset"]
 		else:
+			if all:
+				return(self.axs["offset"])
 			if index is None:
 				index = self.get_current_plot()
 			return self.axs["offset"][index]
@@ -1133,7 +1130,7 @@ class PlotWidget(QGroupBox):
 		
 		return widths
 
-	def get_positions(self, return_qns=False):
+	def get_positions(self, return_qns=False, cat_df=None):
 		shape = self.axs["ax"].shape
 		positions = np.zeros(shape)
 		if return_qns:
@@ -1143,11 +1140,11 @@ class PlotWidget(QGroupBox):
 		for i, reference in zip(range(shape[1]), references):
 			method = reference["method"]
 			if method == "Transition":
-				qns = self.get_qns(reference["transition"])
+				qns, qnus, qnls, diffs = self.get_qns(reference["transition"], return_all=True)
 				if return_qns:
 					allqns[:, i] = qns
 				file = reference["transition"].get("file")
-				positions[:, i] = self.get_position_from_qns(qns, file)
+				positions[:, i] = self.get_position_from_qns(qns, qnus, qnls, diffs, file=file, cat_df=cat_df)
 			elif method == "List":
 				if return_qns:
 					# qns = reference["list"]["qns"]
@@ -1195,8 +1192,7 @@ class PlotWidget(QGroupBox):
 		else:
 			return({"method": None})
 
-
-	def get_qns(self, transition):
+	def get_qns(self, transition, return_all=False):
 		nop = self.axs["ax"].shape[0]
 		noq = main.config["series_qns"]
 
@@ -1209,17 +1205,43 @@ class PlotWidget(QGroupBox):
 			ind = nop-i-1
 			upper, lower = qnus+ind*diffs, qnls+ind*diffs
 			qns.append((upper, lower))
-		return(qns)
+		
+		if return_all:
+			return(qns, qnus, qnls, diffs)
+		else:
+			return(qns)
 
-	def get_position_from_qns(self, qns, file=None):
+	def get_position_from_qns(self, qns, qnus, qnls, diffs, file=None, cat_df=None):
 		positions = []
-		cat_df = main.get_visible_data("cat")
+		if cat_df is None:
+			cat_df = main.get_visible_data("cat", scale=False)
+		if file:
+			cat_df = cat_df.query("filename == @file")
+		
+		# Prefiltering cat_df (Similar to seriesfitwindow -> only one big query)
+		noq = main.config["series_qns"]
+
+		conditions = []
+		conditions_incr = []
+		for i, qnu, qnl, diff in zip(range(noq), qnus, qnls, diffs):
+			if diff:
+				conditions_incr.append(f"(qnu{i+1} - {qnu})*{diff}")
+				conditions_incr.append(f"(qnl{i+1} - {qnl})*{diff}")
+			else:
+				conditions.append(f"(qnu{i+1} == {qnu})")
+				conditions.append(f"(qnl{i+1} == {qnl})")
+
+		if len(conditions_incr):
+			conditions.append(" == ".join(conditions_incr))
+
+		conditions = " and ".join(conditions)
+		cat_df = main.cat_df.query(conditions)
+		
+		
 		for qnus, qnls in qns:
 			cond_upper = [f"(qnu{i+1} == {qn})" for i, qn in enumerate(qnus)]
 			cond_lower = [f"(qnl{i+1} == {qn})" for i, qn in enumerate(qnls)]
 			condition  = " & ".join(cond_upper + cond_lower)
-			if file:
-				condition += f" & (filename == @file)"
 
 			vals = cat_df.query(condition)["x"].to_numpy()
 			val = vals[0] if len(vals) else 0
@@ -1271,7 +1293,7 @@ class PlotWidget(QGroupBox):
 		if main.config["series_blenddialog"] and self.get_series_reference(index[1])["method"] == "Transition":
 			blendwidth = main.config["series_blendwidth"]
 			xrange = (dict_["xpre"]-blendwidth/2, dict_["xpre"]+blendwidth/2)
-			entries = main.get_visible_data("cat", xrange=xrange)
+			entries = main.get_visible_data("cat", xrange=xrange, scale=False)
 			if len(entries) > 1:
 				if BlendWindow in main.open_windows:
 					main.open_windows[BlendWindow].update_gui(entries, dict_, index)
@@ -1293,7 +1315,7 @@ class PlotWidget(QGroupBox):
 			text = f"({x=:.2f}, {y=:.2f}) "
 
 			cutoff = main.config["plot_hover_cutoff"]
-			df = main.get_visible_data("cat", xrange=(x-cutoff, x+cutoff))
+			df = main.get_visible_data("cat", xrange=(x-cutoff, x+cutoff), scale=False)
 			if len(df):
 				df["dist"] = abs(df["x"] - x)
 				df.sort_values("dist", inplace=True)
@@ -1609,7 +1631,7 @@ class PlotWidget(QGroupBox):
 				for j, ax in enumerate(row):
 					self.axs["ax"][i, j] = ax
 					self.axs["lin_plot"][i, j] = ax.scatter([], [], color=main.config["color_lin"], marker="*", zorder=100)
-					self.axs["span"][i, j] = matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax, i=i, j=j:self.on_range(xmin, xmax, (i, j)), 'horizontal')
+					self.axs["span"][i, j] = matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax, i=i, j=j:self.on_range(xmin, xmax, (i, j)), 'horizontal', useblit=True)
 					ax.yaxis.set_visible(False)
 					ax.xaxis.set_visible(False)
 
@@ -1628,7 +1650,7 @@ class PlotWidget(QGroupBox):
 	def manual_draw(self):
 		self.set_data().join()
 		with locks["axs"]:
-			self.plotcanvas.draw_idle()
+			self.plotcanvas.draw()
 
 	def set_data(self):
 		thread = threading.Thread(target=self.set_data_core)
@@ -1639,7 +1661,6 @@ class PlotWidget(QGroupBox):
 
 	@working_d
 	@synchronized_d(locks["axs"])
-	@stopwatch_d
 	def set_data_core(self):
 		with locks["currThread"]:
 			ownid = threading.current_thread().ident
@@ -1648,25 +1669,23 @@ class PlotWidget(QGroupBox):
 			if not main.config["flag_automatic_draw"]:
 				return
 			
+			timers = []
+			timers.append(time.perf_counter())
 			breakpoint(ownid, self.set_data_id)
+			
 			# set x-ranges
-			# @Luis: Think about optimizations
-			xpos, qns = self.get_positions(return_qns=True)
+			cat_df = main.get_visible_data("cat", scale=False)
+			xpos, qns = self.get_positions(return_qns=True, cat_df=cat_df)
+			timers.append(time.perf_counter())
 			widths = self.get_widths()
+			widths += (widths == 0)*10
 
-			xmin = np.zeros(xpos.shape)
-			xmax = np.zeros(xpos.shape)
-
-			for i in range(self.axs["ax"].shape[0]):
-				for j in range(self.axs["ax"].shape[1]):
-					ax = self.axs["ax"][i, j]
-					offset = self.get_offset((i, j))
-					x, width = xpos[i, j]+offset, widths[i, j]/2 or 10
-					xrange = (x-width, x+width)
-					ax.set_xlim(*xrange)
-
-					xmin[i, j], xmax[i, j] = xrange
-
+			offsets = self.get_offset(all=True)
+			xmax = xpos + offsets + widths/2
+			xmin = xpos + offsets - widths/2
+			
+			breakpoint(ownid, self.set_data_id)
+			
 			# set ticks for bottom row
 			i = -1
 			for j in range(self.axs["ax"].shape[1]):
@@ -1689,44 +1708,56 @@ class PlotWidget(QGroupBox):
 				ax.set_xticks(ticks)
 				ax.set_xticklabels(ticklabels)
 
-
 			breakpoint(ownid, self.set_data_id)
 
 			# set data and set y-ranges of data
 			bins = main.config["plot_bins"]
 			scaling = main.config["plot_yscale"]
+			
+			timers.append(time.perf_counter())
 
-			dataframes = [main.get_visible_data(x) for x in ("exp", "cat", "lin")]
-			files_dicts = [main.config[x] for x in ("files_exp", "files_cat", "files_lin")]
+			datatypes = ("exp", "cat", "lin")
+			dataframes = [main.get_visible_data("exp", scale=False), cat_df, main.get_visible_data("lin", scale=False)]
+			files_dicts = [main.config[f"files_{type}"] for type in datatypes]
+			
+			minindices = {type: dataframe["x"].searchsorted(xmin, side="left") for type, dataframe in zip(datatypes, dataframes)}
+			maxindices = {type: dataframe["x"].searchsorted(xmax, side="right") for type, dataframe in zip(datatypes, dataframes)}
+
+			scalingfactordicts = {type: {file: main.config[f"files_{type}"][file].get("scale", 1) for file in main.config[f"files_{type}"].keys()} for type in ("exp", "cat")}
+
+			timers.append(time.perf_counter())
+
 
 			for i in range(self.axs["ax"].shape[0]):
 				for j in range(self.axs["ax"].shape[1]):
 					breakpoint(ownid, self.set_data_id)
 					ax = self.axs["ax"][i, j]
+					ax.set_xlim(xmin[i,j], xmax[i,j])
 
-					for datatype, dataframe, files in zip(("exp", "cat", "lin"), dataframes, files_dicts):
-						minindex = dataframe["x"].searchsorted(xmin[i, j], side="left")
-						maxindex = dataframe["x"].searchsorted(xmax[i, j], side="right")
-
+					for datatype, dataframe, files in zip(datatypes, dataframes, files_dicts):
+						minindex, maxindex = minindices[datatype][i][j], maxindices[datatype][i][j]
 						dataframe = dataframe.iloc[minindex:maxindex].copy()
 
 						tmp_length = len(dataframe.index)
-						if tmp_length > bins:
+						if tmp_length > bins and datatype in ("exp", "cat"):
 							tmp_binning = (xmax[i, j]-xmin[i, j])/bins
 
 							if tmp_binning == 0:
 								tmp_binning = tmp_length
 
 							dataframe.loc[:,"binning"] = (dataframe.loc[:,"x"]-xmin[i, j])//tmp_binning
-							dataframe = dataframe.loc[dataframe.sort_values(["y"]).drop_duplicates("binning", keep="last").sort_values(["x"]).index]
+							dataframe = dataframe.loc[dataframe.sort_values(["y"]).drop_duplicates(("binning", "filename"), keep="last").sort_values(["x"]).index]
 
 						xs = dataframe["x"].to_numpy()
-						ys = dataframe["y"].to_numpy() if datatype != "lin" else 0*xs
+						if datatype == "lin":
+							ys = 0*xs
+						else:
+							ys = dataframe["y"]*dataframe["filename"].replace(scalingfactordicts[datatype]).to_numpy()
 
 						if datatype == "exp":
 							if scaling == "Per Plot":
 								if len(dataframe):
-									yrange_exp = [dataframe["y"].min(), dataframe["y"].max()]
+									yrange_exp = [ys.min(), ys.max()]
 								else:
 									yrange_exp = [-1, 1]
 							if main.config["plot_expasstickspectrum"]:
@@ -1734,6 +1765,7 @@ class PlotWidget(QGroupBox):
 								colors = create_colors(dataframe, files)
 								# segs = (((xs[i], ys[i]),(xs[i], 0)) for i in range(len(xs)))
 							else:
+								# @Luis: optimize this
 								filenames = dataframe["filename"].to_numpy()
 								unique_filenames = np.unique(filenames)
 								
@@ -1758,7 +1790,7 @@ class PlotWidget(QGroupBox):
 						elif datatype == "cat":
 							if scaling == "Per Plot":
 								if len(dataframe):
-									yrange_cat = [dataframe["y"].min(), dataframe["y"].max()]
+									yrange_cat = [ys.min(), ys.max()]
 								else:
 									yrange_cat = [-1, 1]
 								ys = ys*yrange_exp[1]/yrange_cat[1]
@@ -1793,11 +1825,19 @@ class PlotWidget(QGroupBox):
 						yrange = [-1,+1]
 					ax.set_ylim(yrange)
 
+			timers.append(time.perf_counter())
+
 			breakpoint(ownid, self.set_data_id)
 			self.plot_annotations(xpos, qns)
 
+			timers.append(time.perf_counter())
 			breakpoint(ownid, self.set_data_id)
-			self.plotcanvas.draw_idle()
+			self.plotcanvas.draw()
+			timers.append(time.perf_counter())
+
+			for i in range(len(timers)-1):
+				print(f"Step {i:2.0f} took {timers[i+1]-timers[i]:e} seconds")
+			print("\n\n")
 		except CustomError as E:
 			pass
 
@@ -2329,6 +2369,7 @@ class FileWindow(EQWidget):
 
 	def scale_file(self, type, file, scale):
 		main.config[f"files_{type}"][file]["scale"] = scale
+		main.plotwidget.set_data()
 	
 	def reset_all(self, type):
 		files = main.config[f"files_{type}"]
@@ -3641,7 +3682,7 @@ class ResidualsWindow(EQWidget):
 					ymax += 1
 				y_range = [ymin, ymax]
 				self.ax.set_ylim(y_range[0]-main.config["plot_ymargin"]*(y_range[1]-y_range[0]), y_range[1]+main.config["plot_ymargin"]*(y_range[1]-y_range[0]))
-			self.fig.canvas.draw_idle()
+			self.fig.canvas.draw()
 			main.notification("<br/>".join(message))
 		except:
 			main.notification("<span style='color:#eda711;'>WARNING</span>: There was an error in your Residuals window input")
@@ -3674,7 +3715,7 @@ class ResidualsWindow(EQWidget):
 				self.annot.set_visible(True)
 			else:
 				self.annot.set_visible(False)
-			self.fig.canvas.draw_idle()
+			self.fig.canvas.draw()
 
 			if click and noq:
 				# Luis: can this be out of range
@@ -3782,7 +3823,7 @@ class EnergyLevelsWindow(EQWidget):
 					ymax += 1
 				y_range = [ymin, ymax]
 				self.ax.set_ylim(y_range[0]-main.config["plot_ymargin"]*(y_range[1]-y_range[0]), y_range[1]+main.config["plot_ymargin"]*(y_range[1]-y_range[0]))
-			self.fig.canvas.draw_idle()
+			self.fig.canvas.draw()
 		except:
 			main.notification("There was an error in your Energy Levels window inputs")
 			raise
@@ -3803,7 +3844,7 @@ class EnergyLevelsWindow(EQWidget):
 				self.annot.set_visible(True)
 			else:
 				self.annot.set_visible(False)
-			self.fig.canvas.draw_idle()
+			self.fig.canvas.draw()
 
 class SpectraResolverWindow(EQWidget):
 	def __init__(self, id, parent=None):
@@ -4929,7 +4970,7 @@ class ProtPlot(QWidget):
 
 		self.onrange = onrange
 		if onrange:
-			self.span_selector = matplotlib.widgets.SpanSelector(self.ax, lambda vmax, vmin: self.on_range(vmax, vmin, self.i), 'horizontal')
+			self.span_selector = matplotlib.widgets.SpanSelector(self.ax, lambda vmax, vmin: self.on_range(vmax, vmin, self.i), 'horizontal', useblit=True)
 
 	def gui(self):
 		layout = QVBoxLayout()
@@ -4981,7 +5022,7 @@ class ProtPlot(QWidget):
 			yrange = (ymin-margin, ymax+margin)
 		self.ax.set_ylim(yrange)
 
-		self.plot_canvas.draw_idle()
+		self.plot_canvas.draw()
 
 	def move_plot(self, dir, factor=None):
 		if dir == "in":
