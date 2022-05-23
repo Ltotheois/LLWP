@@ -105,7 +105,7 @@ def working_d(func):
 		queue_.put(1)
 		if not queue_.empty():
 			main.signalclass.setindicator.emit("<span style='font-weight: 600;'>Working...</span>")
-		
+
 		try:
 			return(func(self, *args, **kwargs))
 		except Exception as E:
@@ -161,13 +161,13 @@ class Main():
 		if self.messages:
 			main.notification("\n".join(self.messages))
 		self.change_style(self.config["layout_theme"])
-		
+
 		self.autosavetimer = QTimer(self.app)
 		self.autosavetimer.timeout.connect(lambda: main.save_lines_lin(llwpfile(".lin"), force_noappend=True, force_lin=True, quiet=True))
 		if main.config["flag_autosave"]:
 			self.autosavetimer.start(main.config["flag_autosave"]*1000)
 		main.config.register("flag_autosave", lambda: self.autosavetimer.start(main.config["flag_autosave"]*1000) if main.config["flag_autosave"] > 0 else self.autosavetimer.stop())
-		
+
 		sys.exit(self.app.exec_())
 
 	def setup_dfs(self):
@@ -530,13 +530,13 @@ class Main():
 				visible_files.add("__lin__")
 
 			if len(visible_files) != len(fd) + (type == "lin"):
-				dataframe.query("filename in @visible_files", inplace=True)
+				dataframe = dataframe.query("filename in @visible_files")
 
 		if binning:
 			bins = main.config["plot_bins"]
 			nobinning = main.config["plot_skipbinning"]
 			binwidth = (xrange[1]-xrange[0]) / bins
-			
+
 			if len(dataframe) > max(bins, nobinning)  and binwidth != 0:
 				dataframe = bin_data(dataframe, binwidth, xrange)
 
@@ -721,6 +721,8 @@ class MainWindow(QMainWindow):
 		self.catalogwindow = CatalogWindow()
 		self.logwindow = LogWindow()
 		self.quotewindow = QuoteWindow()
+		self.hoverwindow = HoverWindow()
+		self.hoverwindow.setVisible(False)
 
 	def createmenu(self):
 		menus = {label: self.menuBar().addMenu(f"&{label}") for label in ("Files", "View", "Fit", "Plot", "Modules", "Info")}
@@ -750,6 +752,9 @@ class MainWindow(QMainWindow):
 		toggleaction_log = self.logwindow.toggleViewAction()
 		toggleaction_log.setShortcut("Shift+5")
 		toggleaction_log.setToolTip("Toggle the visibility of the Log window")
+		toggleaction_hover = self.hoverwindow.toggleViewAction()
+		toggleaction_hover.setShortcut("Shift+6")
+		toggleaction_hover.setToolTip("Toggle the visibility of the Hover window")
 
 		actions_to_menus = {
 			"Files": (
@@ -762,7 +767,7 @@ class MainWindow(QMainWindow):
 				None,
 				QQ(QAction, parent=self, text="&Reread Files", change=main.reread_files, tooltip="Reread all Exp, Cat and Lin files", shortcut="Ctrl+R"),
 				None,
-				QQ(QAction, parent=self, text="&Edit Files", shortcut="Shift+6", tooltip="See current files and their options", change=lambda x: main.open_window(FileWindow)),
+				QQ(QAction, parent=self, text="&Edit Files", shortcut="Shift+7", tooltip="See current files and their options", change=lambda x: main.open_window(FileWindow)),
 				None,
 				QQ(QAction, parent=self, text="&Save current values as default", shortcut="Ctrl+D", tooltip="Save current configuration as default", change=lambda x: main.saveoptions()),
 				None,
@@ -778,9 +783,9 @@ class MainWindow(QMainWindow):
 				toggleaction_configureplots,
 				toggleaction_referenceseries,
 				toggleaction_catalog,
+				toggleaction_hover,
 				toggleaction_log,
 				None,
-				QQ(QAction, "layout_limitannotationtosingleline", parent=self, text="&Annotate is Single Line", tooltip="Switch between the onhover annotation line being one line (for consistent width and height) or multiple lines (if many lines are at the same position and you want to see all of them)", checkable=True),
 				QQ(QAction, "flag_alwaysshowlog", parent=self,  text="&Force Show Log", tooltip="Make log window visible if a new message is shown", checkable=True),
 			),
 			"Fit": (
@@ -974,12 +979,10 @@ class PlotWidget(QGroupBox):
 			toplayout.addWidget(button)
 			main.config.register("flag_showmainplotcontrols", lambda button=button: button.setVisible(main.config["flag_showmainplotcontrols"]))
 
-		self.toplabel = QQ(QLabel, text="", wordwrap=True, maxHeight=(12 if main.config["layout_limitannotationtosingleline"] else 10000))
+		self.toplabel = QQ(QLabel, text="", wordwrap=False)
 		self.indicator = QQ(QLabel, text="Ready", textFormat=Qt.RichText)
 		self.working = queue.Queue()
 		main.signalclass.setindicator.connect(self.indicator.setText)
-
-		main.config.register("layout_limitannotationtosingleline", lambda: self.toplabel.setMaximumHeight(12 if main.config["layout_limitannotationtosingleline"] else 16777215))
 
 		toplayout.addWidget(self.toplabel, 1)
 		toplayout.addWidget(self.indicator)
@@ -1052,7 +1055,7 @@ class PlotWidget(QGroupBox):
 				xpos  = self.cache_positions[lcp]
 				value = value - xpos
 			offset = value
-			
+
 
 		if reference["method"] == "Fortrat":
 			reference["fortrat"]["center"] = offset
@@ -1112,18 +1115,18 @@ class PlotWidget(QGroupBox):
 	def get_widths(self):
 		references = main.config["series_references"]
 		is_fortrat = [reference["method"] == "Fortrat" for reference in references]
-		
+
 		if main.config["plot_coupled"]:
 			widths = np.full(self.axs["ax"].shape, main.config["plot_width"])
 		else:
 			widths = self.axs["width"]
-		
+
 		for i, do_fortrat in zip(range(widths.shape[1]), is_fortrat):
 			if do_fortrat:
 				reference = references[i]
 				jstart, center = reference["fortrat"]["jstart"], reference["fortrat"]["center"]
 				widths[:, i] *= (np.arange(0, len(widths[:, i]))[::-1] + jstart)*2
-		
+
 		return widths
 
 	def get_positions(self, return_qns=False, cat_df=None):
@@ -1182,7 +1185,7 @@ class PlotWidget(QGroupBox):
 		if not column:
 			column = self.get_current_plot()[1]
 		references = main.config["series_references"]
-		
+
 		if column < len(references):
 			return(references[column])
 		else:
@@ -1201,7 +1204,7 @@ class PlotWidget(QGroupBox):
 			ind = nop-i-1
 			upper, lower = qnus+ind*diffs, qnls+ind*diffs
 			qns.append((upper, lower))
-		
+
 		if return_all:
 			return(qns, qnus, qnls, diffs)
 		else:
@@ -1213,7 +1216,7 @@ class PlotWidget(QGroupBox):
 			cat_df = main.get_visible_data("cat", scale=False)
 		if file:
 			cat_df = cat_df.query("filename == @file")
-		
+
 		# Prefiltering cat_df (Similar to seriesfitwindow -> only one big query)
 		noq = main.config["series_qns"]
 
@@ -1231,9 +1234,8 @@ class PlotWidget(QGroupBox):
 			conditions.append(" == ".join(conditions_incr))
 
 		conditions = " and ".join(conditions)
-		cat_df = main.cat_df.query(conditions)
-		
-		
+		cat_df = cat_df.query(conditions)
+
 		for qnus, qnls in qns:
 			cond_upper = [f"(qnu{i+1} == {qn})" for i, qn in enumerate(qnus)]
 			cond_lower = [f"(qnl{i+1} == {qn})" for i, qn in enumerate(qnls)]
@@ -1307,36 +1309,58 @@ class PlotWidget(QGroupBox):
 		x = event.xdata
 		y = event.ydata
 
-		if all([main.config["plot_hover"], x, y, event.inaxes]):
-			text = f"({x=:.2f}, {y=:.2f}) "
+		if not all([x, y, event.inaxes]):
+			text_top = ""
+			text_annotation = ""
+		else:
+			if main.config["flag_showmainplotposition"]:
+				text_top = f"({x=:.2f}, {y=:.2f})"
+			else:
+				text_top = ""
 
 			cutoff = main.config["plot_hover_cutoff"]
-			df = main.get_visible_data("cat", xrange=(x-cutoff, x+cutoff), scale=False)
-			if len(df):
-				df["dist"] = abs(df["x"] - x)
-				df.sort_values("dist", inplace=True)
+			xrange = (x-cutoff, x+cutoff)
+			cat_df = main.get_visible_data("cat", xrange=xrange)
+			lin_df = main.get_visible_data("lin", xrange=xrange)
 
-				transitions = []
-				noq = main.config["series_qns"]
-				maxdist = df.iloc[0]["dist"]
-				for i, row in df.iterrows():
-					if maxdist < row["dist"]:
-						break
-					qnus = [row[f"qnu{i+1}"] for i in range(noq)]
-					qnls = [row[f"qnl{i+1}"] for i in range(noq)]
-					transitions.append(f"{', '.join([str(qn) for qn in qnus if qn != np.iinfo(np.int64).min])} ← {', '.join([str(qn) for qn in qnls if qn != np.iinfo(np.int64).min])}")
+			dataframes = {"cat": cat_df, "lin": lin_df} # @Luis: Logic when to do which
+			transitions = {}
+			noq = main.config["series_qns"]
 
-				text += " || ".join(transitions)
-		else:
-			text = ""
-		self.toplabel.setText(text)
+			for type, df in dataframes.items():
+				if len(df):
+					df["dist"] = abs(df["x"] - x)
+					smallest_distance = df["dist"].min()
+					df = df.query("dist == @smallest_distance")
+
+					tmp = []
+					for i, row in df.iterrows():
+						qnus = [row[f"qnu{i+1}"] for i in range(noq)]
+						qnls = [row[f"qnl{i+1}"] for i in range(noq)]
+						tmp.append(f"{', '.join([str(qn) for qn in qnus if qn != np.iinfo(np.int64).min])} ← {', '.join([str(qn) for qn in qnls if qn != np.iinfo(np.int64).min])}")
+
+					transitions[type] = tmp
+
+			text_annotation = []
+			if "cat" in transitions:
+				text_annotation.append("Cat:\n" + "\n".join(transitions["cat"]))
+			if "lin" in transitions:
+				text_annotation.append("Lin:\n" + "\n".join(transitions["lin"]))
+
+			if text_annotation:
+				text_annotation = "\n\n".join(text_annotation)
+			else:
+				text_annotation = ""
+
+		main.signalclass.writehover.emit(text_annotation)
+		self.toplabel.setText(text_top)
 
 	def on_click(self, event):
 		ax = event.inaxes
 		index = np.asarray(np.where(self.axs["ax"] == ax)).T
 		if len(index):
 			self.lcp = tuple(index[0])
-	
+
 	@synchronized_d(locks["axs"])
 	def on_range(self, xmin, xmax, index):
 		axrange = self.axs["ax"][index].get_xlim()
@@ -1664,11 +1688,11 @@ class PlotWidget(QGroupBox):
 		try:
 			if not main.config["flag_automatic_draw"]:
 				return
-			
+
 			timers = []
 			timers.append(time.perf_counter())
 			breakpoint(ownid, self.set_data_id)
-			
+
 			# set x-ranges
 			cat_df = main.get_visible_data("cat", scale=False)
 			xpos, qns = self.get_positions(return_qns=True, cat_df=cat_df)
@@ -1679,15 +1703,15 @@ class PlotWidget(QGroupBox):
 			offsets = self.get_offset(all=True)
 			xmax = xpos + offsets + widths/2
 			xmin = xpos + offsets - widths/2
-			
+
 			breakpoint(ownid, self.set_data_id)
-			
+
 			# set ticks for bottom row
 			i = -1
 			for j in range(self.axs["ax"].shape[1]):
 				ax = self.axs["ax"][i, j]
 				ticks = np.linspace(xmin[i, j], xmax[i, j], main.config["plot_ticks"])
-				
+
 				reference = self.get_series_reference(j)
 				if reference["method"] == "Fortrat":
 					ticklabels = symmetric_ticklabels(ticks/2/reference["fortrat"]["jstart"])
@@ -1710,18 +1734,18 @@ class PlotWidget(QGroupBox):
 			bins = main.config["plot_bins"]
 			nobinning = main.config["plot_skipbinning"]
 			scaling = main.config["plot_yscale"]
-			
+
 			timers.append(time.perf_counter())
 
 			datatypes = ("exp", "cat", "lin")
 			dataframes = [main.get_visible_data("exp", scale=False), cat_df, main.get_visible_data("lin", scale=False)]
 			files_dicts = [main.config[f"files_{type}"] for type in datatypes]
-			
+
 			minindices = {type: dataframe["x"].searchsorted(xmin, side="left") for type, dataframe in zip(datatypes, dataframes)}
 			maxindices = {type: dataframe["x"].searchsorted(xmax, side="right") for type, dataframe in zip(datatypes, dataframes)}
 
 			scalingfactordicts = {type: {file: main.config[f"files_{type}"][file].get("scale", 1) for file in main.config[f"files_{type}"].keys()} for type in ("exp", "cat")}
-			
+
 			timers.append(time.perf_counter())
 
 
@@ -1758,16 +1782,16 @@ class PlotWidget(QGroupBox):
 								# @Luis: optimize this
 								filenames = dataframe["filename"].to_numpy()
 								unique_filenames = np.unique(filenames)
-								
+
 								segs = []
 								colors = []
 								for unique_filename in unique_filenames:
 									mask = (filenames == unique_filename)
 									tmp_xs, tmp_ys = xs[mask], ys[mask]
-									
+
 									segs.append(np.array(((tmp_xs[:-1], tmp_xs[1:]), (tmp_ys[:-1], tmp_ys[1:]))).T)
 									colors.extend([files[unique_filename]["color"]]*sum(mask))
-								
+
 								if segs:
 									segs = np.concatenate(segs)
 							coll = matplotlib.collections.LineCollection(segs, colors=colors)
@@ -1794,7 +1818,7 @@ class PlotWidget(QGroupBox):
 							tuples = list(zip(xs,ys))
 							tuples = tuples if len(tuples)!=0 else [[None,None]]
 							colors = create_colors(dataframe, files, lin=True)
-							
+
 							self.axs["lin_plot"][i, j].set_offsets(tuples)
 							self.axs["lin_plot"][i, j].set_color(colors)
 
@@ -1862,7 +1886,7 @@ class PlotWidget(QGroupBox):
 		except ValueError:
 			main.notification("<span style='color:#eda711;'>WARNING</span>: The entered value could not be interpreted as a number.")
 			return
-		
+
 		self.set_offset(xnew)
 
 	def width_dialog(self):
@@ -2116,6 +2140,24 @@ class LogWindow(EQDockWidget):
 		sb = self.log_area.verticalScrollBar()
 		sb.setValue(sb.maximum())
 
+class HoverWindow(EQDockWidget):
+	def __init__(self, parent=None):
+		super().__init__(parent)
+		self.setWindowTitle("Hover")
+
+		mainwidget = QGroupBox()
+		layout = QVBoxLayout()
+		self.setWidget(mainwidget)
+		mainwidget.setLayout(layout)
+
+		self.log_area = QTextEdit()
+		self.log_area.setReadOnly(True)
+		self.log_area.setMinimumHeight(50)
+
+		main.signalclass.writehover.connect(lambda text: self.log_area.setText(text))
+		layout.addWidget(self.log_area)
+
+
 class QuoteWindow(EQDockWidget):
 	def __init__(self, parent=None):
 		super().__init__(parent)
@@ -2185,12 +2227,12 @@ class FileWindow(EQWidget):
 	def __init__(self, id, parent=None):
 		super().__init__(id, parent)
 		self.setWindowTitle("Files Window")
-		
+
 		self.tabs = QTabWidget()
 		tmplayout = QVBoxLayout()
 		tmplayout.addWidget(self.tabs)
 		self.setLayout(tmplayout)
-		
+
 		keys = ("exp", "cat", "lin")
 		self.widgets = {key: {} for key in keys}
 		self.layouts = {key: self.create_layout(key, initial=True) for key in keys}
@@ -2206,11 +2248,11 @@ class FileWindow(EQWidget):
 			types = ("exp", "cat", "lin")
 		else:
 			types = (type, )
-			
-		
+
+
 		for type in types:
 			filesgrid = self.widgets[f"{type}_filesgrid"]
-			
+
 			scrollarea = self.widgets.get(f"{type}_scrollarea")
 			if scrollarea:
 				tmp = (scrollarea.verticalScrollBar().value(), scrollarea.horizontalScrollBar().value())
@@ -2222,65 +2264,65 @@ class FileWindow(EQWidget):
 				if not (key.startswith("__") and key.endswith("__")):
 					for widget in value.values():
 						widget.deleteLater()
-			
+
 			self.widgets[type] = {key: value for key, value in self.widgets[type].items() if (key.startswith("__") and key.endswith("__"))}
-			
+
 			if type == "exp":
 				actions = ("label", "colorinput", "colorpicker", "scale", "hide", "delete", "reread")
 			elif type == "cat":
 				actions = ("label", "colorinput", "colorpicker", "scale", "hide", "delete", "reread")
 			elif type == "lin":
 				actions = ("label", "colorinput", "colorpicker", "hide", "delete", "reread")
-		
+
 			row_id = 0
 			files = main.config[f"files_{type}"]
-		
+
 			for file in files:
 				self.add_row(filesgrid, type, file, actions, row_id)
 				row_id += 1
-			
+
 			filesgrid.setRowStretch(row_id, 1)
-			
+
 			scrollarea.verticalScrollBar().setValue(tmp[0])
 			scrollarea.horizontalScrollBar().setValue(tmp[1])
-			
+
 
 	def create_layout(self, type, initial=False):
 		if initial:
 			layout = QVBoxLayout()
-			
+
 			buttonsbox = QHBoxLayout()
 			scrollarea = QScrollArea()
 			widget = QWidget()
-			
+
 			layout.addLayout(buttonsbox)
-			
+
 			buttonsbox.addWidget(QQ(QToolButton, text="Load", change=lambda x, type=type: main.load_file(type, add_files=True, keep_old=False)))
 			buttonsbox.addWidget(QQ(QToolButton, text="Add", change=lambda x, type=type: main.load_file(type, add_files=True, keep_old=True)))
 			buttonsbox.addWidget(QQ(QToolButton, text="Reread All", change=lambda x, type=type: main.load_file(type, reread=True, do_QNs=False)))
 			buttonsbox.addWidget(QQ(QToolButton, text="Reset All", change=lambda x, type=type: self.reset_all(type)))
 			buttonsbox.addWidget(QQ(QToolButton, text="Delete All", change=lambda x, type=type: self.delete_file(type)))
 			buttonsbox.addStretch(1)
-			
+
 			filesgrid = QGridLayout()
-			
+
 			scrollarea.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 			scrollarea.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 			scrollarea.setWidgetResizable(True)
 			scrollarea.setWidget(widget)
 			widget.setLayout(filesgrid)
-			
+
 			self.widgets[f"{type}_filesgrid"] = filesgrid
 			self.widgets[f"{type}_scrollarea"] = scrollarea
-			
-			
+
+
 			if type == "exp":
 				color = main.config.get('color_exp')
 				file = "__exp__"
-				
+
 				topbox = QHBoxLayout()
 				layout.addLayout(topbox)
-				
+
 				rowdict = {
 					"label":			QQ(QLabel, text="Initial Color"),
 					"colorinput":		QQ(QLineEdit, text=color, maxWidth=200, change=lambda x, file=file, type=type: self.change_color(type, file, inp=True)),
@@ -2289,15 +2331,15 @@ class FileWindow(EQWidget):
 				for label, widget in rowdict.items():
 					topbox.addWidget(widget)
 				self.widgets[type][file] = rowdict
-			
+
 			elif type == "cat":
 				labels = ("Default color", "Current transition")
 				colors = (main.config.get('color_cat'), main.config.get('color_cur'))
 				files = ("__cat__", "__cur__")
-				
+
 				topbox = QHBoxLayout()
 				layout.addLayout(topbox)
-				
+
 				for label, color, file in zip(labels, colors, files):
 					rowdict = {
 						"label":			QQ(QLabel, text=label),
@@ -2307,15 +2349,15 @@ class FileWindow(EQWidget):
 					for label, widget in rowdict.items():
 						topbox.addWidget(widget)
 					self.widgets[type][file] = rowdict
-		
+
 			elif type == "lin":
 				color = main.config.get('color_lin')
 				file = "__lin__"
 				hidden = main.config["flag_hidecatalog"]
-				
+
 				topbox = QHBoxLayout()
 				layout.addLayout(topbox)
-				
+
 				rowdict = {
 					"label":			QQ(QLabel, text="Assigned Markers"),
 					"colorinput":		QQ(QLineEdit, text=color, maxWidth=200, change=lambda x, file=file, type=type: self.change_color(type, file, inp=True)),
@@ -2325,11 +2367,11 @@ class FileWindow(EQWidget):
 				for label, widget in rowdict.items():
 					topbox.addWidget(widget)
 				self.widgets[type][file] = rowdict
-				
+
 			layout.addWidget(scrollarea, 10)
-		
+
 		self.update(type)
-		
+
 		return(layout)
 
 	def add_row(self, layout, type, file, actions, row_id):
@@ -2351,28 +2393,28 @@ class FileWindow(EQWidget):
 		for col_id, action in enumerate(actions):
 			layout.addWidget(rowdict[action], row_id, col_id)
 			layout.setRowStretch(row_id, 0)
-		
+
 		self.widgets[type][file] = rowdict
 
 	def scale_file(self, type, file, scale):
 		main.config[f"files_{type}"][file]["scale"] = scale
 		main.plotwidget.set_data()
-	
+
 	def reset_all(self, type):
 		files = main.config[f"files_{type}"]
-		
+
 		for file in files:
 			if "scale" in files[file]:
 				files[file]["scale"] = 1
-			
+
 			if "hidden" in files[file]:
 				files[file]["hidden"] = False
-			
+
 			if "color" in files[file]:
 				files[file]["color"] = main.config[f"color_{type}"]
-		
+
 		main.signalclass.fileschanged.emit()
-	
+
 	@working_d
 	def delete_file(self, type, file=None):
 		df = main.return_df(type)
@@ -2385,9 +2427,9 @@ class FileWindow(EQWidget):
 				if file in main.config[f"files_{type}"]:
 					del main.config[f"files_{type}"][file]
 				df.drop(df[df["filename"]==file].index, inplace=True)
-		
+
 		main.load_file(type, keep_old=True, do_QNs=False)
-	
+
 	@synchronized_d(locks["axs"])
 	def hide_file(self, type, file):
 		if file == "__lin__":
@@ -2395,7 +2437,7 @@ class FileWindow(EQWidget):
 		else:
 			hidden = main.config[f"files_{type}"][file].get("hidden", False)
 		hidden = not hidden
-		
+
 		if file == "__lin__":
 			main.config["flag_hidecatalog"] = hidden
 		else:
@@ -2409,7 +2451,7 @@ class FileWindow(EQWidget):
 			self.widgets[type][file]["hide"].setText("Hide")
 
 		main.signalclass.updateplot.emit()
-	
+
 	@synchronized_d(locks["axs"])
 	def change_color(self, type, file, inp=False):
 		color_input = self.widgets[type][file]["colorinput"].text()
@@ -3291,7 +3333,7 @@ class PeakfinderWindow(EQWidget):
 		self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
 		self.table.setHidden(True)
 		self.table.doubleClicked.connect(self.go_to)
-		
+
 		layout.addWidget(self.table)
 
 		main.signalclass.peakfinderstart.connect(lambda: self.run_button.setEnabled(False))
@@ -3351,14 +3393,14 @@ class PeakfinderWindow(EQWidget):
 		if main.config["peakfinderwindow_onlyunassigned"]:
 			assigned_xs = main.get_visible_data("lin")["x"]
 			uncertainty = main.config["peakfinderwindow_width"]
-			
+
 			peaks_xs = self.peaks[:, 0]
 			peaks_assigned = np.zeros(self.peaks.shape[0])
-			
+
 			for x in assigned_xs:
 				peaks_assigned += (abs(peaks_xs - x) < uncertainty)
 			self.peaks = self.peaks[peaks_assigned == 0]
-		
+
 		self.peaks = self.peaks[self.peaks[:, 1].argsort()[::-1]]
 		main.signalclass.peakfinderend.emit()
 
@@ -3374,7 +3416,7 @@ class PeakfinderWindow(EQWidget):
 			self.table.setItem(currRowCount, 1, QTableWidgetItem(f'{y:.4f}'))
 		self.table.resizeColumnsToContents()
 		self.table.setHidden(False)
-		
+
 		self.run_button.setEnabled(True)
 
 		if len(self.peaks) > main.config["peakfinderwindow_maxentries"]:
@@ -3497,7 +3539,7 @@ class SeriesFitWindow(EQWidget):
 		conditions = " and ".join(conditions)
 
 		df = main.ser_df.query(conditions).copy()
-		df.sort_values("x", inplace = True)
+		df.sort_values("x", inplace=True)
 
 		if not len(df):
 			self.writelog("No lines matching the transition.")
@@ -4204,7 +4246,7 @@ class FigureWindow(EQWidget):
 			datatypes = ("exp", "cat", "lin")
 			dataframes = [main.get_visible_data("exp", scale=False), cat_df, main.get_visible_data("lin", scale=False)]
 			files_dicts = [main.config[f"files_{type}"] for type in datatypes]
-			
+
 			minindices = {type: dataframe["x"].searchsorted(xmin, side="left") for type, dataframe in zip(datatypes, dataframes)}
 			maxindices = {type: dataframe["x"].searchsorted(xmax, side="right") for type, dataframe in zip(datatypes, dataframes)}
 
@@ -4256,16 +4298,16 @@ class FigureWindow(EQWidget):
 									yrange_exp = [ys.min(), ys.max()]
 								else:
 									yrange_exp = [-1, 1]
-							
+
 							filenames = dataframe["filename"].to_numpy()
 							unique_filenames = np.unique(filenames)
-							
+
 							for unique_filename in unique_filenames:
 								mask = (filenames == unique_filename)
 								tmp_xs, tmp_ys = xs[mask], ys[mask]
-								
+
 								ax.plot(tmp_xs, tmp_ys, **{"color": files[unique_filename]["color"], **main.config["figurewindow_expkwargs"]})
-							
+
 						elif datatype == "cat":
 							if scaling == "Per Plot":
 								if len(dataframe):
@@ -4275,7 +4317,7 @@ class FigureWindow(EQWidget):
 								ys = ys*yrange_exp[1]/yrange_cat[1]
 							elif scaling in ["Global", "Custom"]:
 								ys = ys*main.config["plot_expcat_factor"]*10**main.config["plot_expcat_exponent"]
-							
+
 							segs = np.array(((xs, xs), (ys*0, ys))).T
 							colors = create_colors(dataframe, files, xpos[i, j])
 							coll = matplotlib.collections.LineCollection(segs, **{"colors": colors, **main.config["figurewindow_catkwargs"]})
@@ -4737,18 +4779,18 @@ class ReferenceSelector(QTabWidget):
 		layout.addLayout(hbox)
 
 		plotwidgets["Expression"].setLayout(layout)
-		
+
 		# Tab 4: Fortrat
 		layout = QVBoxLayout()
-		
+
 		layout.addWidget(QQ(QLabel, text="J of lowest Plot: "))
 		self.jstart = QQ(QSpinBox, value=self.state["fortrat"]["jstart"], range=(1, None), change=lambda: self.state["fortrat"].__setitem__("jstart", self.jstart.value()))
 		layout.addWidget(self.jstart)
 		layout.addStretch(1)
 		layout.addWidget(QQ(QPushButton, text="Apply", change=lambda x: main.plotwidget.reset_offsets()))
-		
+
 		plotwidgets["Fortrat"].setLayout(layout)
-		
+
 	def get_values(self):
 		return(self.state)
 
@@ -5008,10 +5050,10 @@ class ProtPlot(QWidget):
 
 		self.exp_xs = xs = exp_df["x"].to_numpy()
 		self.exp_ys = ys = exp_df["y"].to_numpy()
-		
+
 		if self.exp_line:
 			self.exp_line.remove()
-		
+
 		files = main.config[f"files_exp"]
 		if main.config["plot_expasstickspectrum"]:
 			segs = np.array(((xs, xs), (ys*0, ys))).T
@@ -5020,19 +5062,19 @@ class ProtPlot(QWidget):
 			# @Luis: optimize this
 			filenames = exp_df["filename"].to_numpy()
 			unique_filenames = np.unique(filenames)
-			
+
 			segs = []
 			colors = []
 			for unique_filename in unique_filenames:
 				mask = (filenames == unique_filename)
 				tmp_xs, tmp_ys = xs[mask], ys[mask]
-				
+
 				segs.append(np.array(((tmp_xs[:-1], tmp_xs[1:]), (tmp_ys[:-1], tmp_ys[1:]))).T)
 				colors.extend([files[unique_filename]["color"]]*sum(mask))
-			
+
 			if segs:
 				segs = np.concatenate(segs)
-		
+
 		coll = matplotlib.collections.LineCollection(segs, colors=colors)
 		self.exp_line = self.ax.add_collection(coll)
 		self.ax.set_xlim([self.center-self.width/2, self.center+self.width/2])
@@ -5106,7 +5148,7 @@ class ProtPlot(QWidget):
 				"error":	xuncert,
 				"xpre":		xpre
 			}
-			
+
 			reference = reference = main.plotwidget.get_series_reference(index[1])
 			if reference["method"] == "Transition":
 				qns = main.plotwidget.get_qns(reference["transition"])[index[0]]
@@ -5217,7 +5259,7 @@ class Config(dict):
 		self.signal = signal
 		self.signal.connect(self.callback)
 		self.callbacks = pd.DataFrame(columns=["id", "key", "widget", "function"], dtype="object").astype({"id": np.uint})
-		
+
 
 	def __setitem__(self, key, value, widget=None):
 		super().__setitem__(key, value)
@@ -5289,6 +5331,7 @@ class SignalClass(QObject):
 	fitindicator    = pyqtSignal(str)
 	setindicator    = pyqtSignal(str)
 	writelog        = pyqtSignal(str)
+	writehover      = pyqtSignal(str)
 	notification    = pyqtSignal(str)
 	updateconfig    = pyqtSignal(tuple)
 	def __init__(self):
@@ -5648,7 +5691,7 @@ def create_colors(dataframe, files={}, xpos=None, lin=False):
 
 	if xpos:
 		colors[dataframe["x"] == xpos] = main.config["color_cur"]
-		
+
 	return(colors)
 
 def column_to_numeric(val, force_int=False):
@@ -5683,7 +5726,7 @@ def symmetric_ticklabels(ticks):
 def except_hook(cls, exception, traceback):
 	if issubclass(cls, KeyboardInterrupt):
 		sys.exit(0)
-	
+
 	sys.__excepthook__(cls, exception, traceback)
 	with open(llwpfile(".err"), "a+", encoding="utf-8") as file:
 		time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
@@ -5828,7 +5871,6 @@ config_specs = {
 	# Format is: [default value, class]
 	"layout_theme":							["light", str],
 	"layout_owntheme":						[{}, dict],
-	"layout_limitannotationtosingleline":	[True, bool],
 	"layout_mpltoolbar":					[False, bool],
 
 	"color_exp":							["#000000", Color],
@@ -5901,6 +5943,7 @@ config_specs = {
 	"flag_showmainplotcontrols":			[True, bool],
 	"flag_showmainplotwidth":				[True, bool],
 	"flag_showmainplotrowscols":			[True, bool],
+	"flag_showmainplotposition":			[True, bool],
 	"flag_referencenumberlocked":			[True, bool],
 	"flag_logmaxrows":						[10000, int],
 	"flag_tableformatint":					[".0f", str],
