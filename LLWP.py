@@ -1689,14 +1689,11 @@ class PlotWidget(QGroupBox):
 			if not main.config["flag_automatic_draw"]:
 				return
 
-			timers = []
-			timers.append(time.perf_counter())
 			breakpoint(ownid, self.set_data_id)
 
 			# set x-ranges
 			cat_df = main.get_visible_data("cat", scale=False)
 			xpos, qns = self.get_positions(return_qns=True, cat_df=cat_df)
-			timers.append(time.perf_counter())
 			widths = self.get_widths()
 			widths += (widths == 0)*10
 
@@ -1735,8 +1732,6 @@ class PlotWidget(QGroupBox):
 			nobinning = main.config["plot_skipbinning"]
 			scaling = main.config["plot_yscale"]
 
-			timers.append(time.perf_counter())
-
 			datatypes = ("exp", "cat", "lin")
 			dataframes = [main.get_visible_data("exp", scale=False), cat_df, main.get_visible_data("lin", scale=False)]
 			files_dicts = [main.config[f"files_{type}"] for type in datatypes]
@@ -1745,9 +1740,6 @@ class PlotWidget(QGroupBox):
 			maxindices = {type: dataframe["x"].searchsorted(xmax, side="right") for type, dataframe in zip(datatypes, dataframes)}
 
 			scalingfactordicts = {type: {file: main.config[f"files_{type}"][file].get("scale", 1) for file in main.config[f"files_{type}"].keys()} for type in ("exp", "cat")}
-
-			timers.append(time.perf_counter())
-
 
 			for i in range(self.axs["ax"].shape[0]):
 				for j in range(self.axs["ax"].shape[1]):
@@ -1836,19 +1828,13 @@ class PlotWidget(QGroupBox):
 						yrange = [-1,+1]
 					ax.set_ylim(yrange)
 
-			timers.append(time.perf_counter())
 
 			breakpoint(ownid, self.set_data_id)
 			self.plot_annotations(xpos, qns)
 
-			timers.append(time.perf_counter())
 			breakpoint(ownid, self.set_data_id)
 			self.plotcanvas.draw()
-			timers.append(time.perf_counter())
 
-			for i in range(len(timers)-1):
-				print(f"Step {i:2.0f} took {timers[i+1]-timers[i]:e} seconds")
-			print("\n\n")
 		except CustomError as E:
 			pass
 
@@ -5340,7 +5326,11 @@ class SignalClass(QObject):
 class QSpinBox(QSpinBox):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
-		self.setStepType(QAbstractSpinBox.AdaptiveDecimalStepType)
+		# AdaptiveDecimalStepType is not implemented in earlier versions of PyQt5
+		try:
+			self.setStepType(QAbstractSpinBox.AdaptiveDecimalStepType)
+		except:
+			pass
 
 	def setSingleStep(self, value):
 		self.setStepType(QAbstractSpinBox.DefaultStepType)
@@ -5360,7 +5350,11 @@ class QDoubleSpinBox(QDoubleSpinBox):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.setDecimals(20)
-		self.setStepType(QAbstractSpinBox.AdaptiveDecimalStepType)
+		# AdaptiveDecimalStepType is not implemented in earlier versions of PyQt5
+		try:
+			self.setStepType(QAbstractSpinBox.AdaptiveDecimalStepType)
+		except:
+			pass
 
 	def setSingleStep(self, value):
 		self.setStepType(QAbstractSpinBox.DefaultStepType)
