@@ -779,7 +779,7 @@ class MainWindow(QMainWindow):
 			"View": (
 				QQ(QAction, parent=self, text="&Change Style", tooltip="Change between light, dark and custom theme", change=lambda x: main.change_style()),
 				None,
-				QQ(QAction, "layout_mpltoolbar", parent=self, text="&Show MPL Toolbar", shortcut="Shift+1", tooltip="Show or hide toolbar to edit or save the plot canvas", checkable=True),
+				QQ(QAction, "layout_mpltoolbar", parent=self, text="&MPL Toolbar", shortcut="Shift+1", tooltip="Show or hide toolbar to edit or save the plot canvas", checkable=True),
 				toggleaction_configureplots,
 				toggleaction_referenceseries,
 				toggleaction_catalog,
@@ -810,12 +810,12 @@ class MainWindow(QMainWindow):
 				QQ(QAction, parent=self, text="&Config", shortcut="Ctrl+1", tooltip="Press to open the config module", change=lambda x: main.open_window(ConfigWindow)),
 				None,
 				QQ(QAction, parent=self, text="&Blended Lines", shortcut="Ctrl+2", tooltip="Press to open the blended lines module, which allows to fit and assign resolvable blends", change=lambda x: main.open_window(BlendedLinesWindow)),
-				QQ(QAction, parent=self, text="&Show Seriesfinder", shortcut="Ctrl+3", tooltip="Press to open the seriesfinder module, which allows to explore the .cat lines, e.g. finding the most intense transitions", change=lambda x: main.open_window(SeriesfinderWindow)),
+				QQ(QAction, parent=self, text="&Seriesfinder", shortcut="Ctrl+3", tooltip="Press to open the seriesfinder module, which allows to explore the .cat lines, e.g. finding the most intense transitions", change=lambda x: main.open_window(SeriesfinderWindow)),
 				QQ(QAction, parent=self, text="&Peakfinder", shortcut="Ctrl+4", tooltip="Press to open the peakfinder module, which allows to find the peaks of your experimental spectrum and check, which peaks are not assigned yet", change=lambda x: main.open_window(PeakfinderWindow)),
 				QQ(QAction, parent=self, text="&Residuals", shortcut="Ctrl+5", tooltip="Press to open the Residuals module", change=lambda x: main.open_window(ResidualsWindow)),
 				QQ(QAction, parent=self, text="&Energy Levels", shortcut="Ctrl+6", tooltip="Press to open the Energy Levels module", change=lambda x: main.open_window(EnergyLevelsWindow)),
 				QQ(QAction, parent=self, text="&Spectra Resolver", shortcut="Ctrl+7", tooltip="Press to open the Spectra Resolver module", change=lambda x: main.open_window(SpectraResolverWindow)),
-				QQ(QAction, parent=self, text="&Show Lineshape", shortcut="Ctrl+8", tooltip="Press to open the lineshape module, which allows to simulate different line profiles from the .cat stick spectrum", change=lambda x: main.open_window(LineshapeWindow)),
+				QQ(QAction, parent=self, text="&Lineshape", shortcut="Ctrl+8", tooltip="Press to open the lineshape module, which allows to simulate different line profiles from the .cat stick spectrum", change=lambda x: main.open_window(LineshapeWindow)),
 				QQ(QAction, parent=self, text="&Series Fit", shortcut="Ctrl+9", tooltip="Open Series Fit Window, which allows to try out different combinations of transitions as a series", change=lambda x: main.open_window(SeriesFitWindow)),
 				QQ(QAction, parent=self, text="&Create Report", tooltip="Open Report Window, which allows to summarise your analysis", change=lambda x: main.open_window(ReportWindow)),
 				QQ(QAction, parent=self, text="&Create Figure", tooltip="Open Figure Window, which allows to create publication quality figures", change=lambda x: main.open_window(FigureWindow)),
@@ -960,6 +960,7 @@ class PlotWidget(QGroupBox):
 		self.plotcanvas.setMinimumWidth(200)
 		self.fig.canvas.mpl_connect("motion_notify_event", self.on_hover)
 		self.cache_positions = None
+		main.signalclass.drawplot.connect(lambda: self.plotcanvas.draw())
 
 		self.mpltoolbar = NavigationToolbar2QT(self.plotcanvas, self)
 		self.mpltoolbar.setVisible(main.config["layout_mpltoolbar"])
@@ -1021,6 +1022,129 @@ class PlotWidget(QGroupBox):
 
 		main.signalclass.updateplot.connect(lambda: self.set_data())
 		main.config.register(("series_annotate_xs", "plot_annotate", "plot_bins", "flag_automatic_draw"), lambda: self.set_data())
+
+	def benchmark(self):
+		cat_df = main.get_visible_data("cat", scale=False)
+		xpos, qns = self.get_positions(return_qns=True, cat_df=cat_df)
+		widths = self.get_widths()
+		widths += (widths == 0)*10
+
+		offsets = self.get_offset(all=True)
+		xmax = xpos + offsets + widths/2
+		xmin = xpos + offsets - widths/2
+
+		# set data and set y-ranges of data
+		bins = main.config["plot_bins"]
+		nobinning = main.config["plot_skipbinning"]
+		scaling = main.config["plot_yscale"]
+
+		datatypes = ("exp", "cat", "lin")
+		dataframes = [main.get_visible_data("exp", scale=False), cat_df, main.get_visible_data("lin", scale=False)]
+		files_dicts = [main.config[f"files_{type}"] for type in datatypes]
+
+		minindices = {type: dataframe["x"].searchsorted(xmin, side="left") for type, dataframe in zip(datatypes, dataframes)}
+		maxindices = {type: dataframe["x"].searchsorted(xmax, side="right") for type, dataframe in zip(datatypes, dataframes)}
+
+		scalingfactordicts = {type: {file: main.config[f"files_{type}"][file].get("scale", 1) for file in main.config[f"files_{type}"].keys()} for type in ("exp", "cat")}
+
+		st = time.perf_counter()
+		for i in range(self.axs["ax"].shape[0]):
+			for j in range(self.axs["ax"].shape[1]):
+				self.tmp_function(i, j, xmin, xmax, datatypes, dataframes, files_dicts, minindices, maxindices, bins, nobinning, scaling, scalingfactordicts, xpos)
+		et = time.perf_counter()
+		print(f"Regular takes {et-st}")
+
+		st = time.perf_counter()
+		threads = [threading.Thread(target=self.tmp_function, args=(i, j, xmin, xmax, datatypes, dataframes, files_dicts, minindices, maxindices, bins, nobinning, scaling, scalingfactordicts, xpos)) for i in range(self.axs["ax"].shape[0]) for j in range(self.axs["ax"].shape[1])]
+		[thread.start() for thread in threads]
+		[thread.join() for thread in threads]
+		et = time.perf_counter()
+		print(f"Threading takes {et-st}")
+
+
+		import concurrent.futures as cf
+		st = time.perf_counter()
+		with cf.ThreadPoolExecutor(max_workers=100) as ex:
+			futures = [ex.submit(self.tmp_function, i, j, xmin, xmax, datatypes, dataframes, files_dicts, minindices, maxindices, bins, nobinning, scaling, scalingfactordicts, xpos) for i in range(self.axs["ax"].shape[0]) for j in range(self.axs["ax"].shape[1])]
+			cf.wait(futures)
+		et = time.perf_counter()
+		print(f"Pool takes {et-st}")
+
+
+
+	def tmp_function(self, i, j, xmin, xmax, datatypes, dataframes, files_dicts, minindices, maxindices, bins, nobinning, scaling, scalingfactordicts, xpos):
+		ax = self.axs["ax"][i, j]
+		ax.set_xlim(xmin[i,j], xmax[i,j])
+
+		for datatype, dataframe, files in zip(datatypes, dataframes, files_dicts):
+			minindex, maxindex = minindices[datatype][i][j], maxindices[datatype][i][j]
+			dataframe = dataframe.iloc[minindex:maxindex].copy()
+
+			binwidth = (xmax[i, j]-xmin[i, j]) / bins
+			if len(dataframe) > max(bins, nobinning)  and binwidth != 0:
+				dataframe = bin_data(dataframe, binwidth, (xmin[i, j], xmax[i, j]))
+
+			xs = dataframe["x"].to_numpy()
+			if datatype == "lin":
+				ys = 0*xs
+			else:
+				ys = dataframe["y"]*dataframe["filename"].replace(scalingfactordicts[datatype]).to_numpy()
+
+
+			if datatype == "exp":
+				if scaling == "Per Plot":
+					if len(dataframe):
+						yrange_exp = [ys.min(), ys.max()]
+					else:
+						yrange_exp = [-1, 1]
+				if main.config["plot_expasstickspectrum"]:
+					segs = np.array(((xs, xs), (ys*0, ys))).T
+					colors = create_colors(dataframe, files)
+				else:
+					# @Luis: optimize this
+					filenames = dataframe["filename"].to_numpy()
+					unique_filenames = np.unique(filenames)
+
+					segs = []
+					colors = []
+					for unique_filename in unique_filenames:
+						mask = (filenames == unique_filename)
+						tmp_xs, tmp_ys = xs[mask], ys[mask]
+
+						segs.append(np.array(((tmp_xs[:-1], tmp_xs[1:]), (tmp_ys[:-1], tmp_ys[1:]))).T)
+						colors.extend([files[unique_filename]["color"]]*sum(mask))
+
+					if segs:
+						segs = np.concatenate(segs)
+				coll = matplotlib.collections.LineCollection(segs, colors=colors)
+				if self.axs["exp_plot"][i, j]:
+					self.axs["exp_plot"][i, j].remove()
+				self.axs["exp_plot"][i, j] = ax.add_collection(coll)
+			elif datatype == "cat":
+				if scaling == "Per Plot":
+					if len(dataframe):
+						yrange_cat = [ys.min(), ys.max()]
+					else:
+						yrange_cat = [-1, 1]
+					ys = ys*yrange_exp[1]/yrange_cat[1]
+				elif scaling in ["Global", "Custom"]:
+					ys = ys*main.config["plot_expcat_factor"]*10**main.config["plot_expcat_exponent"]
+				segs = np.array(((xs, xs), (ys*0, ys))).T
+				# segs = (((xs[i], 0),(xs[i], ys[i])) for i in range(len(xs)))
+				colors = create_colors(dataframe, files, xpos[i, j])
+				coll = matplotlib.collections.LineCollection(segs, colors=colors)
+				if self.axs["cat_plot"][i, j]:
+					self.axs["cat_plot"][i, j].remove()
+				self.axs["cat_plot"][i, j] = ax.add_collection(coll)
+			elif datatype == "lin":
+				tuples = list(zip(xs,ys))
+				tuples = tuples if len(tuples)!=0 else [[None,None]]
+				colors = create_colors(dataframe, files, lin=True)
+
+				self.axs["lin_plot"][i, j].set_offsets(tuples)
+				self.axs["lin_plot"][i, j].set_color(colors)
+
+
 
 	def gui(self):
 		self.create_plots().join()
@@ -1585,7 +1709,6 @@ class PlotWidget(QGroupBox):
 			reference = self.get_series_reference(index[1])
 			if annotation and reference["method"] == "Transition":
 				annotation.set_color(main.config["color_lin"])
-				ax.draw_artist(annotation)
 
 			lin_plot = self.axs["lin_plot"][index]
 			if lin_plot:
@@ -1593,10 +1716,8 @@ class PlotWidget(QGroupBox):
 				offsets = np.concatenate([offsets, np.array((lin_dict["x"], 0) ,ndmin=2)])
 				lin_plot.set_offsets(offsets)
 
-				ax.draw_artist(lin_plot)
 			with locks["axs"]:
-				self.plotcanvas.update()
-				self.plotcanvas.flush_events()
+				main.signalclass.drawplot.emit()
 
 	def get_current_plot(self):
 		lcp = self.lcp
@@ -1670,7 +1791,7 @@ class PlotWidget(QGroupBox):
 	def manual_draw(self):
 		self.set_data().join()
 		with locks["axs"]:
-			self.plotcanvas.draw()
+			main.signalclass.drawplot.emit()
 
 	def set_data(self):
 		thread = threading.Thread(target=self.set_data_core)
@@ -1751,6 +1872,11 @@ class PlotWidget(QGroupBox):
 						minindex, maxindex = minindices[datatype][i][j], maxindices[datatype][i][j]
 						dataframe = dataframe.iloc[minindex:maxindex].copy()
 
+						# Tested to thread this part as the bin_data function uses pandas functions that release the Global Interpreter Lock (GIL)
+						# However, threading would only help in engineered cases where the data in each plot is huge (meaning high binning parameter but
+						# even higher number of points)
+						# It was decided, that the added complexity was not worth the benefit for these extreme cases. Additionally, the overhead of threads
+						# would reduce performance for the majority of use cases
 						binwidth = (xmax[i, j]-xmin[i, j]) / bins
 						if len(dataframe) > max(bins, nobinning)  and binwidth != 0:
 							dataframe = bin_data(dataframe, binwidth, (xmin[i, j], xmax[i, j]))
@@ -1833,7 +1959,7 @@ class PlotWidget(QGroupBox):
 			self.plot_annotations(xpos, qns)
 
 			breakpoint(ownid, self.set_data_id)
-			self.plotcanvas.draw()
+			main.signalclass.drawplot.emit()
 
 		except CustomError as E:
 			pass
@@ -4203,29 +4329,6 @@ class FigureWindow(EQWidget):
 			xmax = xpos + offsets + widths/2
 			xmin = xpos + offsets - widths/2
 
-			# set ticks for bottom row
-			i = -1
-			for j in range(cols):
-				ax = self.axs[i, j]
-				ax.xaxis.set_visible(True)
-				ticks = np.linspace(xmin[i, j], xmax[i, j], main.config["plot_ticks"])
-
-				reference = main.plotwidget.get_series_reference(j)
-				if reference["method"] == "Fortrat":
-					ticklabels = symmetric_ticklabels(ticks/2/reference["fortrat"]["jstart"])
-				elif main.config["plot_offsetticks"] == 1:
-					ticklabels = symmetric_ticklabels(ticks-xpos[i, j])
-				elif main.config["plot_offsetticks"] == 0:
-					ticklabels = symmetric_ticklabels(ticks)
-				else:
-					ticklabels = [f"{x:.2e}".replace("e+00", "").rstrip("0").rstrip(".") for x in ticks]
-
-				if j!=0 and len(ticks)>1:
-					ticks = ticks[1:]
-					ticklabels = ticklabels[1:]
-				ax.set_xticks(ticks)
-				ax.set_xticklabels(ticklabels)
-
 			# set data and set y-ranges of data
 			scaling = main.config["plot_yscale"]
 
@@ -4244,6 +4347,8 @@ class FigureWindow(EQWidget):
 			for i in range(rows):
 				for j in range(cols):
 					ax = self.axs[i, j]
+					ax.yaxis.set_visible(False)
+					ax.xaxis.set_visible(False)
 					ax.set_xlim(xmin[i, j], xmax[i, j])
 
 					tmp_qns = qns[i, j]
@@ -4326,6 +4431,28 @@ class FigureWindow(EQWidget):
 						yrange = [-1,+1]
 					ax.set_ylim(yrange)
 
+			# set ticks for bottom row
+			i = -1
+			for j in range(cols):
+				ax = self.axs[i, j]
+				ax.xaxis.set_visible(True)
+				ticks = np.linspace(xmin[i, j], xmax[i, j], main.config["plot_ticks"])
+
+				reference = main.plotwidget.get_series_reference(j)
+				if reference["method"] == "Fortrat":
+					ticklabels = symmetric_ticklabels(ticks/2/reference["fortrat"]["jstart"])
+				elif main.config["plot_offsetticks"] == 1:
+					ticklabels = symmetric_ticklabels(ticks-xpos[i, j])
+				elif main.config["plot_offsetticks"] == 0:
+					ticklabels = symmetric_ticklabels(ticks)
+				else:
+					ticklabels = [f"{x:.2e}".replace("e+00", "").rstrip("0").rstrip(".") for x in ticks]
+
+				if j!=0 and len(ticks)>1:
+					ticks = ticks[1:]
+					ticklabels = ticklabels[1:]
+				ax.set_xticks(ticks)
+				ax.set_xticklabels(ticklabels)
 
 			xlabel, xlabelpad = main.config["figurewindow_xlabel"], main.config["figurewindow_xlabelpadding"]
 			ylabel, ylabelpad = main.config["figurewindow_ylabel"], main.config["figurewindow_ylabelpadding"]
@@ -5305,9 +5432,10 @@ class Color(str):
 			raise CustomError(f"Invalid Color: '{color}' is not a valid color.")
 
 class SignalClass(QObject):
-	fileschanged   = pyqtSignal()
+	fileschanged    = pyqtSignal()
 	assignment      = pyqtSignal()
 	updateplot      = pyqtSignal()
+	drawplot        = pyqtSignal()
 	createdplots    = pyqtSignal()
 	blwfit          = pyqtSignal()
 	peakfinderstart = pyqtSignal()
