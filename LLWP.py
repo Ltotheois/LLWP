@@ -331,7 +331,8 @@ class Main():
 
 		else:
 			for fname in fnames:
-				try:# @Luis: An error in one of the files causes the remaining files to not be loaded
+				# Try except block as otherwise files after an exception are not loaded
+				try:
 					self.load_file_core(fname, type, config_updates, results, errors, do_QNs)
 				except Exception as E:
 					pass
@@ -530,7 +531,8 @@ class Main():
 				visible_files.add("__lin__")
 
 			if len(visible_files) != len(fd) + (type == "lin"):
-				dataframe = dataframe.query("filename in @visible_files")
+				# Keep the inplace, as otherwise SettingWithCopyWarning is raised
+				dataframe.query("filename in @visible_files", inplace=True)
 
 		if binning:
 			bins = main.config["plot_bins"]
@@ -1324,7 +1326,7 @@ class PlotWidget(QGroupBox):
 			cat_df = main.get_visible_data("cat", xrange=xrange)
 			lin_df = main.get_visible_data("lin", xrange=xrange)
 
-			dataframes = {"cat": cat_df, "lin": lin_df} # @Luis: Logic when to do which
+			dataframes = {"cat": cat_df, "lin": lin_df}
 			transitions = {}
 			noq = main.config["series_qns"]
 
@@ -3736,7 +3738,7 @@ class ResidualsWindow(EQWidget):
 			self.fig.canvas.draw()
 
 			if click and noq:
-				# Luis: can this be out of range
+				# @Luis: can this be out of range
 				reference = main.config["series_references"][main.config["series_currenttab"]]
 				reference["method"] = "Transition"
 				reference["transition"]["qnus"][:noq] = qnus
