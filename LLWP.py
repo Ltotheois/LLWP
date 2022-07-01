@@ -365,7 +365,7 @@ class Main():
 				for i in range(len(qn_labels)):
 					tmp_label = qn_labels[i]
 					tmp_unique = df[tmp_label].unique()
-					if len(tmp_unique) == 1 and tmp_unique[0] == np.iinfo(np.int64).min:
+					if len(tmp_unique) == 1 and tmp_unique[0] == pyckett.SENTINEL:
 						QNs = i
 						break
 
@@ -414,7 +414,7 @@ class Main():
 						data["y"] = 10 ** data["y"]
 					for column in cat_dtypes.keys():
 						if column not in data.columns:
-							data[column] = np.iinfo(np.int64).min
+							data[column] = pyckett.SENTINEL
 					data = data[cat_dtypes.keys()]
 				else:
 					data = pyckett.cat_to_df(fname, False)
@@ -425,7 +425,7 @@ class Main():
 					data = pd.read_fwf(fname, dtype=dtypes_dict, **format)
 					for column in lin_dtypes.keys():
 						if column not in data.columns:
-							data[column] = np.iinfo(np.int64).min
+							data[column] = pyckett.SENTINEL
 					data = data[lin_dtypes.keys()]
 				else:
 					data = pyckett.lin_to_df(fname, False)
@@ -1275,7 +1275,7 @@ class PlotWidget(QGroupBox):
 				if main.config["series_annotate_xs"] or qns is None:
 					text = f"{{:{main.config['series_annotate_fmt']}}}".format(x)
 				else:
-					text = f"{', '.join([str(qn) if qn != np.iinfo(np.int64).min else '-' for qn in qns[0]])} ← {', '.join([str(qn) if qn != np.iinfo(np.int64).min else '-' for qn in qns[1]])}"
+					text = f"{', '.join([str(qn) if qn != pyckett.SENTINEL else '-' for qn in qns[0]])} ← {', '.join([str(qn) if qn != pyckett.SENTINEL else '-' for qn in qns[1]])}"
 
 					lin_df = main.get_visible_data("lin")
 					if len(lin_df.query(" and ".join([f"qnu{i+1} == {qn}" for i, qn in enumerate(qns[0])] + [f"qnl{i+1} == {qn}" for i, qn in enumerate(qns[1])]))):
@@ -1340,7 +1340,7 @@ class PlotWidget(QGroupBox):
 					for i, row in df.iterrows():
 						qnus = [row[f"qnu{i+1}"] for i in range(noq)]
 						qnls = [row[f"qnl{i+1}"] for i in range(noq)]
-						tmp.append(f"{', '.join([str(qn) for qn in qnus if qn != np.iinfo(np.int64).min])} ← {', '.join([str(qn) for qn in qnls if qn != np.iinfo(np.int64).min])}")
+						tmp.append(f"{', '.join([str(qn) for qn in qnus if qn != pyckett.SENTINEL])} ← {', '.join([str(qn) for qn in qnls if qn != pyckett.SENTINEL])}")
 
 					transitions[type] = tmp
 
@@ -1524,19 +1524,19 @@ class PlotWidget(QGroupBox):
 
 	def assign(self, index=None, init_values={}):
 		lin_dict = {
-			"qnu1":			np.iinfo(np.int64).min,
-			"qnu2":			np.iinfo(np.int64).min,
-			"qnu3":			np.iinfo(np.int64).min,
-			"qnu4":			np.iinfo(np.int64).min,
-			"qnu5":			np.iinfo(np.int64).min,
-			"qnu6":			np.iinfo(np.int64).min,
-			"qnl1":			np.iinfo(np.int64).min,
-			"qnl2":			np.iinfo(np.int64).min,
-			"qnl3":			np.iinfo(np.int64).min,
-			"qnl4":			np.iinfo(np.int64).min,
-			"qnl5":			np.iinfo(np.int64).min,
-			"qnl6":			np.iinfo(np.int64).min,
-			"x":			np.iinfo(np.int64).min,
+			"qnu1":			pyckett.SENTINEL,
+			"qnu2":			pyckett.SENTINEL,
+			"qnu3":			pyckett.SENTINEL,
+			"qnu4":			pyckett.SENTINEL,
+			"qnu5":			pyckett.SENTINEL,
+			"qnu6":			pyckett.SENTINEL,
+			"qnl1":			pyckett.SENTINEL,
+			"qnl2":			pyckett.SENTINEL,
+			"qnl3":			pyckett.SENTINEL,
+			"qnl4":			pyckett.SENTINEL,
+			"qnl5":			pyckett.SENTINEL,
+			"qnl6":			pyckett.SENTINEL,
+			"x":			pyckett.SENTINEL,
 			"error":		0,
 			"weight":		1,
 			"comment":		main.config["fit_comment"],
@@ -1921,11 +1921,10 @@ class ConfigurePlotsWindow(EQDockWidget):
 
 		checkbox_coupled  = QQ(QCheckBox, "plot_coupled", text="Plots are coupled")
 		checkbox_annotate = QQ(QCheckBox, "plot_annotate", text="Annotate plots")
-		checkbox_hover    = QQ(QCheckBox, "plot_hover", text="Show nearest transition")
 
 
 		[layout.addLayout(hbox1), layout.addItem(QSpacerItem(5, 5, QSizePolicy.Minimum, QSizePolicy.Expanding))]
-		[layout.addWidget(widget) for widget in (checkbox_coupled, checkbox_annotate, checkbox_hover, )]
+		[layout.addWidget(widget) for widget in (checkbox_coupled, checkbox_annotate, )]
 
 		checkbox_scale = QQ(QComboBox, "plot_yscale", options=("Per Plot", "Global", "Custom"), change=lambda x: main.signalclass.updateplot.emit())
 		spinbox_scalemin = QQ(QDoubleSpinBox, "plot_yscale_min", range=(None, None), minWidth=120, change=lambda x: main.signalclass.updateplot.emit())
@@ -2860,8 +2859,8 @@ class BlendedLinesWindow(EQWidget):
 		}
 
 		for i in range(6):
-			dict_[f"qnu{i+1}"] = np.iinfo(np.int64).min
-			dict_[f"qnl{i+1}"] = np.iinfo(np.int64).min
+			dict_[f"qnu{i+1}"] = pyckett.SENTINEL
+			dict_[f"qnl{i+1}"] = pyckett.SENTINEL
 
 		if oqns:
 			visible_cat_data = main.get_visible_data("cat")
@@ -3021,7 +3020,7 @@ class SeriesfinderWindow(EQWidget):
 
 			for i, column in enumerate(qns_visible):
 				tmp = row[column]
-				if tmp == np.iinfo(np.int64).min:
+				if tmp == pyckett.SENTINEL:
 					tmp = ""
 				else:
 					tmp = f'{tmp:g}'
@@ -3141,8 +3140,8 @@ class BlendWindow(EQWidget):
 			}
 
 			for i in range(6):
-				tmp_dict[f"qnu{i+1}"] = np.iinfo(np.int64).min
-				tmp_dict[f"qnl{i+1}"] = np.iinfo(np.int64).min
+				tmp_dict[f"qnu{i+1}"] = pyckett.SENTINEL
+				tmp_dict[f"qnl{i+1}"] = pyckett.SENTINEL
 
 			for i in range(self.noq):
 				tmp_dict[f"qnu{i+1}"] = row[f"qnu{i+1}"]
@@ -3872,6 +3871,7 @@ class SpectraResolverWindow(EQWidget):
 		self.setWindowTitle("Spectra Resolver")
 		self.list_ = QListWidget()
 		self.list_.setDragDropMode(QAbstractItemView.InternalMove)
+		self.list_.setSelectionMode(QAbstractItemView.ExtendedSelection)
 
 		self.label = QQ(QLabel, text="Ready", wordwrap=True)
 
@@ -3999,6 +3999,10 @@ class ReportWindow(EQWidget):
 				report.append((f"{tag} max:", results[f'{tag}_max']))
 
 
+		results["nocd"]= sum(cat_df.duplicated(subset=qns_visible))
+		if results["nocd"]:
+			cat_df = cat_df.drop_duplicates(qns_visible, keep="first")
+
 		df = pd.merge(lin_df, cat_df, how="inner", on=qns_visible)
 		df.rename(columns={"x_x": "x_lin", "x_y": "x_cat", "error_x": "error_lin", "error_y": "error_cat", "filename_x": "filename_lin", "filename_y": "filename_cat"}, inplace=True)
 		df.reset_index(drop=True, inplace=True)
@@ -4031,6 +4035,8 @@ class ReportWindow(EQWidget):
 
 		report = [f"{title: <36}{value:16.4f}" if title else "" for title, value in report]
 
+		if results["nocd"]:
+			report.append(f"\nWARNING: {results['nocd']} duplicates were found in your predictions. Each first occurence was kept.")
 		if results["not"] != results["nom"]:
 			report.append(f"\nWARNING: {results['not']-results['nom']} assignments have no matching prediction. This affects i.a. the RMS and WRMS.")
 		if any(df["error_lin"] == 0):
@@ -4243,7 +4249,7 @@ class FigureWindow(EQWidget):
 					elif main.config["series_annotate_xs"] or tmp_qns is None:
 						text = f"{{:{main.config['series_annotate_fmt']}}}".format(xpos[i, j])
 					else:
-						text = f"{', '.join([str(qn) if qn != np.iinfo(np.int64).min else '-' for qn in tmp_qns[0]])} ← {', '.join([str(qn) if qn != np.iinfo(np.int64).min else '-' for qn in tmp_qns[1]])}"
+						text = f"{', '.join([str(qn) if qn != pyckett.SENTINEL else '-' for qn in tmp_qns[0]])} ← {', '.join([str(qn) if qn != pyckett.SENTINEL else '-' for qn in tmp_qns[1]])}"
 
 						lin_df = main.get_visible_data("lin")
 						if len(lin_df.query(" and ".join([f"qnu{i+1} == {qn}" for i, qn in enumerate(tmp_qns[0])] + [f"qnl{i+1} == {qn}" for i, qn in enumerate(tmp_qns[1])]))):
@@ -4473,7 +4479,7 @@ class QNsDialog(QDialog):
 		QShortcut("Esc", self).activated.connect(lambda: self.predone(0))
 
 		qns = [f"qnu{i+1}" for i in range(6)]+[f"qnl{i+1}" for i in range(6)]
-		self.res = {key: np.iinfo(np.int64).min for key in qns}
+		self.res = {key: pyckett.SENTINEL for key in qns}
 
 		self.setWindowTitle(f"Choose QNs for transition at {frequency}")
 		self.resize(main.config["qnsdialog_width"], main.config["qnsdialog_height"])
@@ -5427,7 +5433,7 @@ class CustomTableModel(QAbstractTableModel):
 			if isinstance(value, str):
 				return(value)
 			elif isinstance(value, (np.integer, int)):
-				if value == np.iinfo(np.int64).min:
+				if value == pyckett.SENTINEL:
 					return("")
 				else:
 					return(f"{{:{main.config['flag_tableformatint']}}}".format(value))
@@ -5483,7 +5489,7 @@ class CustomTableModel(QAbstractTableModel):
 					value = np.float64(value)
 			except ValueError:
 				if np.issubdtype(dtype, np.integer):
-					value = np.iinfo(np.int64).min
+					value = pyckett.SENTINEL
 				else:
 					value = np.nan
 
@@ -5699,7 +5705,7 @@ def column_to_numeric(val, force_int=False):
 	val = val.strip()
 	if val == "" or val == ":" or val == len(val)*"*":
 		if force_int:
-			return(np.iinfo(np.int64).min)
+			return(pyckett.SENTINEL)
 		else:
 			return(np.nan)
 	elif val[0].isalpha():
@@ -5820,7 +5826,7 @@ def addemptyrow_inplace(df, model=None):
 		if dtype == np.float64:
 			newvalues.append(np.nan)
 		elif dtype == np.int64:
-			newvalues.append(np.iinfo(np.int64).min)
+			newvalues.append(pyckett.SENTINEL)
 		else:
 			newvalues.append("")
 	df.loc[len(df.index)] = newvalues
@@ -5899,7 +5905,6 @@ config_specs = {
 	"plot_coupled":							[True, bool],
 	"plot_ymargin":							[0.1, float],
 	"plot_annotate":						[True, bool],
-	"plot_hover":							[True, bool],
 	"plot_hover_cutoff":					[20, float],
 	"plot_rows":							[5, int],
 	"plot_cols":							[1, int],
