@@ -1,5 +1,5 @@
 # LLWP - Loomis-Wood Plots
 
-LLWP is a python based Loomis-Wood plotting software. It is used to visualise spectra and assign predictions to experimental data, especially for perturbed series.
+LLWP is a Python based Loomis-Wood plotting software. Its main use case is to explore and assign real spectra.
 
-For more information go to its [website](https://ltotheois.github.io/LLWP/index.html).
+For more information see its [website](https://llwp.astro.uni-koeln.de/docs.html).

@@ -4616,12 +4616,10 @@ class ConsoleDialog(QDialog):
 	def renameoradd_tab(self, index):
 		if index == -1:
 			self.add_tab()
-			main.config["pipe_commands"].append(["New Tab", "", True, True, True])
 		elif self.tabs.widget(index) != 0:
 			text, ok = QInputDialog().getText(self, "Tab Name","Enter the Tabs Name:")
 			if ok and text:
 				self.tabs.setTabText(index, text)
-				main.config["pipe_commands"][index][0] = text
 
 	def predone(self, val):
 		commands = []
