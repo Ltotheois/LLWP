@@ -1592,8 +1592,13 @@ class PlotWidget(QGroupBox):
 			lin_plot = self.axs["lin_plot"][index]
 			if lin_plot:
 				offsets = lin_plot.get_offsets()
-				offsets = np.concatenate([offsets, np.array((lin_dict["x"], 0) ,ndmin=2)])
+				offsets = np.concatenate([offsets, np.array((lin_dict["x"], 0), ndmin=2)])
+				
+				colors = lin_plot.get_facecolor()
+				color = matplotlib.colors.to_rgba(main.config["color_lin"])
+				colors = np.concatenate([colors, np.array((color, ), ndmin=2)])
 				lin_plot.set_offsets(offsets)
+				lin_plot.set_color(colors)
 
 			with locks["axs"]:
 				main.signalclass.drawplot.emit()
@@ -5274,23 +5279,17 @@ class Config(dict):
 		if not isinstance(keys, (tuple, list)):
 			keys = [keys]
 		for key in keys:
-			self.callbacks = self.callbacks.append({
-				"id":		0,
-				"key":		key,
-				"function":	function
-			}, ignore_index=True)
+			id = 0
+			df = self.callbacks
+			df.loc[len(df), ["id", "key", "function"]] = id, key, function
 
 	def register_widget(self, key, widget, function):
 		ids = set(self.callbacks["id"])
 		id = 1
 		while id in ids:
 			id += 1
-		self.callbacks = self.callbacks.append({
-			"id":		id,
-			"key":		key,
-			"widget":	widget,
-			"function":	function
-		}, ignore_index=True)
+		df = self.callbacks
+		df.loc[len(df), ["id", "key", "function", "widget"]] = id, key, function, widget
 		widget.destroyed.connect(lambda x, id=id: self.unregister_widget(id))
 
 	def unregister_widget(self, id):
@@ -5724,8 +5723,9 @@ def symmetric_ticklabels(ticks):
 		if dec_a == dec_o:
 			tick_labels.append(f"{a:.4f}".rstrip("0").rstrip("."))
 		else:
-			min_dec = max(dec_a, dec_o)
-			tick_labels.append(f"{a:.4f}"[:-(4-min_dec)])
+			trailing_zeros = 4 - max(dec_a, dec_o)
+			tick = f"{a:.4f}"[:-trailing_zeros] if trailing_zeros else f"{a:.4f}"
+			tick_labels.append(tick)
 	return(tick_labels)
 
 def except_hook(cls, exception, traceback):
