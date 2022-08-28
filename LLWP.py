@@ -1317,7 +1317,7 @@ class PlotWidget(QGroupBox):
 			text_annotation = ""
 		else:
 			if main.config["flag_showmainplotposition"]:
-				text_top = f"({x=:.2f}, {y=:.2f})"
+				text_top = f"({x=:.4f}, {y=:.4f})"
 			else:
 				text_top = ""
 
@@ -1593,11 +1593,11 @@ class PlotWidget(QGroupBox):
 			if lin_plot:
 				offsets = lin_plot.get_offsets()
 				offsets = np.concatenate([offsets, np.array((lin_dict["x"], 0), ndmin=2)])
+				lin_plot.set_offsets(offsets)
 				
 				colors = lin_plot.get_facecolor()
 				color = matplotlib.colors.to_rgba(main.config["color_lin"])
 				colors = np.concatenate([colors, np.array((color, ), ndmin=2)])
-				lin_plot.set_offsets(offsets)
 				lin_plot.set_color(colors)
 
 			with locks["axs"]:
@@ -3575,6 +3575,7 @@ class SeriesFitWindow(EQWidget):
 		self.writelog(f"Succeeded, parameters were determined as \n{tmp}")
 
 	def show_pred_freqs(self):
+		# @Luis: Show list in widget and show "List" widget in tab
 		reference = main.config["series_references"][main.config["series_currenttab"]]
 		reference["method"] = "List"
 		reference["list"] = {"qns": self.pred_qns, "xs": self.pred_xs, "i0": 0} # @Luis: Check if this format works for the qns
@@ -5433,11 +5434,17 @@ class CustomTableModel(QAbstractTableModel):
 				if value == pyckett.SENTINEL:
 					return("")
 				else:
-					return(f"{{:{main.config['flag_tableformatint']}}}".format(value))
+					if role == Qt.EditRole:
+						return(str(value))
+					else:
+						return(f"{{:{main.config['flag_tableformatint']}}}".format(value))
 			elif np.isnan(value):
 				return("")
 			else:
-				return(f"{{:{main.config['flag_tableformatfloat']}}}".format(value))
+				if role == Qt.EditRole:
+					return(str(value))
+				else:
+					return(f"{{:{main.config['flag_tableformatfloat']}}}".format(value))
 
 	def rowCount(self, index):
 		return(self.data.shape[0])
