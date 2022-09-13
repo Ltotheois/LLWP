@@ -1654,9 +1654,19 @@ class PlotWidget(QGroupBox):
 
 			for i, row in enumerate(tmp):
 				for j, ax in enumerate(row):
+					exp_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=main.config["color_exp"])
+					cat_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=main.config["color_cat"])
+					span = matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax, i=i, j=j:self.on_range(xmin, xmax, (i, j)), 'horizontal', useblit=True)
+					
 					self.axs["ax"][i, j] = ax
+					self.axs["exp_plot"][i, j] = exp_coll
+					self.axs["cat_plot"][i, j] = cat_coll
 					self.axs["lin_plot"][i, j] = ax.scatter([], [], color=main.config["color_lin"], marker="*", zorder=100)
-					self.axs["span"][i, j] = matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax, i=i, j=j:self.on_range(xmin, xmax, (i, j)), 'horizontal', useblit=True)
+					self.axs["span"][i, j] = span
+					
+					ax.add_collection(exp_coll)
+					ax.add_collection(cat_coll)
+					
 					ax.yaxis.set_visible(False)
 					ax.xaxis.set_visible(False)
 
@@ -1796,10 +1806,8 @@ class PlotWidget(QGroupBox):
 
 								if segs:
 									segs = np.concatenate(segs)
-							coll = matplotlib.collections.LineCollection(segs, colors=colors)
-							if self.axs["exp_plot"][i, j]:
-								self.axs["exp_plot"][i, j].remove()
-							self.axs["exp_plot"][i, j] = ax.add_collection(coll)
+							
+							self.axs["exp_plot"][i, j].set(segments=segs, colors=colors)
 						elif datatype == "cat":
 							if scaling == "Per Plot":
 								if len(dataframe):
@@ -1812,10 +1820,8 @@ class PlotWidget(QGroupBox):
 							segs = np.array(((xs, xs), (ys*0, ys))).T
 							# segs = (((xs[i], 0),(xs[i], ys[i])) for i in range(len(xs)))
 							colors = create_colors(dataframe, files, xpos[i, j])
-							coll = matplotlib.collections.LineCollection(segs, colors=colors)
-							if self.axs["cat_plot"][i, j]:
-								self.axs["cat_plot"][i, j].remove()
-							self.axs["cat_plot"][i, j] = ax.add_collection(coll)
+							
+							self.axs["cat_plot"][i, j].set(segments=segs, colors=colors)
 						elif datatype == "lin":
 							tuples = list(zip(xs,ys))
 							tuples = tuples if len(tuples)!=0 else [[None,None]]
@@ -2562,10 +2568,13 @@ class BlendedLinesWindow(EQWidget):
 		self.cid = None
 
 		class CustomPlotWidget(ProtPlot):
+			
 			def gui(self):
 				super().gui()
 				self.fit_line = self.ax.plot([], [], color = main.config["blendedlineswindow_color_total"])[0]
-				self.cat_line = None
+				self.cat_line = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), color=main.config["color_cat"])
+				self.ax.add_collection(self.cat_line)
+				
 				self.plot_parts = []
 
 			@synchronized_d(locks["fitting"])
@@ -2600,10 +2609,6 @@ class BlendedLinesWindow(EQWidget):
 
 					breakpoint(ownid, self.fit_thread_id)
 
-					if self.cat_line != None:
-						self.cat_line.remove()
-						self.cat_line = None
-
 					df_cat = main.get_visible_data("cat", xrange=xrange)
 					if len(df_cat) != 0:
 						cat_xs = df_cat["x"].to_numpy()
@@ -2614,7 +2619,7 @@ class BlendedLinesWindow(EQWidget):
 						segs = np.array(((cat_xs, cat_xs), (cat_ys*0, cat_ys))).T
 						# segs = (((cat_xs[i],0),(cat_xs[i],cat_ys[i])) for i in range(len(cat_xs)))
 						colors = create_colors(df_cat, main.config["files_cat"])
-						self.cat_line = self.ax.add_collection(matplotlib.collections.LineCollection(segs, colors=colors))
+						self.cat_line.set(segments=segs, colors=colors)
 
 					breakpoint(ownid, self.fit_thread_id)
 
@@ -5033,9 +5038,8 @@ class ProtPlot(QWidget):
 
 		self.ax = self.fig.subplots()
 		self.ax.ticklabel_format(useOffset=False)
-
-		self.exp_line = None
-		self.ax.plot([], [], color=main.config["color_exp"])[0]
+		self.exp_line = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), color=main.config["color_exp"])
+		self.ax.add_collection(self.exp_line)
 
 	def from_current_plot(self, update=True):
 		self.i = main.plotwidget.get_current_plot()
@@ -5052,9 +5056,6 @@ class ProtPlot(QWidget):
 
 		self.exp_xs = xs = exp_df["x"].to_numpy()
 		self.exp_ys = ys = exp_df["y"].to_numpy()
-
-		if self.exp_line:
-			self.exp_line.remove()
 
 		files = main.config[f"files_exp"]
 		if main.config["plot_expasstickspectrum"]:
@@ -5077,8 +5078,7 @@ class ProtPlot(QWidget):
 			if segs:
 				segs = np.concatenate(segs)
 
-		coll = matplotlib.collections.LineCollection(segs, colors=colors)
-		self.exp_line = self.ax.add_collection(coll)
+		self.exp_line.set(segments=segs, colors=colors)
 		self.ax.set_xlim([self.center-self.width/2, self.center+self.width/2])
 
 		yrange = [-1, 1]
