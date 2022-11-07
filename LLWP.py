@@ -193,9 +193,6 @@ class Main():
 			print(output)
 		if self.config["flag_shownotification"]:
 			self.signalclass.notification.emit(output)
-		if self.config["flag_alwaysshowlog"]:
-			main.mainwindow.logwindow.setVisible(True)
-			main.mainwindow.logwindow.raise_()
 		self.signalclass.writelog.emit(output)
 
 	def update_plot(self, dict_={}):
@@ -2132,6 +2129,10 @@ class LogWindow(EQDockWidget):
 		layout.addWidget(self.log_area)
 
 	def writelog(self, text):
+		if main.config["flag_alwaysshowlog"]:
+			self.setVisible(True)
+			self.raise_()
+		
 		tmp = self.log_area.toPlainText()
 		tmp = tmp.split("\n")
 		if len(tmp)-1 > main.config["flag_logmaxrows"]:
@@ -2140,6 +2141,7 @@ class LogWindow(EQDockWidget):
 		self.log_area.append(text)
 		sb = self.log_area.verticalScrollBar()
 		sb.setValue(sb.maximum())
+		
 
 class HoverWindow(EQDockWidget):
 	def __init__(self, parent=None):
@@ -4791,7 +4793,7 @@ class ReferenceSelector(QTabWidget):
 		layout = QVBoxLayout()
 
 		layout.addWidget(QQ(QLabel, text="J of lowest Plot: "))
-		self.jstart = QQ(QSpinBox, value=self.state["fortrat"]["jstart"], range=(1, None), change=lambda: self.state["fortrat"].__setitem__("jstart", self.jstart.value()))
+		self.jstart = QQ(QSpinBox, value=self.state["fortrat"]["jstart"], singlestep=1, range=(1, None), change=lambda: self.state["fortrat"].__setitem__("jstart", self.jstart.value()))
 		layout.addWidget(self.jstart)
 		layout.addStretch(1)
 		layout.addWidget(QQ(QPushButton, text="Apply", change=lambda x: main.plotwidget.reset_offsets()))
