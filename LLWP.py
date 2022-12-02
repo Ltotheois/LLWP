@@ -118,7 +118,7 @@ def working_d(func):
 	return(wrapper)
 
 locks = {key: threading.RLock() for key in (
-  "exp_df", "cat_df", "lin_df", "ser_df", "windows", "axs", "pipe", "currThread", "fitting", "peaks"
+  "exp_df", "cat_df", "lin_df", "ser_df", "windows", "axs", "pipe", "currThread", "fitting", "peaks", "calibration",
 )}
 
 
@@ -818,6 +818,7 @@ class MainWindow(QMainWindow):
 				QQ(QAction, parent=self, text="&Series Fit", shortcut="Ctrl+9", tooltip="Open Series Fit Window, which allows to try out different combinations of transitions as a series", change=lambda x: main.open_window(SeriesFitWindow)),
 				QQ(QAction, parent=self, text="&Create Report", tooltip="Open Report Window, which allows to summarise your analysis", change=lambda x: main.open_window(ReportWindow)),
 				QQ(QAction, parent=self, text="&Create Figure", tooltip="Open Figure Window, which allows to create publication quality figures", change=lambda x: main.open_window(FigureWindow)),
+				QQ(QAction, parent=self, text="&Calibrate Spectrum", tooltip="Open Calibrate Spectrum Window, which allows to intensity calibrate the spectrum", change=lambda x: main.open_window(CalibrateSpectrumWindow)),
 				None,
 				QQ(QAction, parent=self, text="&Pipe", shortcut="Ctrl+0", tooltip="Set up or execute the pipe command", change=lambda x: main.open_window(PipeWindow)),
 				QQ(QAction, parent=self, text="&Run Pipe", tooltip="Run the pipe command", change=lambda x: main.run_pipe(), shortcut="Ctrl+P"),
@@ -1290,7 +1291,7 @@ class PlotWidget(QGroupBox):
 	def check_blends(self, index, dict_):
 		if main.config["series_blenddialog"] and self.get_series_reference(index[1])["method"] == "Transition":
 			blendwidth = main.config["series_blendwidth"]
-			xrange = (dict_["xpre"]-blendwidth/2, dict_["xpre"]+blendwidth/2)
+			xrange = (dict_["xpre"]-blendwidth, dict_["xpre"]+blendwidth)
 			entries = main.get_visible_data("cat", xrange=xrange, scale=False)
 			if len(entries) > 1:
 				if BlendWindow in main.open_windows:
@@ -1591,7 +1592,7 @@ class PlotWidget(QGroupBox):
 				offsets = lin_plot.get_offsets()
 				offsets = np.concatenate([offsets, np.array((lin_dict["x"], 0), ndmin=2)])
 				lin_plot.set_offsets(offsets)
-				
+
 				colors = lin_plot.get_facecolor()
 				color = matplotlib.colors.to_rgba(main.config["color_lin"])
 				colors = np.concatenate([colors, np.array((color, ), ndmin=2)])
@@ -1654,16 +1655,16 @@ class PlotWidget(QGroupBox):
 					exp_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=main.config["color_exp"])
 					cat_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=main.config["color_cat"])
 					span = matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax, i=i, j=j:self.on_range(xmin, xmax, (i, j)), 'horizontal', useblit=True)
-					
+
 					self.axs["ax"][i, j] = ax
 					self.axs["exp_plot"][i, j] = exp_coll
 					self.axs["cat_plot"][i, j] = cat_coll
 					self.axs["lin_plot"][i, j] = ax.scatter([], [], color=main.config["color_lin"], marker="*", zorder=100)
 					self.axs["span"][i, j] = span
-					
+
 					ax.add_collection(exp_coll)
 					ax.add_collection(cat_coll)
-					
+
 					ax.yaxis.set_visible(False)
 					ax.xaxis.set_visible(False)
 
@@ -1803,7 +1804,7 @@ class PlotWidget(QGroupBox):
 
 								if segs:
 									segs = np.concatenate(segs)
-							
+
 							self.axs["exp_plot"][i, j].set(segments=segs, colors=colors)
 						elif datatype == "cat":
 							if scaling == "Per Plot":
@@ -1817,7 +1818,7 @@ class PlotWidget(QGroupBox):
 							segs = np.array(((xs, xs), (ys*0, ys))).T
 							# segs = (((xs[i], 0),(xs[i], ys[i])) for i in range(len(xs)))
 							colors = create_colors(dataframe, files, xpos[i, j])
-							
+
 							self.axs["cat_plot"][i, j].set(segments=segs, colors=colors)
 						elif datatype == "lin":
 							tuples = list(zip(xs,ys))
@@ -2132,7 +2133,7 @@ class LogWindow(EQDockWidget):
 		if main.config["flag_alwaysshowlog"]:
 			self.setVisible(True)
 			self.raise_()
-		
+
 		tmp = self.log_area.toPlainText()
 		tmp = tmp.split("\n")
 		if len(tmp)-1 > main.config["flag_logmaxrows"]:
@@ -2141,7 +2142,7 @@ class LogWindow(EQDockWidget):
 		self.log_area.append(text)
 		sb = self.log_area.verticalScrollBar()
 		sb.setValue(sb.maximum())
-		
+
 
 class HoverWindow(EQDockWidget):
 	def __init__(self, parent=None):
@@ -2570,13 +2571,13 @@ class BlendedLinesWindow(EQWidget):
 		self.cid = None
 
 		class CustomPlotWidget(ProtPlot):
-			
+
 			def gui(self):
 				super().gui()
 				self.fit_line = self.ax.plot([], [], color = main.config["blendedlineswindow_color_total"])[0]
 				self.cat_line = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), color=main.config["color_cat"])
 				self.ax.add_collection(self.cat_line)
-				
+
 				self.plot_parts = []
 
 			@synchronized_d(locks["fitting"])
@@ -4480,7 +4481,175 @@ class ConfigWindow(EQWidget):
 		self.timer.stop()
 		return super().closeEvent(*args, **kwargs)
 
+class CalibrateSpectrumWindow(EQWidget):
+	def __init__(self, id, parent=None):
+		super().__init__(id, parent)
+		self.setWindowTitle("Spectrum Calibration")
+		
+		vbox = QVBoxLayout()
+		self.setLayout(vbox)
+		
+		self.cal_df = None
+		self.calibration_points = []
 
+		self.fig = figure.Figure(dpi=main.config["plot_dpi"])
+		self.plotcanvas = FigureCanvas(self.fig)
+		self.plotcanvas.setMinimumHeight(200)
+		self.plotcanvas.setMinimumWidth(200)
+		
+		self.axs = self.fig.subplots(3, sharex=True, gridspec_kw = {'wspace':0, 'hspace':0})
+		self.axs[0].get_xaxis().set_visible(False)
+		self.axs[1].get_xaxis().set_visible(False)
+		self.factors  = self.axs[0].scatter([], [], color=main.config["calibratewindow_color"])
+		self.exp_line = self.axs[1].plot([], [], color=main.config["color_exp"])[0]
+		self.cal_line = self.axs[2].plot([], [], color=main.config["calibratewindow_color"])[0]
+	
+		self.mpltoolbar = NavigationToolbar2QT(self.plotcanvas, self)
+
+		vbox.addWidget(self.plotcanvas)
+		vbox.addWidget(self.mpltoolbar)
+		
+		vbox.addWidget(QQ(QPlainTextEdit, "calibratewindow_queryexp", maxHeight=60, placeholder="Query text to filter experimental dataframe."))
+		vbox.addWidget(QQ(QPlainTextEdit, "calibratewindow_querycat", maxHeight=60, placeholder="Query text to filter predictions dataframe."))
+
+		tmplayout = QGridLayout()
+		row_id = 0
+		tmplayout.addWidget(QQ(QLabel, text="Function: "), row_id, 0)
+		tmplayout.addWidget(QQ(QComboBox, "calibratewindow_lineshape", items=("Gauss", "Lorentz", "Voigt"), minWidth=120), row_id, 1)
+
+		tmplayout.addWidget(QQ(QLabel, text="Color: "), row_id, 2)
+		tmplayout.addWidget(QQ(QLineEdit, "calibratewindow_color", minWidth=120, ), row_id, 3)
+		
+		row_id += 1
+
+		tmplayout.addWidget(QQ(QLabel, text="Derivative: "), row_id, 0)
+		tmplayout.addWidget(QQ(QSpinBox, "calibratewindow_derivative", range=(0, 2), minWidth=120), row_id, 1)
+		
+		row_id += 1
+
+		tmplayout.addWidget(QQ(QLabel, text="Blendwidth: "), row_id, 0)
+		tmplayout.addWidget(QQ(QDoubleSpinBox, "calibratewindow_blendwidth", range=(0, None), minWidth=120), row_id, 1)
+		
+		tmplayout.addWidget(QQ(QLabel, text="Fitwidth: "), row_id, 2)
+		tmplayout.addWidget(QQ(QDoubleSpinBox, "calibratewindow_fitwidth", range=(0, None), minWidth=120), row_id, 3)
+		
+		tmplayout.setColumnStretch(5, 2)
+		
+		vbox.addLayout(tmplayout)
+		
+		self.run_button = QQ(QPushButton, text="Run", change=lambda x: self.run())
+		self.save_button = QQ(QPushButton, text="Save", change=lambda x: self.save())
+		vbox.addWidget(self.run_button)
+		vbox.addWidget(self.save_button)
+		
+		main.signalclass.calibrationstart.connect(lambda: self.run_button.setEnabled(False))
+		main.signalclass.calibrationend.connect(lambda: self.after_calibration())
+	
+	def update_plot(self):
+		if len(self.calibration_points):
+			self.factors.set_offsets(self.calibration_points)
+			self.factors.set_color(main.config["calibratewindow_color"])
+			self.axs[0].set_ylim(self.calibration_points[:, 1].min(), self.calibration_points[:, 1].max())
+		
+		if isinstance(self.cal_df, pd.DataFrame):
+			xs = self.cal_df["x"].to_numpy()
+			ys_old = self.cal_df["y_old"].to_numpy()
+			ys = self.cal_df["y"].to_numpy()
+			self.exp_line.set_data(xs, ys_old)
+			self.axs[1].set_ylim(ys_old.min(), ys_old.max())
+			self.cal_line.set_data(xs, ys)
+			self.axs[2].set_ylim(ys.min(), ys.max())
+		
+		self.axs[0].set_xlim(xs.min(), xs.max())
+		self.plotcanvas.draw()
+	
+	
+	@threading_d
+	@synchronized_d(locks["calibration"])
+	def run(self):
+		main.signalclass.calibrationstart.emit()
+		
+		try:
+			exp_df = main.get_visible_data("exp", scale=False)
+			cat_df = main.get_visible_data("cat", scale=False)
+			
+			if main.config["calibratewindow_queryexp"].strip():
+				exp_df = exp_df.query(main.config["calibratewindow_queryexp"])
+			if main.config["calibratewindow_querycat"].strip():
+				cat_df = cat_df.query(main.config["calibratewindow_querycat"])
+			
+			blendwidth = main.config["calibratewindow_blendwidth"] / 2
+			fitwidth = main.config["calibratewindow_fitwidth"] / 2
+			fitfunction = lambda *args: lineshape(main.config["calibratewindow_lineshape"], main.config["calibratewindow_derivative"], *args[:-1]) + args[-1]
+			
+			xs = cat_df["x"].to_numpy()
+			
+			i_starts_exp, i_stops_exp = exp_df["x"].searchsorted(xs - fitwidth, side="left"), exp_df["x"].searchsorted(xs + fitwidth, side="right")
+			i_starts_cat, i_stops_cat = cat_df["x"].searchsorted(xs - blendwidth, side="left"), cat_df["x"].searchsorted(xs + blendwidth, side="right")
+			
+			calibration_points = []
+			for i, x0 in enumerate(xs):
+				# Sum intensity of all blended peaks
+				blends_df = cat_df.iloc[i_starts_cat[i]: i_stops_cat[i]]
+				y0 = blends_df["y"].sum()
+				
+				# Get experimental data for fit
+				expfit_df = exp_df.iloc[i_starts_exp[i]: i_stops_exp[i]]
+				if len(expfit_df) < 10:
+					continue
+				
+				xs, ys = expfit_df["x"].to_numpy(), expfit_df["y"].to_numpy()
+				
+				# Fit peaks and get calibration factors for these points
+				ymax = ys.max()
+				p0 = [x0, ymax, fitwidth/10, fitwidth/10, 0]
+				bounds = [
+					[x0-0.2, 0, 0, 0, 0],
+					[x0+0.2, 2*ymax, fitwidth/2.5, fitwidth/2.5, ymax/2],
+				]
+				
+				popt, pcov = optimize.curve_fit(fitfunction, xs, ys, p0=p0, bounds=bounds)
+				calibration_points.append((popt[0], y0/popt[1]))
+				
+				# @Luis: Perform checks to see if fit was sensible
+					
+			if not len(calibration_points):
+				calibration_points = np.array([[], []])
+				main.notification("There are no calibration points.")
+				return
+				
+			calibration_points = np.array(calibration_points)
+			calibration_points = calibration_points[np.argsort(calibration_points[:, 0])]
+			
+			if not len(exp_df):
+				main.notification("There are no experimental points.")
+				return
+			
+			factors = np.interp(exp_df["x"].to_numpy(), calibration_points[:, 0], calibration_points[:, 1], left=None, right=None)
+			exp_df["y_old"] = exp_df["y"]
+			exp_df["y"] *= factors
+			exp_df["y"] /= exp_df["y"].max()
+			exp_df["factors"] = factors
+			
+			main.notification(f"Used {len(calibration_points)} of {len(cat_df)} predictions for calibration.")
+			
+		except Exception as E:
+			raise
+		finally:
+			self.calibration_points = calibration_points
+			self.cal_df = exp_df
+			main.signalclass.calibrationend.emit()
+	
+	def after_calibration(self):
+		self.run_button.setEnabled(True)
+		self.update_plot()
+
+	def save(self):
+		self.save_button.setEnabled(False)
+		fname = QFileDialog.getSaveFileName(None, 'Choose file to save spectrum to',"","CSV Files (*.csv);;All Files (*)")[0]
+		if fname:
+			self.cal_df[["x", "y"]].to_csv(fname, index=None, header=None, sep="\t")
+		self.save_button.setEnabled(True)
 
 
 ##
@@ -4531,7 +4700,7 @@ class QNsDialog(QDialog):
 		table.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
 		tmp_df = df.copy()
-		tmp_df["dist"] = frequency-tmp_df["x"]
+		tmp_df["dist"] = tmp_df["x"] - frequency
 		tmp_df["absdist"] = abs(tmp_df["dist"])
 		tmp_df.sort_values(by=["absdist"], inplace=True)
 		tmp_df.reset_index(drop=True, inplace=True)
@@ -5325,6 +5494,8 @@ class SignalClass(QObject):
 	blwfit          = pyqtSignal()
 	peakfinderstart = pyqtSignal()
 	peakfinderend   = pyqtSignal()
+	calibrationstart= pyqtSignal()
+	calibrationend  = pyqtSignal()
 	overlapend      = pyqtSignal()
 	overlapindicator= pyqtSignal(str)
 	fitindicator    = pyqtSignal(str)
@@ -6052,6 +6223,14 @@ config_specs = {
 	"figurewindow_bottomborder":			[0.1, float],
 	"figurewindow_annotation":				["Like main plot", str],
 	"figurewindow_customannotation":		["", str],
+	
+	"calibratewindow_color":				["#ff0000", Color],
+	"calibratewindow_derivative":			[0, int],
+	"calibratewindow_lineshape":			["Gauss", str],
+	"calibratewindow_querycat":				["", str],
+	"calibratewindow_queryexp":				["", str],
+	"calibratewindow_blendwidth":			[0.1, float],
+	"calibratewindow_fitwidth":				[2, float],
 
 	"files_exp":							[{}, dict],
 	"files_cat":							[{}, dict],
