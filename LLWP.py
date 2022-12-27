@@ -354,8 +354,6 @@ class Main():
 			self.yrange_exp = np.array((df["y"].min(), df["y"].max()))
 
 		elif type == "cat":
-			self.yrange_exp = np.array((df["y"].min(), df["y"].max()))
-
 			if do_QNs and len(df) and self.config["flag_autosetqns"]:
 				qn_labels = ['qnu1', 'qnu2', 'qnu3', 'qnu4', 'qnu5', 'qnu6']
 				QNs = len(qn_labels)
@@ -386,6 +384,7 @@ class Main():
 				errors.put(fname)
 				self.notification(f"<span style='color:#ff0000;'>ERROR</span>: The file {fname} could not be found. Please check the file.")
 			if os.path.getsize(fname) == 0:
+				self.notification(f"<span style='color:#eda711;'>WARNING</span>: The file {fname} is empty and was therefore skipped.")
 				return
 
 			options = self.config[f"files_{type}"].get(fname, {})
@@ -469,7 +468,7 @@ class Main():
 			else:
 				file.write(pyckett.df_to_lin(catalog))
 		if not quiet:
-			self.notification(f"Newly assigned lines were saved to the file {path}.")
+			self.notification(f"The {len(catalog)} newly assigned lines were saved to the file {path}.")
 
 	@synchronized_d(locks["pipe"])
 	def run_pipe(self, index=None):
@@ -1604,12 +1603,18 @@ class PlotWidget(QGroupBox):
 	def get_current_plot(self):
 		lcp = self.lcp
 		shape = self.axs["ax"].shape
-		if 0 <= lcp[0] < shape[0] and 0 <= lcp[1] < shape[1]:
+		if self.is_valid_plot(lcp):
 			return(lcp)
 		else:
-			lcp = (0, 0)
-			return(lcp)
+			return((0, 0))
 
+	def is_valid_plot(self, i):
+		shape = self.axs["ax"].shape
+		if 0 <= i[0] < shape[0] and 0 <= i[1] < shape[1]:
+			return(True)
+		else:
+			return(False)
+			
 	def create_plots(self):
 		thread = threading.Thread(target=self.create_plots_core)
 		with locks["currThread"]:
@@ -4994,6 +4999,8 @@ class ReferenceSelector(QTabWidget):
 			xs = []
 			tmp_xs = re.split('; |, |\s', line)
 			for x in tmp_xs:
+				if not x.strip():
+					continue
 				try:
 					xs.append(float(x))
 				except ValueError:
@@ -5216,7 +5223,8 @@ class ProtPlot(QWidget):
 		self.i = main.plotwidget.get_current_plot()
 		xrange = main.plotwidget.axs["ax"][self.i].get_xlim()
 		self.center = sum(xrange)/2
-		self.width = xrange[1] - xrange[0]
+		if main.config["flag_protplotautowidth"]:
+			self.width = xrange[1] - xrange[0]
 
 		if update:
 			self.update_plot()
@@ -5284,6 +5292,16 @@ class ProtPlot(QWidget):
 
 		self.update_plot()
 
+	def alter_plot(self, pos, dir):
+		new_i = list(self.i)
+		new_i[pos] += dir
+		
+		if main.plotwidget.is_valid_plot(new_i):
+			self.i = tuple(new_i)
+			xrange = main.plotwidget.axs["ax"][self.i].get_xlim()
+			self.center = sum(xrange)/2
+			self.update_plot()
+
 	def wheelEvent(self,event):
 		steps = event.angleDelta().y() // 120
 		factor = 2**(-steps)
@@ -5300,6 +5318,11 @@ class ProtPlot(QWidget):
 			"Shift+s": lambda: self.move_plot("sout"),
 			"Shift+a": lambda: self.move_plot("sleft"),
 			"Shift+d": lambda: self.move_plot("sright"),
+			
+			"Ctrl+w": lambda: self.alter_plot(0, -1),
+			"Ctrl+s": lambda: self.alter_plot(0, +1),
+			"Ctrl+a": lambda: self.alter_plot(1, -1),
+			"Ctrl+d": lambda: self.alter_plot(1, +1),
 		}
 
 
@@ -6133,6 +6156,7 @@ config_specs = {
 	"flag_tableformatint":					[".0f", str],
 	"flag_tableformatfloat":				[".2f", str],
 	"flag_autosave":						[120, int],
+	"flag_protplotautowidth":				[True, bool],
 
 	"pipe_current":							[0, int],
 	"pipe_commands":						[[], list],
