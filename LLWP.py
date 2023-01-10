@@ -794,7 +794,7 @@ class MainWindow(QMainWindow):
 				QQ(QAction, parent=self, text="&Change Fit Color", tooltip="Change the color of the fitfunction", change=lambda x: main.plotwidget.change_fitcolor()),
 				None,
 				QQ(QAction, "fit_alwaysassign", parent=self, text="&Always Assign", tooltip="Always assign fitted line and add to assigned lines table", checkable = True),
-				QQ(QAction, parent=self, text="&Manual Assign", tooltip="Manually assign and add line to the assigned lines table, useful when always assign is not selected", change=lambda x: self.plotwidget.manual_assign(), shortcut="Ctrl+Return"),
+				QQ(QAction, parent=self, text="&Manual Assign", tooltip="Manually assign and add line to the assigned lines table, useful when always assign is not selected", change=lambda x: main.plotwidget.manual_assign(), shortcut="Ctrl+Return"),
 			),
 			"Plot": (
 				QQ(QAction, parent=self, text="&# Plots", shortcut="Ctrl+N", tooltip="Change number of plots", change=lambda x: main.plotwidget.plot_number()),
@@ -1027,7 +1027,7 @@ class PlotWidget(QGroupBox):
 		main.config.register(("plot_rows", "plot_cols"), self.create_plots)
 		main.config.register("series_references", self.set_data)
 
-	def set_offset(self, value):
+	def set_offset(self, value, absolute=True):
 		coupled = main.config["plot_coupled"]
 		lcp = self.get_current_plot()
 
@@ -1051,11 +1051,13 @@ class PlotWidget(QGroupBox):
 		elif value == "--":
 			offset -= width/2
 		else:
-			if (not main.config["plot_relativegoto"]) and reference["method"] != "Fortrat":
-				xpos  = self.cache_positions[lcp]
-				value = value - xpos
-			offset = value
-
+			if reference["method"] == "Fortrat":
+				offset = value
+			else:
+				if absolute:
+					xpos  = self.cache_positions[lcp]
+					value = value - xpos
+				offset = value
 
 		if reference["method"] == "Fortrat":
 			reference["fortrat"]["center"] = offset
@@ -1388,14 +1390,26 @@ class PlotWidget(QGroupBox):
 					dict_[f"qnl{i+1}"] = qnl
 
 			if not main.config["fit_alwaysassign"]:
-				self.lastassignment = dict_
+				self.lastassignment = index, dict_
 			elif self.check_blends(index, dict_):
 				return
 			else:
 				self.assign(index, dict_)
 		else:
-			self.set_offset( (xmin+xmax)/2 - self.cache_positions[index])
-			self.set_width(xmax-xmin)
+			center, width = (xmin + xmax) / 2, xmax - xmin
+			reference = self.get_series_reference()
+	
+			if reference["method"] == "Fortrat":
+				lcp = self.get_current_plot()
+				jstart = reference["fortrat"]["jstart"]
+				nplots = self.axs["ax"].shape[0]
+				jplot = jstart + nplots - lcp[0] - 1
+				
+				center = center / jplot / 2
+				width = width / jplot / 2
+			
+			self.set_offset(center, absolute=True)
+			self.set_width(width, absolute=True)
 
 	def fit_peak(self, xmin, xmax, index=None):
 		data = main.get_visible_data("exp", xrange=(xmin, xmax))
@@ -1599,6 +1613,21 @@ class PlotWidget(QGroupBox):
 
 			with locks["axs"]:
 				main.signalclass.drawplot.emit()
+
+	@synchronized_d(locks["lin_df"])
+	@synchronized_d(locks["ser_df"])
+	def manual_assign(self):
+		if self.lastassignment is None:
+			main.notification("No saved assignment.")
+			return
+		index, dict_ = self.lastassignment
+		
+		if self.check_blends(index, dict_):
+			pass
+		else:
+			self.assign(index, dict_)
+		self.lastassignment = None
+
 
 	def get_current_plot(self):
 		lcp = self.lcp
@@ -1892,7 +1921,8 @@ class PlotWidget(QGroupBox):
 			main.notification("<span style='color:#eda711;'>WARNING</span>: The entered value could not be interpreted as a number.")
 			return
 
-		self.set_offset(xnew)
+		absolute = not main.config["plot_relativegoto"]
+		self.set_offset(xnew, absolute=absolute)
 
 	def width_dialog(self):
 		resp, rc = QInputDialog.getText(self, 'Set view width', 'Width:')
@@ -5363,7 +5393,7 @@ class ProtPlot(QWidget):
 					dict_[f"qnl{i+1}"] = qnl
 
 			if not main.config["fit_alwaysassign"]:
-				main.plotwidget.lastassignment = dict_
+				main.plotwidget.lastassignment = index, dict_
 			elif main.plotwidget.check_blends(index, dict_):
 				return
 			else:
@@ -5835,9 +5865,14 @@ def QQ(widgetclass, config_key=None, **kwargs):
 
 def bin_data(dataframe, binwidth, range):
 	length = len(dataframe)
-
+	
 	dataframe.loc[:,"bin"] = (dataframe.loc[:,"x"]-range[0]) // binwidth
-	dataframe = dataframe.loc[dataframe.sort_values("y").drop_duplicates(("bin", "filename"), keep="last").sort_values(["x"]).index]
+
+	# For assignments (lin_df) as they do not have an intensity
+	if "y" not in dataframe:
+		dataframe = dataframe.loc[dataframe.drop_duplicates(("bin", "filename"), keep="last").sort_values(["x"]).index]
+	else:
+		dataframe = dataframe.loc[dataframe.sort_values("y").drop_duplicates(("bin", "filename"), keep="last").sort_values(["x"]).index]
 	return(dataframe)
 
 def csv_copypaste(self, event):
