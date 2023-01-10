@@ -2237,6 +2237,7 @@ class FileWindow(EQWidget):
 		super().__init__(id, parent)
 		self.setWindowTitle("Files Window")
 
+		self.setAcceptDrops(True)
 		self.tabs = QTabWidget()
 		tmplayout = QVBoxLayout()
 		tmplayout.addWidget(self.tabs)
@@ -2251,6 +2252,15 @@ class FileWindow(EQWidget):
 			self.tabs.addTab(tmpwidget, label.capitalize())
 
 		main.signalclass.fileschanged.connect(self.update)
+
+	def dragEnterEvent(self, event):
+		if event.mimeData().hasUrls():
+			event.accept()
+		else:
+			event.ignore()
+
+	def dropEvent(self, event):
+		main.mainwindow.dropEvent(event)
 
 	def update(self, type=None):
 		if type is None:
@@ -3676,6 +3686,7 @@ class ResidualsWindow(EQWidget):
 			tmp_dict = df_view.groupby(df_view.x_lin).apply(lambda x: np.average(x.x_cat, weights=x.weight)).to_dict()
 			df["x_cat"] = df["x_lin"].map(lambda x: tmp_dict.get(x, x))
 
+		df["obs_calc"] = df["x_lin"] - df["x_cat"]
 		return(df)
 
 	def plot_residuals(self):
@@ -3685,7 +3696,6 @@ class ResidualsWindow(EQWidget):
 			message = []
 
 			df = self.get_residuals()
-			df["obs_calc"] = df["x_lin"] - df["x_cat"]
 			df["color"] = main.config["residualswindow_defaultcolor"]
 			message.append(f"Found {len(df)} entries matching your query.")
 
