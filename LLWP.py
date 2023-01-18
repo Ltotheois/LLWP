@@ -217,6 +217,8 @@ class Main():
 							value = json.loads(value)
 						elif class_ == bool:
 							value = True if value in ["True", "1"] else False
+						elif class_ == str:
+							value = value.encode("utf-8").decode("unicode_escape")
 						value = class_(value)
 						self.config[fullkey] = value
 					except Exception as E:
@@ -236,6 +238,8 @@ class Main():
 				output_dict[category] = {}
 			if type(value) in (dict, list, tuple):
 				value = json.dumps(value)
+			elif type(value) == str:
+				value = value.encode("unicode_escape").decode("utf-8")
 
 			output_dict[category][name] = value
 
