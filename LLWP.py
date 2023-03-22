@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 # Author: Luis Bonah
-# Description: Loomis-Wood Plotting Software
+# Description: Loomis-Wood Plot Software for Assigning experimental Spectra to Quantum Numbers
 
 CREDITSSTRING = """Made by Luis Bonah
 
@@ -1294,6 +1294,8 @@ class PlotWidget(QGroupBox):
 				self.axs["annotation"][i, j].set_color(color)
 
 	def check_blends(self, index, dict_):
+		with locks["axs"]:
+			main.signalclass.drawplot.emit()
 		if main.config["series_blenddialog"] and self.get_series_reference(index[1])["method"] == "Transition":
 			blendwidth = main.config["series_blendwidth"]
 			xrange = (dict_["xpre"]-blendwidth, dict_["xpre"]+blendwidth)
@@ -1320,7 +1322,7 @@ class PlotWidget(QGroupBox):
 			text_annotation = ""
 		else:
 			if main.config["flag_showmainplotposition"]:
-				text_top = f"({x=:.4f}, {y=:.4f})"
+				text_top = f"({x=:{main.config['flag_xformatfloat']}}, {y=:{main.config['flag_xformatfloat']}})"
 			else:
 				text_top = ""
 
@@ -2903,10 +2905,10 @@ class BlendedLinesWindow(EQWidget):
 			currRowCount = table.rowCount()
 			table.insertRow(currRowCount)
 			table.setCellWidget(currRowCount, 0, QQ(QPushButton, text="Assign", change=lambda x, xpos=params[0], error=errparam[1]: self.pre_assign(xpos, error)))
-			table.setItem(currRowCount, 1, QTableWidgetItem(f'{params[0]:.4f}'))
-			table.setItem(currRowCount, 2, QTableWidgetItem(f'{params[1]:.4f}'))
-			table.setItem(currRowCount, 3, QTableWidgetItem(f'{params[2] if function != "Lorentz" else  0:.4f}'))
-			table.setItem(currRowCount, 4, QTableWidgetItem(f'{params[1+now] if function != "Gauss" else  0:.4f}'))
+			table.setItem(currRowCount, 1, QTableWidgetItem(f'{params[0]:{main.config["flag_xformatfloat"]}}'))
+			table.setItem(currRowCount, 2, QTableWidgetItem(f'{params[1]:{main.config["flag_xformatfloat"]}}'))
+			table.setItem(currRowCount, 3, QTableWidgetItem(f'{params[2] if function != "Lorentz" else  0:{main.config["flag_xformatfloat"]}}'))
+			table.setItem(currRowCount, 4, QTableWidgetItem(f'{params[1+now] if function != "Gauss" else  0:{main.config["flag_xformatfloat"]}}'))
 			table.setCellWidget(currRowCount, 5, QQ(QPushButton, text="Assign other QNs", change=lambda x, xpos=params[0], error=errparam[1]: self.pre_assign(xpos, error, oqns=True)))
 			table.setCellWidget(currRowCount, 6, QQ(QPushButton, text="Delete", change=lambda x, ind=currRowCount: self.del_peak(i=ind)))
 		table.resizeColumnsToContents()
@@ -3077,8 +3079,8 @@ class SeriesfinderWindow(EQWidget):
 			currRowCount = table.rowCount()
 			table.insertRow(currRowCount)
 			table.setCellWidget(currRowCount,0, QQ(QPushButton, text="Start", change=lambda x, crow=row: self.startHere(crow)))
-			table.setItem(currRowCount, 1, QTableWidgetItem(f'{row["y"]:.4f}'))
-			table.setItem(currRowCount, 2, QTableWidgetItem(f'{row["x"]:.4f}'))
+			table.setItem(currRowCount, 1, QTableWidgetItem(f'{row["y"]:{main.config["flag_xformatfloat"]}}'))
+			table.setItem(currRowCount, 2, QTableWidgetItem(f'{row["x"]:{main.config["flag_xformatfloat"]}}'))
 
 			for i, column in enumerate(qns_visible):
 				tmp = row[column]
@@ -3136,7 +3138,7 @@ class BlendWindow(EQWidget):
 				elif val == "filename":
 					text = entry[val]
 				else:
-					text = f"{entry[val]:.4f}".rstrip("0").rstrip(".")
+					text = f"{entry[val]:{main.config['flag_xformatfloat']}}".rstrip("0").rstrip(".")
 				table.setItem(currRowCount, j+1, QTableWidgetItem(text))
 			checkbox = QQ(QCheckBox, value=True)
 			self.checkboxes.append(checkbox)
@@ -3464,8 +3466,8 @@ class PeakfinderWindow(EQWidget):
 		for x, y in self.peaks[:main.config["peakfinderwindow_maxentries"]]:
 			currRowCount = self.table.rowCount()
 			self.table.insertRow(currRowCount)
-			self.table.setItem(currRowCount, 0, QTableWidgetItem(f'{x:.4f}'))
-			self.table.setItem(currRowCount, 1, QTableWidgetItem(f'{y:.4f}'))
+			self.table.setItem(currRowCount, 0, QTableWidgetItem(f'{x:{main.config["flag_xformatfloat"]}}'))
+			self.table.setItem(currRowCount, 1, QTableWidgetItem(f'{y:{main.config["flag_xformatfloat"]}}'))
 		self.table.resizeColumnsToContents()
 		self.table.setHidden(False)
 
@@ -3628,7 +3630,7 @@ class SeriesFitWindow(EQWidget):
 		self.pred_qns = [np.concatenate((qnu+incrs*i, qnl+incrs*i)) for i in range(main.config["seriesfitwindow_maxprediction"])]
 		self.pred_xs  = [self.function(qns, *popt) for qns in self.pred_qns]
 
-		tmp = "\n".join([f"{name} : {value:.4f}" for name, value in zip(self.fitparams, popt)])
+		tmp = "\n".join([f"{name} : {value:{main.config['flag_xformatfloat']}}" for name, value in zip(self.fitparams, popt)])
 		self.writelog(f"Succeeded, parameters were determined as \n{tmp}")
 
 	def show_pred_freqs(self):
@@ -4758,7 +4760,7 @@ class QNsDialog(QDialog):
 			currRowCount = table.rowCount()
 			table.insertRow(currRowCount)
 			for j, col in enumerate(cols):
-				val = f'{row[col]:.4f}'.rstrip("0").rstrip(".")
+				val = f'{row[col]:{main.config["flag_xformatfloat"]}}'.rstrip("0").rstrip(".")
 				table.setItem(currRowCount, j+1, QTableWidgetItem(val))
 			tmpd = {key: row[key] for key in qns}
 			tmpd["xpre"] = row["x"]
@@ -5089,7 +5091,7 @@ class ReferenceSelector(QTabWidget):
 			currRowCount = table.rowCount()
 			table.insertRow(currRowCount)
 			table.setItem(currRowCount, 0, QTableWidgetItem(f"{i}"))
-			table.setItem(currRowCount, 1, QTableWidgetItem(f"{x:.4f}"))
+			table.setItem(currRowCount, 1, QTableWidgetItem(f"{x:{main.config['flag_xformatfloat']}}"))
 		self.changed()
 
 class SeriesSelector(QWidget):
@@ -5970,13 +5972,13 @@ def symmetric_ticklabels(ticks):
 	for a, o in zip(ticks, ticks[::-1]):
 		if not (np.isfinite(a) and np.isfinite(o)):
 			continue
-		dec_a = len(f"{a:.4f}".rstrip("0").split(".")[1])
-		dec_o = len(f"{o:.4f}".rstrip("0").split(".")[1])
+		dec_a = len(f"{a:{main.config['flag_xformatfloat']}}".rstrip("0").split(".")[1])
+		dec_o = len(f"{o:{main.config['flag_xformatfloat']}}".rstrip("0").split(".")[1])
 		if dec_a == dec_o:
-			tick_labels.append(f"{a:.4f}".rstrip("0").rstrip("."))
+			tick_labels.append(f"{a:{main.config['flag_xformatfloat']}}".rstrip("0").rstrip("."))
 		else:
 			trailing_zeros = 4 - max(dec_a, dec_o)
-			tick = f"{a:.4f}"[:-trailing_zeros] if trailing_zeros else f"{a:.4f}"
+			tick = f"{a:{main.config['flag_xformatfloat']}}"[:-trailing_zeros] if trailing_zeros else f"{a:{main.config['flag_xformatfloat']}}"
 			tick_labels.append(tick)
 	return(tick_labels)
 
@@ -6204,6 +6206,7 @@ config_specs = {
 	"flag_logmaxrows":						[10000, int],
 	"flag_tableformatint":					[".0f", str],
 	"flag_tableformatfloat":				[".2f", str],
+	"flag_xformatfloat":					[".4f", str],
 	"flag_autosave":						[120, int],
 	"flag_protplotautowidth":				[True, bool],
 
