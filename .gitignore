@@ -1,0 +1,4 @@
+versions/
+LLWP/llwp.egg-info/
+**/dist/
+**/__pycache__/

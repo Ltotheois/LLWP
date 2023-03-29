@@ -688,7 +688,14 @@ class MainWindow(QMainWindow):
 			self.setGeometry(*json.loads(geometry))
 
 		try:
-			main.app.setWindowIcon(QIcon(llwpfile(".svg")))
+			possible_folders = [os.path.dirname(os.path.realpath(__file__)), os.getcwd()]
+			for folder in possible_folders:
+				iconpath = os.path.join(folder, "LLWP.svg")
+				if os.path.isfile(iconpath):
+					icon = QIcon(iconpath)
+					break
+				
+			main.app.setWindowIcon(QIcon(iconpath))
 			import ctypes
 			ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_TAG)
 		except Exception as E:
@@ -4743,7 +4750,7 @@ class QNsDialog(QDialog):
 		qnslayout.setColumnStretch(7, 1)
 		layout.addLayout(qnslayout)
 
-		cols = ["dist", "x"] + qns
+		cols = ["dist", "x", "log y"] + qns
 		table = QTableWidget()
 		table.setColumnCount(len(cols)+1)
 		table.setHorizontalHeaderLabels(["Assign"] + cols)
@@ -4752,6 +4759,7 @@ class QNsDialog(QDialog):
 
 		tmp_df = df.copy()
 		tmp_df["dist"] = tmp_df["x"] - frequency
+		tmp_df["log y"] = np.log10(tmp_df["y"])
 		tmp_df["absdist"] = abs(tmp_df["dist"])
 		tmp_df.sort_values(by=["absdist"], inplace=True)
 		tmp_df.reset_index(drop=True, inplace=True)
@@ -6108,10 +6116,13 @@ def shared_labels(fig, xlabel, ylabel, xlabelpad=15, ylabelpad=0, **kwargs):
 	return(ax)
 
 def llwpfile(extension):
-	# Using the folder the python file is in causes problems with the Exe file
-	# as it unpacks the python stuff into a temporary folder
-	# return(os.path.join(os.path.dirname(os.path.realpath(__file__)), f"{APP_TAG}{extension}"))
-	return(f"{APP_TAG}{extension}")
+	home = os.path.expanduser("~")
+	llwpfolder = os.path.join(home, ".llwp")
+	
+	if not os.path.isdir(llwpfolder):
+		os.mkdir(llwpfolder)
+
+	return(os.path.join(llwpfolder, extension))
 
 
 ##
@@ -6317,6 +6328,10 @@ config_specs = {
 # json.dumps(quotes.split("\n\n"))
 quotes_str = '["Erstens kommt es anders und zweitens als man denkt\\n- Ekrem Bora", "In der Theorie willst du was ver\\u00e4ndern, aber in der Praxis geht alles schief.\\nIn der Theorie wollen wir zu viel, geben aber viel zu wenig, das ist kein fairer Deal.\\n- Anis M. Y. Ferchichi & Jochen Burchard", "Und bist du unten, dr\\u00fccken sie dich noch ein St\\u00fcck tiefer\\nNoch ein St\\u00fcck tiefer\\nNoch ein St\\u00fcck tiefer\\nNoch ein St\\u00fcck tiefer\\n- Anis M. Y. Ferchichi", "Da ting goes skrrrrahh, pap, pap, ka-ka-ka\\nSkidiki-pap-pap, and a pu-pu-pudrrrr-boom\\nSkya, du-du-ku-ku-dun-dun\\nPoom, poom, you dun know\\n- Michael Dapaah", "It wasn\'t me\\n- Orville Richard Burrell", "We are going so fast\\nBut time so slow\\n- Theory of Relativity", "D\\u00f6p, d\\u00f6p, d\\u00f6p, d\\u00f6p, d\\u00f6d\\u00f6d\\u00f6d\\u00f6d\\u00f6p\\nD\\u00f6, d\\u00f6d\\u00f6d\\u00f6p, d\\u00f6p, d\\u00f6d\\u00f6d\\u00f6d\\u00f6d\\u00f6p, d\\u00f6p\\n- Hans Peter Geerdes", "Skibadee, skibadanger\\nI am the rearranger\\n- Hans Peter Geerdes", "Respect to the Man in the Ice Cream Van\\n- Hans Peter Geerdes", "Hyper Hyper\\n- Hans Peter Geerdes", "If we could only slow the time\\nWe would have forever every night\\n- Don Pepijn Schipper", "Meine Stra\\u00dfenpoesie l\\u00f6st die Chaostheorie\\n- Mousa Amouei", "Die Parabel sie steigt, und zwar exponentiell\\n- Mohamed El Moussaoui", "Chuba chuba chuba chuba chuba chuba chubby.\\nI don\'t have any lines to go right here, so chuby Teletubby\\n- Marshall Bruce Mathers III", "Two things are infinite: The universe and human stupidity;\\nand I\\u2018m not sure about the universe\\n- Albert E", "Physics is like sex: sure, it may give some practical results, but that\'s not why we do it.\\n- Richard P. Feynman", "I do not think you can name many great inventions that have been made by married men.\\n- Nikola Tesla", "Those who are not shocked when they first come across quantum theory cannot possibly have understood it.\\n- Niels Bohr", "We\\u2019re not free in what we do, because we\\u2019re not free in what we want.\\n- Jonas Kahnwald", "What we know is a drop. What we don\\u2019t know is an ocean.\\n- Isaac Newton", "Das ist der Sound f\\u00fcr die echten M\\u00e4nner, die das hier h\\u00f6ren, wenn sie Pressluft h\\u00e4mmern\\n- Tarek Ebene, Nico Seyfrid & Maxim Dr\\u00fcner", "I accept that\\n- Chuck Marstein", "Many of life\'s failures are people who did not realize how close they were to success when they gave up\\n- Thomas A. Edison", "I find that the harder I work, the more luck I seem to have\\n- Thomas Jefferson", "Whether you think you can or you think you can\'t, you\'re right\\n- Henry Ford", "Life is never fair, and perhaps it is a good thing for most of us that it is not\\n- Oscar Wilde", "Only a life lived for others is a life worthwhile\\n- Albert Einstein", "Imagination is more important than knowledge\\n- Albert Einstein", "My mama always said, \\u2018Life was like a box of chocolates. You never know what you\\u2019re gonna get\\n- Forrest", "Before you marry a person, you should first make them use a computer with slow Internet to see who they really are\\n- Will Ferrell", "I don\\u2019t believe in astrology; I\\u2019m a Sagittarius and we\\u2019re skeptical\\n- Arthur C. Clarke", "If you think you are too small to make a difference, try sleeping with a mosquito\\n- Dalai Lama", "People who think they know everything are a great annoyance to those of us who do\\n- Isaac Asimov", "They asked me how well I understood theoretical physics, I said I had a theoretical degree in physics.\\nThey said welcome aboard.\\n- Fantastic"]'
 
-if __name__ == '__main__':
+def start():
+	global main
 	main = Main()
 	main.gui()
+
+if __name__ == '__main__':
+	start()
