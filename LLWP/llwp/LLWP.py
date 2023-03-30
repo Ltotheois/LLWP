@@ -2626,6 +2626,7 @@ class BlendedLinesWindow(EQWidget):
 		self.setWindowTitle("Blended Lines Window")
 
 		self.peaks = []
+		self.fit_values = None
 		self.cid = None
 
 		class CustomPlotWidget(ProtPlot):
@@ -2770,15 +2771,19 @@ class BlendedLinesWindow(EQWidget):
 						tmp_ys = fitfunction_withoutbaseline(res_xs, *tmp_params)
 						self.plot_parts.append(self.ax.plot(res_xs, tmp_ys, color=main.config["blendedlineswindow_color_total"], alpha=main.config["blendedlineswindow_transparency"])[0])
 
-						opt_param.append( tmp_params+list(peaks[i]) )
-						err_param.append( tmp_errors+list(peaks[i]) )
+						opt_param.append( tmp_params )
+						err_param.append( tmp_errors )
 
-					self.parent.params = opt_param, err_param, profile, noa, now
 
 					self.plot_parts.append(self.ax.scatter([x[0] for x in opt_param], [x[1] for x in opt_param], color=main.config["blendedlineswindow_color_points"]))
 
 					if polynomrank > 0 and main.config["blendedlineswindow_showbaseline"]:
-						self.plot_parts.append(self.ax.plot(res_xs, np.polyval(popt[-polynomrank:], res_xs-self.center), color=main.config["blendedlineswindow_color_baseline"])[0])
+						baseline_args = popt[-polynomrank:]
+						self.plot_parts.append(self.ax.plot(res_xs, np.polyval(baseline_args, res_xs-self.center), color=main.config["blendedlineswindow_color_baseline"])[0])
+					else:
+						baseline_args = []
+
+					self.parent.params = opt_param, err_param, profile, derivative, noa, now, self.center, baseline_args
 
 					breakpoint(ownid, self.fit_thread_id)
 
@@ -2837,6 +2842,7 @@ class BlendedLinesWindow(EQWidget):
 		row = (
 		  QQ(QPushButton, text="Del All", change=lambda x: self.del_peak(-1)),
 		  QQ(QPushButton, text="Update", change=lambda x: self.plotWidget.update_plot()),
+		  QQ(QPushButton, text="Save", change=lambda x: self.save_values()),
 		  self.label,
 		)
 
@@ -2902,23 +2908,46 @@ class BlendedLinesWindow(EQWidget):
 		return(np.sum(res_ys, axis=0))
 
 	def fill_table(self):
-		opt_param, err_param, function, noa, now = self.params
+		opt_param, err_param, function, derivative, noa, now, self.center, baseline_args = self.params
+		fit_values = {
+			"function": function,
+			"derivative": derivative,
+			"center": self.center,
+			"baseline": list(baseline_args),
+			"peaks": [],
+		}
+		
 		opt_param.sort(key=lambda x: x[0])
 		table = self.table
 		table.setRowCount(0)
 		table.setColumnCount(7)
 		table.setHorizontalHeaderLabels(["Action", "Frequency", "Amplitude", "FWHM Gauss", "FWHM Lorentz", "Other QNs", "Delete"])
-		for params, errparam in zip(opt_param, err_param):
+		for params, params_error in zip(opt_param, err_param):
+			x, y, wg, wl = params[0], params[1], params[2] if function != "Lorentz" else  0, params[1+now] if function != "Gauss" else  0
+			x_error, y_error, wg_error, wl_error = params_error[0], params_error[1], params_error[2] if function != "Lorentz" else  0, params_error[1+now] if function != "Gauss" else  0
+			
 			currRowCount = table.rowCount()
 			table.insertRow(currRowCount)
-			table.setCellWidget(currRowCount, 0, QQ(QPushButton, text="Assign", change=lambda x, xpos=params[0], error=errparam[1]: self.pre_assign(xpos, error)))
-			table.setItem(currRowCount, 1, QTableWidgetItem(f'{params[0]:{main.config["flag_xformatfloat"]}}'))
-			table.setItem(currRowCount, 2, QTableWidgetItem(f'{params[1]:{main.config["flag_xformatfloat"]}}'))
-			table.setItem(currRowCount, 3, QTableWidgetItem(f'{params[2] if function != "Lorentz" else  0:{main.config["flag_xformatfloat"]}}'))
-			table.setItem(currRowCount, 4, QTableWidgetItem(f'{params[1+now] if function != "Gauss" else  0:{main.config["flag_xformatfloat"]}}'))
-			table.setCellWidget(currRowCount, 5, QQ(QPushButton, text="Assign other QNs", change=lambda x, xpos=params[0], error=errparam[1]: self.pre_assign(xpos, error, oqns=True)))
+			table.setCellWidget(currRowCount, 0, QQ(QPushButton, text="Assign", change=lambda x, xpos=x, error=x_error: self.pre_assign(xpos, error)))
+			table.setItem(currRowCount, 1, QTableWidgetItem(f'{x:{main.config["flag_xformatfloat"]}}'))
+			table.setItem(currRowCount, 2, QTableWidgetItem(f'{y:{main.config["flag_xformatfloat"]}}'))
+			table.setItem(currRowCount, 3, QTableWidgetItem(f'{wg:{main.config["flag_xformatfloat"]}}'))
+			table.setItem(currRowCount, 4, QTableWidgetItem(f'{wl:{main.config["flag_xformatfloat"]}}'))
+			table.setCellWidget(currRowCount, 5, QQ(QPushButton, text="Assign other QNs", change=lambda x, xpos=x, error=x_error: self.pre_assign(xpos, error, oqns=True)))
 			table.setCellWidget(currRowCount, 6, QQ(QPushButton, text="Delete", change=lambda x, ind=currRowCount: self.del_peak(i=ind)))
+			fit_values["peaks"].append({"values": (x, y, wg, wl), "errors": (x_error, y_error, wg_error, wl_error)})
+		self.fit_values = fit_values
 		table.resizeColumnsToContents()
+
+	def save_values(self):
+		if self.fit_values:
+			filename = llwpfile(".fit")
+			with open(filename, "a+") as file:
+				file.write(json.dumps(self.fit_values))
+				file.write("\n")
+			main.notification(f"Saved the fit to the file {filename}.")
+		else:
+			main.notification(f"No fit values to be saved.")
 
 	def pre_assign(self, x, error, oqns=False):
 		index = self.plotWidget.i
@@ -6102,6 +6131,7 @@ def exp_to_df(fname, sep="\t", xcolumn=0, ycolumn=1, sort=True):
 
 	data.columns = column_names
 	data = data[["x", "y",]]
+	data = data.dropna()
 	data["filename"] = fname
 
 	return(data)
