@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llwp"
-version = "1.3"
+version = "1.4.1"
 authors = [
   { name="Luis Bonah", email="bonah@ph1.uni-koeln.de" },
 ]
@@ -17,7 +17,7 @@ classifiers = [
 	"License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
 	"Operating System :: OS Independent",
 ]
-keywords = ["LLWP", "Loomis-Wood Plots", "Spectroscopy"],
+keywords = ["LLWP", "Loomis-Wood Plots", "Spectroscopy"]
 
 [project.urls]
 "Homepage" = "https://llwp.astro.uni-koeln.de/"

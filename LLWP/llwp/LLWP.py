@@ -6,7 +6,7 @@
 
 CREDITSSTRING = """Made by Luis Bonah
 
-As this programs GUI is based on PyQt5, which is GNU GPL v3 licensed, this program is also licensed under GNU GPL v3 (See the bottom paragraph).
+As this programs GUI is based on PyQt6, which is GNU GPL v3 licensed, this program is also licensed under GNU GPL v3 (See the bottom paragraph).
 
 pandas, matplotlib, scipy and numpy were used for this program, speeding up the development process massively.
 
@@ -51,9 +51,9 @@ import pyckett
 
 from scipy import optimize, special, signal
 
-from PyQt5.QtCore import *
-from PyQt5.QtWidgets import *
-from PyQt5.QtGui import *
+from PyQt6.QtCore import *
+from PyQt6.QtWidgets import *
+from PyQt6.QtGui import *
 
 import matplotlib
 from matplotlib import style, figure
@@ -155,7 +155,11 @@ class Main():
 		self.mainwindow.createmenu()
 		self.mainwindow.readstate()
 		if len(sys.argv) > 1:
-			self.loadproject(sys.argv[1])
+			project = sys.argv[1]
+			if project == "RESTART":
+				self.loadproject(llwpfile(".llwp"))
+			else:
+				self.loadproject(project)
 		self.mainwindow.show()
 
 		if self.messages:
@@ -168,7 +172,7 @@ class Main():
 			self.autosavetimer.start(main.config["flag_autosave"]*1000)
 		main.config.register("flag_autosave", lambda: self.autosavetimer.start(main.config["flag_autosave"]*1000) if main.config["flag_autosave"] > 0 else self.autosavetimer.stop())
 
-		sys.exit(self.app.exec_())
+		sys.exit(self.app.exec())
 
 	def setup_dfs(self):
 		self.exp_df = pd.DataFrame(columns=exp_dtypes.keys()).astype(exp_dtypes)
@@ -453,7 +457,7 @@ class Main():
 	@synchronized_d(locks["lin_df"])
 	def save_lines_lin(self, path = None, force_noappend=False, force_lin=False, quiet=False):
 		append = self.config["flag_appendonsave"]
-		options = {"options": QFileDialog.DontConfirmOverwrite} if append else {}
+		options = {"options": QFileDialog.Option.DontConfirmOverwrite} if append else {}
 
 		if not path:
 			path, ext = QFileDialog.getSaveFileName(None, 'Save file', '', **options)
@@ -575,6 +579,9 @@ class Main():
 			self.config["layout_theme"] = "light"
 
 		if self.config["layout_theme"] == "light":
+		# @Maybe delete the whole change style functionality
+		# But Probably keep to update matplotlib style
+		# @Luis: this does not work properly if the standard palette is dark
 			palette = app.style().standardPalette()
 			mplstyles = ("default", "white")
 
@@ -590,20 +597,20 @@ class Main():
 				"text":					QColor(255, 255, 255),
 				"button":				QColor(53, 53, 53),
 				"buttonText":			QColor(255, 255, 255),
-				"brightText":			Qt.red,
+				"brightText":			Qt.GlobalColor.red,
 				"light":				QColor(255, 255, 255),
 				"midlight":				QColor(200, 200, 200),
 				"mid":					QColor(150, 150, 150),
 				"dark":					QColor(50, 50, 50),
 				"shadow":				QColor(0, 0, 0),
 				"highlight":			QColor(42, 130, 218),
-				"highlightedText":		 QColor(35, 35, 35),
+				"highlightedText":		QColor(35, 35, 35),
 				"link":					QColor(42, 130, 218),
 				"linkVisited":			QColor(42, 130, 218),
 
-				"disabledButtonText":	Qt.darkGray,
-				"disabledWindowText":	Qt.darkGray,
-				"disabledText":			Qt.darkGray,
+				"disabledButtonText":	Qt.GlobalColor.darkGray,
+				"disabledWindowText":	Qt.GlobalColor.darkGray,
+				"disabledText":			Qt.GlobalColor.darkGray,
 				"disabledLight":		QColor(53, 53, 53),
 
 				"mplstyles":			("dark_background", "black"),
@@ -613,31 +620,31 @@ class Main():
 				colors.update(self.config["layout_owntheme"])
 
 			tmp_dict = {
-				"window":				(QPalette.Window,),
-				"windowText":			(QPalette.WindowText,),
-				"base":					(QPalette.Base,),
-				"alternateBase":		(QPalette.AlternateBase,),
-				"toolTipBase":			(QPalette.ToolTipBase,),
-				"toolTipText":			(QPalette.ToolTipText,),
-				"placeholderText":		(QPalette.PlaceholderText,),
-				"text":					(QPalette.Text,),
-				"button":				(QPalette.Button,),
-				"buttonText":			(QPalette.ButtonText,),
-				"brightText":			(QPalette.BrightText,),
-				"light":				(QPalette.Light,),
-				"midlight":				(QPalette.Midlight,),
-				"dark":					(QPalette.Dark,),
-				"mid":					(QPalette.Mid,),
-				"shadow":				(QPalette.Shadow,),
-				"highlight":			(QPalette.Highlight,),
-				"highlightedText":		(QPalette.HighlightedText,),
-				"link":					(QPalette.Link,),
-				"linkVisited":			(QPalette.LinkVisited,),
+				"window":				(QPalette.ColorRole.Window,),
+				"windowText":			(QPalette.ColorRole.WindowText,),
+				"base":					(QPalette.ColorRole.Base,),
+				"alternateBase":		(QPalette.ColorRole.AlternateBase,),
+				"toolTipBase":			(QPalette.ColorRole.ToolTipBase,),
+				"toolTipText":			(QPalette.ColorRole.ToolTipText,),
+				"placeholderText":		(QPalette.ColorRole.PlaceholderText,),
+				"text":					(QPalette.ColorRole.Text,),
+				"button":				(QPalette.ColorRole.Button,),
+				"buttonText":			(QPalette.ColorRole.ButtonText,),
+				"brightText":			(QPalette.ColorRole.BrightText,),
+				"light":				(QPalette.ColorRole.Light,),
+				"midlight":				(QPalette.ColorRole.Midlight,),
+				"dark":					(QPalette.ColorRole.Dark,),
+				"mid":					(QPalette.ColorRole.Mid,),
+				"shadow":				(QPalette.ColorRole.Shadow,),
+				"highlight":			(QPalette.ColorRole.Highlight,),
+				"highlightedText":		(QPalette.ColorRole.HighlightedText,),
+				"link":					(QPalette.ColorRole.Link,),
+				"linkVisited":			(QPalette.ColorRole.LinkVisited,),
 
-				"disabledButtonText":	(QPalette.Disabled, QPalette.ButtonText),
-				"disabledWindowText":	(QPalette.Disabled, QPalette.WindowText),
-				"disabledText":			(QPalette.Disabled, QPalette.Text),
-				"disabledLight":		(QPalette.Disabled, QPalette.Light),
+				"disabledButtonText":	(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText),
+				"disabledWindowText":	(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText),
+				"disabledText":			(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text),
+				"disabledLight":		(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Light),
 			}
 
 			mplstyles = colors["mplstyles"]
@@ -678,7 +685,7 @@ class Main():
 class MainWindow(QMainWindow):
 	def __init__(self, parent=None):
 		super().__init__(parent)
-		self.setFocusPolicy(Qt.StrongFocus)
+		self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 		self.setWindowTitle(APP_TAG)
 		self.setAcceptDrops(True)
 		self.shortcuts()
@@ -911,7 +918,8 @@ class MainWindow(QMainWindow):
 				main.notification(f"<span style='color:#ff0000;'>ERROR</span>: The file {file} could not be found.")
 				continue
 
-			extension = os.path.splitext(file)[1]
+			path, extension = os.path.splitext(file)
+			extension = extension if extension else os.path.basename(path)
 			type = None
 			for key, value in types.items():
 				if extension in value:
@@ -991,7 +999,7 @@ class PlotWidget(QGroupBox):
 			main.config.register("flag_showmainplotcontrols", lambda button=button: button.setVisible(main.config["flag_showmainplotcontrols"]))
 
 		self.toplabel = QQ(QLabel, text="", wordwrap=False)
-		self.indicator = QQ(QLabel, text="Ready", textFormat=Qt.RichText)
+		self.indicator = QQ(QLabel, text="Ready", textFormat=Qt.TextFormat.RichText)
 		self.working = queue.Queue()
 		main.signalclass.setindicator.connect(self.indicator.setText)
 
@@ -1958,7 +1966,7 @@ class EQDockWidget(QDockWidget):
 		super().__init__(main.mainwindow)
 		self.setObjectName(self.__class__.__name__)
 
-		main.mainwindow.addDockWidget(2, self)
+		main.mainwindow.addDockWidget(Qt.DockWidgetArea(2), self)
 		QShortcut("Esc", self).activated.connect(self.close)
 
 class ConfigurePlotsWindow(EQDockWidget):
@@ -1980,7 +1988,7 @@ class ConfigurePlotsWindow(EQDockWidget):
 		checkbox_annotate = QQ(QCheckBox, "plot_annotate", text="Annotate plots")
 
 
-		[layout.addLayout(hbox1), layout.addItem(QSpacerItem(5, 5, QSizePolicy.Minimum, QSizePolicy.Expanding))]
+		[layout.addLayout(hbox1), layout.addItem(QSpacerItem(5, 5, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))]
 		[layout.addWidget(widget) for widget in (checkbox_coupled, checkbox_annotate, )]
 
 		checkbox_scale = QQ(QComboBox, "plot_yscale", options=("Per Plot", "Global", "Custom"), change=lambda x: main.signalclass.updateplot.emit())
@@ -2016,7 +2024,7 @@ class ConfigurePlotsWindow(EQDockWidget):
 		grid.addWidget(spinbox_scalemax, 2, 3)
 		grid.setColumnStretch(7, 10)
 		grid.setRowStretch(2, 10)
-		layout.addItem(QSpacerItem(5, 5, QSizePolicy.Minimum, QSizePolicy.Expanding))
+		layout.addItem(QSpacerItem(5, 5, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 		layout.addLayout(grid)
 
 		layout.addStretch(1)
@@ -2038,7 +2046,7 @@ class ReferenceSeriesWindow(EQDockWidget):
 		self.tabs.setMovable(True)
 		self.tabs.setDocumentMode(True)
 
-		self.tabs.setCornerWidget(QQ(QToolButton, text="Dupl.", tooltip="Duplicate current tab", change=self.duplicate_tab), Qt.TopRightCorner)
+		self.tabs.setCornerWidget(QQ(QToolButton, text="Dupl.", tooltip="Duplicate current tab", change=self.duplicate_tab), Qt.Corner.TopRightCorner)
 		self.tabs.tabCloseRequested.connect(self.close_tab)
 		self.tabs.tabBarDoubleClicked.connect(self.renameoradd_tab)
 		self.tabs.setCurrentIndex(main.config["series_currenttab"])
@@ -2220,7 +2228,7 @@ class QuoteWindow(EQDockWidget):
 		self.setWidget(mainwidget)
 		mainwidget.setLayout(layout)
 
-		self.quote = QQ(QLabel, wordwrap=True, align=Qt.AlignCenter)
+		self.quote = QQ(QLabel, wordwrap=True, align=Qt.AlignmentFlag.AlignCenter)
 		self.new_quote()
 		layout.addWidget(self.quote)
 		self.setVisible(False)
@@ -2233,7 +2241,7 @@ class QuoteWindow(EQDockWidget):
 		quotes = json.loads(quotes_str)
 		quote = quotes[random.randint(0,len(quotes)-1)]
 		self.quote.setText(quote)
-		self.quote.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
+		self.quote.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
 
 
 
@@ -2244,9 +2252,9 @@ class QuoteWindow(EQDockWidget):
 class EQWidget(QWidget):
 	def __init__(self, id, parent=None):
 		self.id = id
+		geometry = main.config.get(f"windowgeometry_{self.id}")
 		super().__init__(parent)
 
-		geometry = main.config.get(f"windowgeometry_{self.id}")
 		if geometry:
 			if isinstance(geometry, str):
 				geometry = json.loads(geometry)
@@ -2272,7 +2280,7 @@ class CreditsWindow(EQWidget):
 
 		global CREDITSSTRING
 		layout = QVBoxLayout()
-		layout.addWidget(QQ(QLabel, text=CREDITSSTRING, align=Qt.AlignCenter, wordwrap=True, minHeight=300, minWidth=500))
+		layout.addWidget(QQ(QLabel, text=CREDITSSTRING, align=Qt.AlignmentFlag.AlignCenter, wordwrap=True, minHeight=300, minWidth=500))
 		self.setLayout(layout)
 
 class FileWindow(EQWidget):
@@ -2368,8 +2376,8 @@ class FileWindow(EQWidget):
 
 			filesgrid = QGridLayout()
 
-			scrollarea.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-			scrollarea.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+			scrollarea.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+			scrollarea.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 			scrollarea.setWidgetResizable(True)
 			scrollarea.setWidget(widget)
 			widget.setLayout(filesgrid)
@@ -2835,7 +2843,7 @@ class BlendedLinesWindow(EQWidget):
 
 		layout.addLayout(tmplayout)
 
-		self.label = QQ(QLabel, text="Ready", textFormat=Qt.RichText)
+		self.label = QQ(QLabel, text="Ready", textFormat=Qt.TextFormat.RichText)
 		main.signalclass.fitindicator.connect(self.label.setText)
 		tmp_layout = QHBoxLayout()
 		layout.addLayout(tmp_layout)
@@ -2851,7 +2859,7 @@ class BlendedLinesWindow(EQWidget):
 		tmp_layout.addStretch()
 
 		self.table = QTableWidget()
-		self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+		self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 		self.table.setMinimumHeight(50)
 		layout.addWidget(self.table)
 
@@ -2915,6 +2923,7 @@ class BlendedLinesWindow(EQWidget):
 			"center": self.center,
 			"baseline": list(baseline_args),
 			"peaks": [],
+			"datetime": time.strftime("%d.%m.%Y %H:%M:%S", time.localtime()),
 		}
 		
 		opt_param.sort(key=lambda x: x[0])
@@ -2942,9 +2951,18 @@ class BlendedLinesWindow(EQWidget):
 	def save_values(self):
 		if self.fit_values:
 			filename = llwpfile(".fit")
+			
 			with open(filename, "a+") as file:
-				file.write(json.dumps(self.fit_values))
-				file.write("\n")
+				file.seek(0)
+				previous_fits = file.read()
+				if previous_fits.strip():
+					all_fits = json.loads(previous_fits)
+					all_fits.append(self.fit_values)
+				else:
+					all_fits = [self.fit_values]
+			
+				file.truncate(0)
+				json.dump(all_fits, file, indent=2)
 			main.notification(f"Saved the fit to the file {filename}.")
 		else:
 			main.notification(f"No fit values to be saved.")
@@ -2965,7 +2983,7 @@ class BlendedLinesWindow(EQWidget):
 		if oqns:
 			visible_cat_data = main.get_visible_data("cat")
 			dialog = QNsDialog(x, visible_cat_data)
-			dialog.exec_()
+			dialog.exec()
 
 			if dialog.result() == 1:
 				dict_.update(dialog.save())
@@ -3007,7 +3025,7 @@ class SeriesfinderWindow(EQWidget):
 		self.messageLabel = QQ(QLabel, wordwrap=True, hidden=True)
 
 		self.outputTable = QTableWidget()
-		self.outputTable.setEditTriggers(QAbstractItemView.NoEditTriggers)
+		self.outputTable.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
 		vertLayout = QHBoxLayout()
 		leftLayout = QGridLayout()
@@ -3196,7 +3214,7 @@ class BlendWindow(EQWidget):
 		self.noq = main.config["series_qns"]
 		self.table = QTableWidget()
 		self.cols = ["x", "y", "dist"] + [f"qn{ul}{i+1}" for ul in ("u", "l") for i in range(6)] + ["filename"]
-		self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+		self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 		self.table.setRowCount(0)
 		self.table.setColumnCount(len(self.cols)+1)
 		self.table.setHorizontalHeaderLabels(["Y/N", "x", "log. y", "Dist"] +  [f"{ul}{i+1}" for ul in ("U", "L") for i in range(6)] + ["Filename"])
@@ -3420,7 +3438,7 @@ class PeakfinderWindow(EQWidget):
 		layout.addWidget(self.infolabel)
 
 		self.table = QTableWidget()
-		self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+		self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 		self.table.setHidden(True)
 		self.table.doubleClicked.connect(self.go_to)
 
@@ -3971,8 +3989,8 @@ class SpectraResolverWindow(EQWidget):
 		super().__init__(id, parent)
 		self.setWindowTitle("Spectra Resolver")
 		self.list_ = QListWidget()
-		self.list_.setDragDropMode(QAbstractItemView.InternalMove)
-		self.list_.setSelectionMode(QAbstractItemView.ExtendedSelection)
+		self.list_.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+		self.list_.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
 		self.label = QQ(QLabel, text="Ready", wordwrap=True)
 
@@ -4241,19 +4259,13 @@ class FigureWindow(EQWidget):
 		self.layout = layout
 
 		QShortcut(
-			QKeySequence(QKeySequence.ZoomIn),
+			QKeySequence(Qt.Key.Key_ZoomIn),
 			self.view,
 			activated=self.zoom_in,
 		)
 
 		QShortcut(
-			QKeySequence(QKeySequence.ZoomIn),
-			self.view,
-			activated=self.zoom_in,
-		)
-
-		QShortcut(
-			QKeySequence(QKeySequence.ZoomOut),
+			QKeySequence(Qt.Key.Key_ZoomOut),
 			self.view,
 			activated=self.zoom_out,
 		)
@@ -4476,14 +4488,14 @@ class ConfigWindow(EQWidget):
 
 		self.updating = True
 
-		scrollarea.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-		scrollarea.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+		scrollarea.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+		scrollarea.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 		scrollarea.setWidgetResizable(True)
 
 		tmp_layout = QHBoxLayout()
 		tmp_layout.addWidget(QQ(QPushButton, text="Save as default", change=lambda: main.saveoptions()))
 		completer = QCompleter(main.config.keys())
-		completer.setCaseSensitivity(Qt.CaseInsensitive)
+		completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
 		tmp_layout.addWidget(QQ(QLineEdit, placeholder="Search", completer=completer, change=lambda x: self.search(x)))
 		tmp_layout.addStretch(1)
 
@@ -4779,12 +4791,13 @@ class QNsDialog(QDialog):
 		qnslayout.setColumnStretch(7, 1)
 		layout.addLayout(qnslayout)
 
-		cols = ["dist", "x", "log y"] + qns
+		tmp = ["dist", "x", "log y"]
+		cols = tmp + qns
 		table = QTableWidget()
 		table.setColumnCount(len(cols)+1)
 		table.setHorizontalHeaderLabels(["Assign"] + cols)
 		table.setRowCount(0)
-		table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+		table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
 		tmp_df = df.copy()
 		tmp_df["dist"] = tmp_df["x"] - frequency
@@ -4803,9 +4816,10 @@ class QNsDialog(QDialog):
 			tmpd["xpre"] = row["x"]
 			table.setCellWidget(currRowCount, 0, QQ(QPushButton, text="Assign", change=lambda x, tmpd=tmpd: self.table_save(tmpd)))
 
+		
 		for i in range(6):
-			table.setColumnHidden(i+3, i>=noq)
-			table.setColumnHidden(i+9, i>=noq)
+			table.setColumnHidden(i+ len(tmp) + 1, i>=noq)
+			table.setColumnHidden(i+ len(tmp) + 7, i>=noq)
 
 		table.resizeColumnsToContents()
 		layout.addWidget(table)
@@ -5009,7 +5023,7 @@ class ReferenceSelector(QTabWidget):
 		layout = QVBoxLayout()
 
 		self.xsTable = QQ(QTableWidget, rowCount=0, columnCount=2, move=(0, 0))
-		self.xsTable.setEditTriggers(QAbstractItemView.NoEditTriggers)
+		self.xsTable.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 		self.xsTable.setHorizontalHeaderLabels(["#", "Frequency"])
 		layout.addWidget(self.xsTable)
 		if self.state["list"]["xs"]:
@@ -5260,6 +5274,11 @@ class SeriesSelector(QWidget):
 ##
 ## Miscellaneous Classes
 ##
+class FigureCanvas(FigureCanvas):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.wheelEvent = lambda event: event.ignore()
+
 class ProtPlot(QWidget):
 	def __init__(self, parent=None, i=None, onrange=False):
 		super().__init__(parent)
@@ -5452,11 +5471,11 @@ class NotificationsBox(QWidget):
 		self.bg_color = QColor("#a5aab3")
 		self.messages = []
 		self.setWindowFlags(
-			Qt.Window | Qt.Tool | Qt.FramelessWindowHint |
-			Qt.WindowStaysOnTopHint | Qt.X11BypassWindowManagerHint)
+			Qt.WindowType.Window | Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint |
+			Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.X11BypassWindowManagerHint)
 
-		self.setAttribute(Qt.WA_NoSystemBackground, True)
-		self.setAttribute(Qt.WA_TranslucentBackground, True)
+		self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+		self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
 		self.setMinimumHeight(80)
 		self.setMinimumWidth(300)
@@ -5470,8 +5489,8 @@ class NotificationsBox(QWidget):
 			background-color: #bf29292a;
 		""")
 
-		self._desktop = QApplication.instance().desktop()
-		startPos = QPoint(self._desktop.screenGeometry().width() - self.width() - 10, 10)
+		self._desktop = QApplication.instance().primaryScreen()
+		startPos = QPoint(self._desktop.geometry().width() - self.width() - 10, 10)
 		self.move(startPos)
 
 	def paintEvent(self, event=None):
@@ -5618,12 +5637,12 @@ class QSpinBox(QSpinBox):
 		super().__init__(*args, **kwargs)
 		# AdaptiveDecimalStepType is not implemented in earlier versions of PyQt5
 		try:
-			self.setStepType(QAbstractSpinBox.AdaptiveDecimalStepType)
+			self.setStepType(QAbstractSpinBox.StepType.AdaptiveDecimalStepType)
 		except:
 			pass
 
 	def setSingleStep(self, value):
-		self.setStepType(QAbstractSpinBox.DefaultStepType)
+		self.setStepType(QAbstractSpinBox.StepType.DefaultStepType)
 		super().setSingleStep(value)
 
 	def setValue(self, value):
@@ -5642,12 +5661,12 @@ class QDoubleSpinBox(QDoubleSpinBox):
 		self.setDecimals(20)
 		# AdaptiveDecimalStepType is not implemented in earlier versions of PyQt5
 		try:
-			self.setStepType(QAbstractSpinBox.AdaptiveDecimalStepType)
+			self.setStepType(QAbstractSpinBox.StepType.AdaptiveDecimalStepType)
 		except:
 			pass
 
 	def setSingleStep(self, value):
-		self.setStepType(QAbstractSpinBox.DefaultStepType)
+		self.setStepType(QAbstractSpinBox.StepType.DefaultStepType)
 		super().setSingleStep(value)
 
 	def textFromValue(self, value):
@@ -5667,14 +5686,14 @@ class QDoubleSpinBox(QDoubleSpinBox):
 	def validate(self, text, position):
 		try:
 			np.float64(text)
-			return(2, text, position)
+			return(QValidator.State(2), text, position)
 		except ValueError:
 			if text.strip() in ["+", "-", ""]:
-				return(1, text, position)
+				return(QValidator.State(1), text, position)
 			elif re.match(r"^[+-]?\d+\.?\d*[Ee][+-]?\d?$", text):
-				return(1, text, position)
+				return(QValidator.State(1), text, position)
 			else:
-				return(0, text, position)
+				return(QValidator.State(0), text, position)
 
 	def fixup(self, text):
 		tmp = re.search(r"[+-]?\d+\.?\d*", text)
@@ -5703,7 +5722,7 @@ class CustomTableModel(QAbstractTableModel):
 		self.editable = editable
 
 	def data(self, index, role):
-		if role == Qt.DisplayRole or role == Qt.EditRole:
+		if role == Qt.ItemDataRole.DisplayRole or role == Qt.ItemDataRole.EditRole:
 			value = self.data.iloc[index.row(), index.column()]
 			dtype = self.data[self.data.columns[index.column()]].dtypes
 
@@ -5713,14 +5732,14 @@ class CustomTableModel(QAbstractTableModel):
 				if value == pyckett.SENTINEL:
 					return("")
 				else:
-					if role == Qt.EditRole:
+					if role == Qt.ItemDataRole.EditRole:
 						return(str(value))
 					else:
 						return(f"{{:{main.config['flag_tableformatint']}}}".format(value))
 			elif np.isnan(value):
 				return("")
 			else:
-				if role == Qt.EditRole:
+				if role == Qt.ItemDataRole.EditRole:
 					return(str(value))
 				else:
 					return(f"{{:{main.config['flag_tableformatfloat']}}}".format(value))
@@ -5732,11 +5751,11 @@ class CustomTableModel(QAbstractTableModel):
 		return(self.data.shape[1]-len(self.hiddencolumns))
 
 	def headerData(self, section, orientation, role):
-		if role == Qt.DisplayRole:
-			if orientation == Qt.Horizontal:
+		if role == Qt.ItemDataRole.DisplayRole:
+			if orientation == Qt.Orientation.Horizontal:
 				return str(self.headers[section])
 
-			if orientation == Qt.Vertical:
+			if orientation == Qt.Orientation.Vertical:
 				if section >= len(self.data.index):
 					return ""
 				return str(self.data.index[section])
@@ -5935,7 +5954,7 @@ def csv_copypaste(self, event):
 		QApplication.clipboard().setText(output)
 
 	elif event.key() == Qt.Key_V and (event.modifiers() & Qt.ControlModifier):
-		if QAbstractItemView.NoEditTriggers == self.editTriggers():
+		if QAbstractItemView.EditTrigger.NoEditTriggers == self.editTriggers():
 			return
 		cells = sorted(self.selectedIndexes())
 		if not cells:
@@ -6042,7 +6061,7 @@ def breakpoint(ownid, lastid):
 def commandline(showdialog=True):
 	if showdialog:
 		dialog = ConsoleDialog()
-		dialog.exec_()
+		dialog.exec()
 		if dialog.result() != 1:
 			return
 
@@ -6068,13 +6087,12 @@ def send_mail_to_author():
 	webbrowser.open(f"mailto:bonah@ph1.uni-koeln.de?subject={APP_TAG}")
 
 def restart():
-	dir = os.path.dirname(os.path.realpath(__file__))
-	fname = os.path.join(dir, llwpfile(".llwp"))
+	fname = llwpfile(".llwp")
 	main.saveproject(fname)
 	main.saveoptions()
 	if not main.new_df.empty:
 		main.save_lines_lin(llwpfile(".lin"), force_noappend=True, force_lin=True)
-	os.execv(sys.executable, [sys.executable, sys.argv[0], fname])
+	os.execl(sys.executable, sys.executable, __file__, fname)
 
 def lineshape(shape, derivative, *args):
 	if shape == "Gauss":
