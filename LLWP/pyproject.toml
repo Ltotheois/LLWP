@@ -11,7 +11,7 @@ authors = [
 description = "LLWP is a fast, efficient and easy solution for exploring and assigning spectra - relying on Loomis-Wood plots."
 readme = "README.md"
 requires-python = ">=3.7"
-dependencies = ['numpy', 'pandas', 'matplotlib', 'wrapt', 'pyckett', 'scipy', 'PyQt5']
+dependencies = ['numpy', 'pandas', 'matplotlib', 'wrapt', 'pyckett', 'scipy', 'PyQt6']
 classifiers = [
 	"Programming Language :: Python :: 3",
 	"License :: OSI Approved :: GNU General Public License v3 (GPLv3)",

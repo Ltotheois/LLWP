@@ -57,7 +57,7 @@ from PyQt6.QtGui import *
 
 import matplotlib
 from matplotlib import style, figure
-from matplotlib.backends.backend_qt5agg import FigureCanvas, NavigationToolbar2QT
+from matplotlib.backends.backend_qtagg import FigureCanvas, NavigationToolbar2QT
 
 import warnings
 warnings.simplefilter('ignore', np.RankWarning)
@@ -129,6 +129,9 @@ locks = {key: threading.RLock() for key in (
 ##
 class Main():
 	def __init__(self):
+		self.app = QApplication(sys.argv)
+		self.app.setStyle("Fusion")
+	
 		self.open_windows = {}
 		self.signalclass = SignalClass()
 		self.config = Config(self.signalclass.updateconfig)
@@ -140,8 +143,12 @@ class Main():
 		sys.excepthook = except_hook
 		threading.excepthook = lambda args: except_hook(*args[:3])
 
-		self.app = QApplication(sys.argv)
-		self.app.setStyle("Fusion")
+		self.update_mpl_theme()
+		self.app.styleHints().colorSchemeChanged.connect(self.update_mpl_theme)
+		matplotlib.rcParams['axes.facecolor'] = '#00000000'
+		
+		matplotlib.rc('font', **self.config["plot_font_dict"])
+		self.config.register("plot_font_dict", lambda: matplotlib.rc('font', **self.config["plot_font_dict"]))
 
 		self.notificationsbox = NotificationsBox()
 		self.signalclass.notification.connect(lambda text: self.notificationsbox.add_message(text))
@@ -150,6 +157,7 @@ class Main():
 		self.plotwidget = PlotWidget()
 		self.plotwidget.gui()
 		self.plotwidget.create_plots()
+		
 		self.mainwindow.setCentralWidget(self.plotwidget)
 		self.mainwindow.loaddockables()
 		self.mainwindow.createmenu()
@@ -164,7 +172,6 @@ class Main():
 
 		if self.messages:
 			main.notification("\n".join(self.messages))
-		self.change_style(self.config["layout_theme"])
 
 		self.autosavetimer = QTimer(self.app)
 		self.autosavetimer.timeout.connect(lambda: main.save_lines_lin(llwpfile(".lin"), force_noappend=True, force_lin=True, quiet=True))
@@ -173,6 +180,17 @@ class Main():
 		main.config.register("flag_autosave", lambda: self.autosavetimer.start(main.config["flag_autosave"]*1000) if main.config["flag_autosave"] > 0 else self.autosavetimer.stop())
 
 		sys.exit(self.app.exec())
+
+	def update_mpl_theme(self):
+		if is_dark_theme():
+			mpl_style = 'dark_background'
+			mpl_background = 'black'
+		else:
+			mpl_style = 'default'
+			mpl_background = 'white'
+			
+		matplotlib.style.use(mpl_style)
+		matplotlib.rcParams['figure.facecolor'] = mpl_background
 
 	def setup_dfs(self):
 		self.exp_df = pd.DataFrame(columns=exp_dtypes.keys()).astype(exp_dtypes)
@@ -204,7 +222,7 @@ class Main():
 
 	def loadoptions(self, fname=None):
 		if not fname:
-			self.config.update({key: value[0] for key, value in config_specs.items()})
+			self.config.update({key: value for key, (value, class_) in config_specs.items()})
 			fname = llwpfile(".ini")
 
 		config_parser = configparser.ConfigParser(interpolation=None)
@@ -231,7 +249,19 @@ class Main():
 						print(message)
 				else:
 					self.config[fullkey] = value
-
+		
+		# Special case changing colors for better contrast
+		for key, value in self.config.items():
+			if key in config_specs and config_specs[key][1] == Color:
+				if is_dark_theme():
+					if value in ("#000000", ):
+						self.config[key] = "#ffffff"
+						self.messages.append(f"Changed the color of '{key}' from black to white as it is otherwise invisible.")
+				else:
+					if value in ("#ffffff", ):
+						self.config[key] = "#000000"
+						self.messages.append(f"Changed the color of '{key}' from white to black as it is otherwise invisible.")
+				
 	def saveoptions(self):
 		self.mainwindow.savestate()
 		output_dict = {}
@@ -565,100 +595,6 @@ class Main():
 			elif type == "ser":
 				return(self.ser_df)
 
-	def change_style(self, style=None):
-		styles = ["light", "dark", "custom"]
-		app = self.app
-		if style == None:
-			self.config["layout_theme"] = styles[(styles.index(self.config["layout_theme"])+1)%len(styles)]
-		elif style in styles:
-			self.config["layout_theme"] = style
-		else:
-			self.config["layout_theme"] = styles[0]
-
-		if self.config["layout_owntheme"] == {} and self.config["layout_theme"] == "custom":
-			self.config["layout_theme"] = "light"
-
-		if self.config["layout_theme"] == "light":
-		# @Maybe delete the whole change style functionality
-		# But Probably keep to update matplotlib style
-		# @Luis: this does not work properly if the standard palette is dark
-			palette = app.style().standardPalette()
-			mplstyles = ("default", "white")
-
-		elif self.config["layout_theme"] == "dark" or self.config["layout_theme"] == "custom":
-			colors = {
-				"window":				QColor(53, 53, 53),
-				"windowText":			QColor(255, 255, 255),
-				"base":					QColor(35, 35, 35),
-				"alternateBase":		QColor(53, 53, 53),
-				"toolTipBase":			QColor(25, 25, 25),
-				"toolTipText":			QColor(255, 255, 255),
-				"placeholderText":		QColor(100, 100, 100),
-				"text":					QColor(255, 255, 255),
-				"button":				QColor(53, 53, 53),
-				"buttonText":			QColor(255, 255, 255),
-				"brightText":			Qt.GlobalColor.red,
-				"light":				QColor(255, 255, 255),
-				"midlight":				QColor(200, 200, 200),
-				"mid":					QColor(150, 150, 150),
-				"dark":					QColor(50, 50, 50),
-				"shadow":				QColor(0, 0, 0),
-				"highlight":			QColor(42, 130, 218),
-				"highlightedText":		QColor(35, 35, 35),
-				"link":					QColor(42, 130, 218),
-				"linkVisited":			QColor(42, 130, 218),
-
-				"disabledButtonText":	Qt.GlobalColor.darkGray,
-				"disabledWindowText":	Qt.GlobalColor.darkGray,
-				"disabledText":			Qt.GlobalColor.darkGray,
-				"disabledLight":		QColor(53, 53, 53),
-
-				"mplstyles":			("dark_background", "black"),
-			}
-
-			if self.config["layout_theme"] == "custom":
-				colors.update(self.config["layout_owntheme"])
-
-			tmp_dict = {
-				"window":				(QPalette.ColorRole.Window,),
-				"windowText":			(QPalette.ColorRole.WindowText,),
-				"base":					(QPalette.ColorRole.Base,),
-				"alternateBase":		(QPalette.ColorRole.AlternateBase,),
-				"toolTipBase":			(QPalette.ColorRole.ToolTipBase,),
-				"toolTipText":			(QPalette.ColorRole.ToolTipText,),
-				"placeholderText":		(QPalette.ColorRole.PlaceholderText,),
-				"text":					(QPalette.ColorRole.Text,),
-				"button":				(QPalette.ColorRole.Button,),
-				"buttonText":			(QPalette.ColorRole.ButtonText,),
-				"brightText":			(QPalette.ColorRole.BrightText,),
-				"light":				(QPalette.ColorRole.Light,),
-				"midlight":				(QPalette.ColorRole.Midlight,),
-				"dark":					(QPalette.ColorRole.Dark,),
-				"mid":					(QPalette.ColorRole.Mid,),
-				"shadow":				(QPalette.ColorRole.Shadow,),
-				"highlight":			(QPalette.ColorRole.Highlight,),
-				"highlightedText":		(QPalette.ColorRole.HighlightedText,),
-				"link":					(QPalette.ColorRole.Link,),
-				"linkVisited":			(QPalette.ColorRole.LinkVisited,),
-
-				"disabledButtonText":	(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText),
-				"disabledWindowText":	(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText),
-				"disabledText":			(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text),
-				"disabledLight":		(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Light),
-			}
-
-			mplstyles = colors["mplstyles"]
-			palette = QPalette()
-			for key, values in tmp_dict.items():
-				palette.setColor(*values, colors[key])
-
-
-		app.setPalette(palette)
-		matplotlib.style.use(mplstyles[0])
-		matplotlib.rc('font', **self.config["plot_font_dict"])
-		main.config.register("plot_font_dict", lambda: matplotlib.rc('font', **self.config["plot_font_dict"]))
-		self.plotwidget.fig.patch.set_facecolor(mplstyles[1])
-		self.plotwidget.create_plots()
 
 	@synchronized_d(locks["windows"])
 	def open_window(self, window, *args):
@@ -793,8 +729,6 @@ class MainWindow(QMainWindow):
 				QQ(QAction, parent=self, text="&Quit", change=self.close, tooltip="Close the program"),
 			),
 			"View": (
-				QQ(QAction, parent=self, text="&Change Style", tooltip="Change between light, dark and custom theme", change=lambda x: main.change_style()),
-				None,
 				QQ(QAction, "layout_mpltoolbar", parent=self, text="&MPL Toolbar", shortcut="Shift+1", tooltip="Show or hide toolbar to edit or save the plot canvas", checkable=True),
 				toggleaction_configureplots,
 				toggleaction_referenceseries,
@@ -1390,7 +1324,7 @@ class PlotWidget(QGroupBox):
 		if xmax == xmin or xmax > axrange[1] or xmin < axrange[0]:
 			return
 
-		shift = (QApplication.keyboardModifiers() == Qt.ShiftModifier)
+		shift = (QApplication.keyboardModifiers() == Qt.KeyboardModifier.ShiftModifier)
 		if shift or main.config["fit_alwaysfit"]:
 			xmiddle, xuncert = self.fit_peak(xmin, xmax, index)
 			if main.config["fit_clipboard"]:
@@ -1912,8 +1846,8 @@ class PlotWidget(QGroupBox):
 		self.set_width(2 ** -steps, absolute=False)
 
 	def change_fitcolor(self):
-		color = QColorDialog.getColor(initial=QColor(rgbt_to_trgb(main.config["color_fit"])), options=QColorDialog.ShowAlphaChannel)
-		color = Color(trgb_to_rgbt(color.name(QColor.HexArgb)))
+		color = QColorDialog.getColor(initial=QColor(rgbt_to_trgb(main.config["color_fit"])), options=QColorDialog.ColorDialogOption.ShowAlphaChannel)
+		color = Color(trgb_to_rgbt(color.name(QColor.NameFormat.HexArgb)))
 		main.config["color_fit"] = color
 
 	def plot_number(self):
@@ -2528,9 +2462,9 @@ class FileWindow(EQWidget):
 		if inp:
 			color = color_input
 		else:
-			color = QColorDialog.getColor(initial=QColor(rgbt_to_trgb(color_input)), options=QColorDialog.ShowAlphaChannel)
+			color = QColorDialog.getColor(initial=QColor(rgbt_to_trgb(color_input)), options=QColorDialog.ColorDialogOption.ShowAlphaChannel)
 			if color.isValid():
-				color = trgb_to_rgbt(color.name(QColor.HexArgb))
+				color = trgb_to_rgbt(color.name(QColor.NameFormat.HexArgb))
 			else:
 				return
 
@@ -4759,7 +4693,9 @@ class QNsDialog(QDialog):
 		super().__init__()
 		QShortcut("Esc", self).activated.connect(lambda: self.predone(0))
 
+		noq = main.config["series_qns"]
 		qns = [f"qnu{i+1}" for i in range(6)]+[f"qnl{i+1}" for i in range(6)]
+		qns_visible = [f"qn{ul}{n+1}" for ul in ("u", "l") for n in range(noq)]
 		self.res = {key: pyckett.SENTINEL for key in qns}
 
 		self.setWindowTitle(f"Choose QNs for transition at {frequency}")
@@ -4771,7 +4707,6 @@ class QNsDialog(QDialog):
 		layout.addWidget(QQ(QLabel, wordwrap=True, text="Enter the quantum numbers in the input fields or choose one of the transitions from the table."))
 		layout.addSpacing(10)
 
-		noq = main.config["series_qns"]
 		self.sbs = {}
 		qnslayout = QGridLayout()
 		for i in range(noq):
@@ -4812,19 +4747,19 @@ class QNsDialog(QDialog):
 			for j, col in enumerate(cols):
 				val = f'{row[col]:{main.config["flag_xformatfloat"]}}'.rstrip("0").rstrip(".")
 				table.setItem(currRowCount, j+1, QTableWidgetItem(val))
-			tmpd = {key: row[key] for key in qns}
+			tmpd = {key: row[key] for key in qns_visible}
 			tmpd["xpre"] = row["x"]
 			table.setCellWidget(currRowCount, 0, QQ(QPushButton, text="Assign", change=lambda x, tmpd=tmpd: self.table_save(tmpd)))
 
 		
 		for i in range(6):
-			table.setColumnHidden(i+ len(tmp) + 1, i>=noq)
-			table.setColumnHidden(i+ len(tmp) + 7, i>=noq)
+			table.setColumnHidden(i+ len(tmp) + 2, i>=noq)
+			table.setColumnHidden(i+ len(tmp) + 8, i>=noq)
 
 		table.resizeColumnsToContents()
 		layout.addWidget(table)
 
-		buttons = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+		buttons = QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
 		buttonBox = QDialogButtonBox(buttons)
 		buttonBox.accepted.connect(lambda: self.selector_save(1))
 		buttonBox.rejected.connect(lambda: self.predone(0))
@@ -4886,7 +4821,7 @@ class ConsoleDialog(QDialog):
 	def add_tab(self, title="Command", command=""):
 		textarea = QQ(QPlainTextEdit, value=command)
 		cursor = textarea.textCursor()
-		cursor.movePosition(QTextCursor.End)
+		cursor.movePosition(QTextCursor.MoveOperation.End)
 		textarea.setTextCursor(cursor)
 		self.tabs.addTab(textarea, title)
 
@@ -5278,6 +5213,7 @@ class FigureCanvas(FigureCanvas):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.wheelEvent = lambda event: event.ignore()
+		self.setStyleSheet('background-color: #00000000')
 
 class ProtPlot(QWidget):
 	def __init__(self, parent=None, i=None, onrange=False):
@@ -5436,7 +5372,7 @@ class ProtPlot(QWidget):
 		axrange = self.axs["ax"][index].get_xlim()
 		if xmax == xmin or xmax > axrange[1] or xmin < axrange[0]:
 			return
-		shift = (QApplication.keyboardModifiers() == Qt.ShiftModifier)
+		shift = (QApplication.keyboardModifiers() == Qt.KeyboardModifier.ShiftModifier)
 		if self.onrange == "Assign" and (shift or main.config["fit_alwaysfit"]):
 			xmiddle, xuncert = main.plotwidget.fit_peak(xmin, xmax, index)
 			xpre = main.plotwidget.self.cache_positions[index]
@@ -5591,6 +5527,9 @@ class Config(dict):
 
 	def unregister_widget(self, id):
 		self.callbacks.drop(self.callbacks[self.callbacks["id"] == id].index, inplace=True)
+
+def is_dark_theme():
+	return(QApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark)
 
 class Color(str):
 	def __new__(cls, color):
@@ -5762,9 +5701,9 @@ class CustomTableModel(QAbstractTableModel):
 
 	def flags(self, index):
 		if self.editable:
-			return(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+			return(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable)
 		else:
-			return(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+			return(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
 
 	def update(self):
 		self.layoutChanged.emit()
@@ -5772,7 +5711,7 @@ class CustomTableModel(QAbstractTableModel):
 	def setData(self, index, value, role):
 		if not index.isValid():
 			return False
-		if role != Qt.EditRole:
+		if role != Qt.ItemDataRole.EditRole:
 			return False
 
 		row = index.row()
@@ -5938,7 +5877,7 @@ def bin_data(dataframe, binwidth, range):
 	return(dataframe)
 
 def csv_copypaste(self, event):
-	if event.key() == Qt.Key_C and (event.modifiers() & Qt.ControlModifier):
+	if event.key() == Qt.Key.Key_C and (event.modifiers() == Qt.KeyboardModifier.ControlModifier):
 		cells = sorted(self.selectedIndexes())
 		output = []
 		i = 0
@@ -5953,7 +5892,7 @@ def csv_copypaste(self, event):
 		output = "\n".join(output)
 		QApplication.clipboard().setText(output)
 
-	elif event.key() == Qt.Key_V and (event.modifiers() & Qt.ControlModifier):
+	elif event.key() == Qt.Key.Key_V and (event.modifiers() == Qt.KeyboardModifier.ControlModifier):
 		if QAbstractItemView.EditTrigger.NoEditTriggers == self.editTriggers():
 			return
 		cells = sorted(self.selectedIndexes())
@@ -5968,7 +5907,7 @@ def csv_copypaste(self, event):
 			for j, value in enumerate(row):
 				while self.isColumnHidden(j_0+j+j_hidden):
 					j_hidden += 1
-				self.model().setData(self.model().index(i_0+i, j_0+j+j_hidden), value, Qt.EditRole)
+				self.model().setData(self.model().index(i_0+i, j_0+j+j_hidden), value, Qt.ItemDataRole.EditRole)
 	else:
 		return False
 	return True
@@ -6092,7 +6031,7 @@ def restart():
 	main.saveoptions()
 	if not main.new_df.empty:
 		main.save_lines_lin(llwpfile(".lin"), force_noappend=True, force_lin=True)
-	os.execl(sys.executable, sys.executable, __file__, fname)
+	os.execl(sys.executable, __file__, fname)
 
 def lineshape(shape, derivative, *args):
 	if shape == "Gauss":
@@ -6187,8 +6126,6 @@ lin_dtypes = pyckett.lin_dtypes
 
 config_specs = {
 	# Format is: [default value, class]
-	"layout_theme":							["light", str],
-	"layout_owntheme":						[{}, dict],
 	"layout_mpltoolbar":					[False, bool],
 
 	"color_exp":							["#000000", Color],
@@ -6251,9 +6188,9 @@ config_specs = {
 	"flag_alwaysshowlog":					[True, bool],
 	"flag_extensions":						[{"exp": [".csv"], "cat": [".cat"], "lin": [".lin"], "project": [".llwp"]}, dict],
 	"flag_autosetqns":						[True, bool],
-	"flag_predictionformats":				[{}, dict, True],
-	"flag_assignmentformats":				[{}, dict, True],
-	"flag_assignmentsavefmt":				[{}, dict, True],
+	"flag_predictionformats":				[{}, dict],
+	"flag_assignmentformats":				[{}, dict],
+	"flag_assignmentsavefmt":				[{}, dict],
 	"flag_loadfilesthreaded":				[True, bool],
 	"flag_shownotification":				[True, bool],
 	"flag_notificationtime":				[2000, int],
