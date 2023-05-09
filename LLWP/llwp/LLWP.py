@@ -2630,7 +2630,10 @@ class BlendedLinesWindow(EQWidget):
 					xs = []
 					ys = []
 					ws = []
+					exp_mean = 0
 					if len(exp_ys) and (polynomrank + len(peaks)):
+						if main.config["blendedlineswindow_autopositionpeaks"]:
+							exp_mean = exp_ys.mean()
 						p0 = []
 						bounds = [[],[]]
 
@@ -2688,13 +2691,16 @@ class BlendedLinesWindow(EQWidget):
 						perr = np.sqrt(np.diag(pcov))
 						res_xs = np.linspace(xrange[0], xrange[1], main.config["blendedlineswindow_xpoints"])
 						res_ys = fitfunction(res_xs, *popt)
+						res_exp_ys = fitfunction(exp_xs, *popt)
 					else:
 						popt = [0]*(noa*len(peaks)+polynomrank+2*fixedwidth)
 						perr = [0]*(noa*len(peaks)+polynomrank+2*fixedwidth)
 						res_xs = np.linspace(xrange[0], xrange[1], main.config["blendedlineswindow_xpoints"])
 						res_ys = res_xs*0
+						res_exp_ys = exp_xs*0
 
 					breakpoint(ownid, self.fit_thread_id)
+
 
 					self.fit_line.set_data(res_xs, res_ys)
 					self.fit_line.set_color(main.config["blendedlineswindow_color_total"])
@@ -2711,13 +2717,14 @@ class BlendedLinesWindow(EQWidget):
 							tmp_errors.extend(perr[-(polynomrank+now):len(popt)-polynomrank])
 
 						tmp_ys = fitfunction_withoutbaseline(res_xs, *tmp_params)
+						tmp_ys += exp_mean
 						self.plot_parts.append(self.ax.plot(res_xs, tmp_ys, color=main.config["blendedlineswindow_color_total"], alpha=main.config["blendedlineswindow_transparency"])[0])
 
 						opt_param.append( tmp_params )
 						err_param.append( tmp_errors )
 
 
-					self.plot_parts.append(self.ax.scatter([x[0] for x in opt_param], [x[1] for x in opt_param], color=main.config["blendedlineswindow_color_points"]))
+					self.plot_parts.append(self.ax.scatter([x[0] for x in opt_param], [x[1] + exp_mean for x in opt_param], color=main.config["blendedlineswindow_color_points"]))
 
 					if polynomrank > 0 and main.config["blendedlineswindow_showbaseline"]:
 						baseline_args = popt[-polynomrank:]
@@ -2725,7 +2732,8 @@ class BlendedLinesWindow(EQWidget):
 					else:
 						baseline_args = []
 
-					self.parent.params = opt_param, err_param, profile, derivative, noa, now, self.center, baseline_args
+					rms_ys = np.sqrt(np.sum((exp_ys - res_exp_ys)**2) / len(exp_ys)) if len(exp_ys) else 0
+					self.parent.params = opt_param, err_param, profile, derivative, noa, now, self.center, baseline_args, rms_ys
 
 					breakpoint(ownid, self.fit_thread_id)
 
@@ -2850,13 +2858,14 @@ class BlendedLinesWindow(EQWidget):
 		return(np.sum(res_ys, axis=0))
 
 	def fill_table(self):
-		opt_param, err_param, function, derivative, noa, now, self.center, baseline_args = self.params
+		opt_param, err_param, function, derivative, noa, now, self.center, baseline_args, rms_ys = self.params
 		fit_values = {
 			"function": function,
 			"derivative": derivative,
 			"center": self.center,
 			"baseline": list(baseline_args),
 			"peaks": [],
+			"RMS": rms_ys,
 			"datetime": time.strftime("%d.%m.%Y %H:%M:%S", time.localtime()),
 		}
 		
@@ -6031,7 +6040,7 @@ def restart():
 	main.saveoptions()
 	if not main.new_df.empty:
 		main.save_lines_lin(llwpfile(".lin"), force_noappend=True, force_lin=True)
-	os.execl(sys.executable, __file__, fname)
+	os.execl(sys.executable, sys.executable, __file__, fname)
 
 def lineshape(shape, derivative, *args):
 	if shape == "Gauss":
@@ -6220,6 +6229,7 @@ config_specs = {
 	"blendedlineswindow_color_total":		["#3d5dff", Color],
 	"blendedlineswindow_color_points":		["#ff3352", Color],
 	"blendedlineswindow_color_baseline":	["#f6fa14", Color],
+	"blendedlineswindow_autopositionpeaks":	[True, bool],
 
 	"lineshapewindow_lineshape":			["Gauss", str],
 	"lineshapewindow_derivative":			[0, int],
