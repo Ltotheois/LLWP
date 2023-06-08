@@ -3108,6 +3108,7 @@ class BlendWindow(EQWidget):
 		self.update_gui(entries, dict_, index)
 
 	def update_gui(self, entries, dict_, index):
+		self.noq = main.config["series_qns"]
 		self.entries = entries.reset_index(drop=True)
 		self.xmiddle = dict_["x"]
 		self.index = index
@@ -3154,7 +3155,6 @@ class BlendWindow(EQWidget):
 		self.label = QQ(QLabel)
 		layout.addWidget(self.label)
 
-		self.noq = main.config["series_qns"]
 		self.table = QTableWidget()
 		self.cols = ["x", "y", "dist"] + [f"qn{ul}{i+1}" for ul in ("u", "l") for i in range(6)] + ["filename"]
 		self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -3207,7 +3207,6 @@ class BlendWindow(EQWidget):
 			for i in range(self.noq):
 				tmp_dict[f"qnu{i+1}"] = row[f"qnu{i+1}"]
 				tmp_dict[f"qnl{i+1}"] = row[f"qnl{i+1}"]
-
 			main.plotwidget.assign(None, tmp_dict)
 
 		main.plotwidget.set_data()
