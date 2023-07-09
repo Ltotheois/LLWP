@@ -3020,11 +3020,11 @@ class SeriesfinderWindow(EQWidget):
 
 		tmp_condition = []
 		if main.config["seriesfinderwindow_atype"]:
-			tmp_condition.append(f"(abs(qnu2-qnl2) == 0 and abs(qnu3-qnl3) == 1)")
+			tmp_condition.append(f"(abs(qnu2-qnl2) % 2 == 0 and abs(qnu3-qnl3) % 2 == 1)")
 		if main.config["seriesfinderwindow_btype"]:
-			tmp_condition.append(f"(abs(qnu2-qnl2) == 1 and abs(qnu3-qnl3) == 1)")
+			tmp_condition.append(f"(abs(qnu2-qnl2) % 2 == 1 and abs(qnu3-qnl3) % 2 == 1)")
 		if main.config["seriesfinderwindow_ctype"]:
-			tmp_condition.append(f"(abs(qnu2-qnl2) == 1 and abs(qnu3-qnl3) == 0)")
+			tmp_condition.append(f"(abs(qnu2-qnl2) % 2 == 1 and abs(qnu3-qnl3) % 2 == 0)")
 		if tmp_condition:
 			condition.append(" or ".join(tmp_condition))
 		condition = " and ".join([f"({x})" for x  in condition])
@@ -3054,7 +3054,7 @@ class SeriesfinderWindow(EQWidget):
 		else:
 			unassigned = "with already assigned lines"
 
-		tmp_cat_df["y"] = np.log(tmp_cat_df["y"])/np.log(10)
+		tmp_cat_df["y"] = np.log10(tmp_cat_df["y"])
 		tmp_cat_df = tmp_cat_df.nlargest(nor, "y")
 
 		if tmp_min and tmp_max:
@@ -4761,8 +4761,8 @@ class QNsDialog(QDialog):
 
 		
 		for i in range(6):
-			table.setColumnHidden(i+ len(tmp) + 2, i>=noq)
-			table.setColumnHidden(i+ len(tmp) + 8, i>=noq)
+			table.setColumnHidden(i+ len(tmp) + 1, i>=noq)
+			table.setColumnHidden(i+ len(tmp) + 7, i>=noq)
 
 		table.resizeColumnsToContents()
 		layout.addWidget(table)
@@ -5896,7 +5896,7 @@ def csv_copypaste(self, event):
 			while i < len(cells) and cells[i].row() == row:
 				tmp.append(cells[i].data())
 				i += 1
-			output.append("\t".join(tmp))
+			output.append("\t".join(map(str, tmp)))
 		output = "\n".join(output)
 		QApplication.clipboard().setText(output)
 
@@ -6063,7 +6063,7 @@ def lineshape(shape, derivative, *args):
 		ys = special.voigt_profile(x-x_0, gauss, lorentz)
 
 	for i in range(0, int(derivative)):
-		ys = np.gradient(ys)
+		ys = np.gradient(ys, edge_order=2)
 	if derivative%2 == 0 and derivative != 0 and derivative%4 != 0:
 		ys = -ys
 	ymax = np.max(ys) if np.isfinite(ys).any() else 1
