@@ -179,6 +179,8 @@ class Main():
 			self.autosavetimer.start(main.config["flag_autosave"]*1000)
 		main.config.register("flag_autosave", lambda: self.autosavetimer.start(main.config["flag_autosave"]*1000) if main.config["flag_autosave"] > 0 else self.autosavetimer.stop())
 
+		# @Luis: Add here any code that should be performed automatically after the start
+
 		sys.exit(self.app.exec())
 
 	def update_mpl_theme(self):
@@ -188,7 +190,7 @@ class Main():
 		else:
 			mpl_style = 'default'
 			mpl_background = 'white'
-			
+		
 		matplotlib.style.use(mpl_style)
 		matplotlib.rcParams['figure.facecolor'] = mpl_background
 
@@ -767,6 +769,7 @@ class MainWindow(QMainWindow):
 				QQ(QAction, parent=self, text="&Spectra Resolver", shortcut="Ctrl+7", tooltip="Press to open the Spectra Resolver module", change=lambda x: main.open_window(SpectraResolverWindow)),
 				QQ(QAction, parent=self, text="&Lineshape", shortcut="Ctrl+8", tooltip="Press to open the lineshape module, which allows to simulate different line profiles from the .cat stick spectrum", change=lambda x: main.open_window(LineshapeWindow)),
 				QQ(QAction, parent=self, text="&Series Fit", shortcut="Ctrl+9", tooltip="Open Series Fit Window, which allows to try out different combinations of transitions as a series", change=lambda x: main.open_window(SeriesFitWindow)),
+				QQ(QAction, parent=self, text="&Energy Level Trends", tooltip="Open Energy Levels Trend Window, which allows to find trends in energy level series, mitigating label shifts", change=lambda x: main.open_window(EnergyLevelsTrendWindow)),
 				QQ(QAction, parent=self, text="&Create Report", tooltip="Open Report Window, which allows to summarise your analysis", change=lambda x: main.open_window(ReportWindow)),
 				QQ(QAction, parent=self, text="&Create Figure", tooltip="Open Figure Window, which allows to create publication quality figures", change=lambda x: main.open_window(FigureWindow)),
 				QQ(QAction, parent=self, text="&Calibrate Spectrum", tooltip="Open Calibrate Spectrum Window, which allows to intensity calibrate the spectrum", change=lambda x: main.open_window(CalibrateSpectrumWindow)),
@@ -3849,7 +3852,6 @@ class EnergyLevelsWindow(EQWidget):
 		self.dataframe = None
 		self.dataframe_filtered = None
 
-
 		self.ax = self.fig.subplots()
 		self.ax.ticklabel_format(useOffset=False)
 
@@ -3882,8 +3884,6 @@ class EnergyLevelsWindow(EQWidget):
 		buttonslayout.addStretch(1)
 		self.update_button = QQ(QPushButton, text="Update", change=self.plot_energylevels)
 		buttonslayout.addWidget(self.update_button)
-		self.trend_button = QQ(QPushButton, text="Label Shifting", change=lambda x: main.open_window(EnergyLevelsTrendWindow, self))
-		buttonslayout.addWidget(self.trend_button)
 		buttonslayout.addStretch(1)
 
 	def load_file(self, fname=None):
@@ -3901,6 +3901,8 @@ class EnergyLevelsWindow(EQWidget):
 		main.app.processEvents()
 		self.noq = main.config["series_qns"]
 		try:
+			if self.dataframe is None:
+				return
 			df = self.dataframe
 			query = main.config["energylevelswindow_query"]
 			if query:
@@ -3973,284 +3975,186 @@ class EnergyLevelsWindow(EQWidget):
 		self.load_file(fname)
 
 class EnergyLevelsTrendWindow(EQWidget):
-	def __init__(self, id, parent):
+	def __init__(self, id, parent=None):
 		super().__init__(id)
 		self.setWindowTitle("Energy Levels Trend")
-	
-
-		self.parent = parent
-		self.fit_data = pd.DataFrame(columns=pyckett.egy_dtypes.keys()).astype(pyckett.egy_dtypes)
-		self.predicted_levels = None
-		self.last_command = None
-		self.last_update_plot_args = None
+		self.setAcceptDrops(True)
 		
-		self.reduced_energy_parameter_input = QQ(QDoubleSpinBox, "energylevelstrendwindow_reducedenergyparameter", range=(None, None))
-
-		self.command_prompt = QQ(QLineEdit, placeholder="Enter commands (add, del, reset, ...)")
-		self.command_prompt.returnPressed.connect(self.on_command)
+		self.dataframe = pd.DataFrame(columns=pyckett.egy_dtypes.keys()).astype(pyckett.egy_dtypes)
+		self.dataframe_cache = {}
+		self.reduced_energy_input = QQ(QLineEdit, "energylevelstrendwindow_reducedenergy", placeholder="Specify formula for reduced energy (depending on egy, qn1, ..., qn6)")
+		self.file_label = QQ(QLabel)
 		
-		self.best_levels_output = QQ(QTextEdit, readonly=True, height=200)
-		self.best_levels_output.setFontFamily("Courier")
-		self.used_levels_output = QQ(QTextEdit, readonly=True)
-		self.used_levels_output.setFontFamily("Courier")
 		
+		self.series_selector = None
+		class CustomSeriesSelector(SeriesSelector):
+			def changed(self, *args, **kwargs):
+				super().changed(*args, **kwargs)
+				self.parent.series_selector_changed()
+		self.series_selector = CustomSeriesSelector(self)
+		self.series_selector.layout.setColumnStretch(8, 0)
 		
 		layout = QVBoxLayout()
+		layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+		
 		self.setLayout(layout)
 		
-		layout.addWidget(QQ(QLabel, text="Reduced Energy Parameter: "))
-		layout.addWidget(self.reduced_energy_parameter_input)
-		layout.addWidget(self.command_prompt)
-		layout.addWidget(self.best_levels_output)
-		layout.addWidget(self.used_levels_output)
-		layout.addWidget(QQ(QLineEdit, "energylevelstrendwindow_qnsspecifier", placeholder="Quantum number specifier"))
-		layout.addWidget(QQ(QPushButton, text="Transfer to LWP", change=self.transfer_to_main_plot))
+		tmp_hlayout = QHBoxLayout()
+		layout.addLayout(tmp_hlayout)
 		
-		self.fit_line = None
-		self.register_collection()
+		tmp = QGroupBox("Options")
+		tmp_layout = QGridLayout()
+		row = 0
+		tmp_layout.addWidget(QQ(QLabel, text="File: "), row, 0)
+		tmp_layout.addWidget(self.file_label, row, 1)
+		tmp_layout.addWidget(QQ(QPushButton, text="Open", change=lambda x: self.load_file()), row, 2)
+		row = 1
+		tmp_layout.addWidget(QQ(QLabel, text="Filter: "), row, 0)
+		tmp_layout.addWidget(QQ(QLineEdit, "energylevelstrendwindow_egyquery"), row, 1, 1, 2)
+		row = 2
+		tmp_layout.addWidget(QQ(QLabel, text="Reduced Energy Formula: "), row, 0)
+		tmp_layout.addWidget(self.reduced_energy_input, row, 1, 1, 2)
+		row = 3
+		tmp_layout.addWidget(QQ(QPushButton, text="Transfer to LWP", change=self.transfer_to_main_plot), row, 1, 1, 1)
 		
-		for i in range(10):
-			QShortcut(str(i), self).activated.connect(lambda i=i: self.quick_assign(i))
-			
-		# @Luis: Save initial value from energy levels window before changing them here
+		tmp.setLayout(tmp_layout)
+		tmp_hlayout.addWidget(tmp, 1)
 		
-	@synchronized_d(locks["axs"])
-	def register_collection(self):
-		if not self.fit_line:
-			self.fit_line = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=main.config["energylevelstrendwindow_fitcolor"])
-			self.parent.ax.add_collection(self.fit_line)
-	
-	@synchronized_d(locks["axs"])
-	def unregister_collection(self):
-		if self.fit_line:
-			self.fit_line.remove()
-			self.fit_line = None
-	
-	def quick_assign(self, i):
-		if i == 0:
-			i = 10
+		
+		tmp = QGroupBox("Transition")
+		tmp_layout2 = QVBoxLayout()
+		tmp.setLayout(tmp_layout2)
+		tmp_layout2.addWidget(self.series_selector)
+		tmp_hlayout.addWidget(tmp)
+		
+		tmp_layout = QHBoxLayout()
+		
+		self.trend_plots = [TrendPlot(get_data=self.get_data, get_init_level=lambda i=i: self.get_init_level(i)) for i in ("upper", "lower")]
+		for trend_plot in self.trend_plots:
+			tmp_layout.addWidget(trend_plot)
+		
+		layout.addLayout(tmp_layout, 1)
+		
+		self.series_selector_changed()
 
-		if self.predicted_levels is None:
-			main.notification("There are currently no predicted levels to be assigned.")
+	def load_file(self, fname=None):
+		if fname is None:
+			fname = QFileDialog.getOpenFileName(None, 'Choose Egy File to load',"")[0]
+		if fname:
+			self.dataframe = pyckett.egy_to_df(fname)
+			self.dataframe_cache = {}
+			self.file_label.setText(os.path.split(fname)[1])
+			
+			for trend_plot in self.trend_plots:
+				trend_plot.run_fit()
+
+	def get_init_level(self, level_type):
+		state = self.series_selector.get_values()
+		
+		if level_type == "upper":
+			return(state["qnus"])
+		else:
+			return(state["qnls"])
+
+	def get_data(self):
+		query = main.config["energylevelstrendwindow_egyquery"].strip()
+		
+		if self.dataframe_cache.get(query) != query:
+			if query:
+				filtered_data = self.dataframe.query(query)
+			else:
+				filtered_data = self.dataframe
+			self.dataframe_cache = {"query": query, "data": filtered_data}
+		else:
+			filtered_data = self.dataframe_cache["data"]
+			
+		return(filtered_data)
+	
+	def series_selector_changed(self):
+		if self.series_selector is None:
 			return
+		state = self.series_selector.get_values()
 		
-		if i <= 0 or i > len(self.predicted_levels):
-			main.notification("Specified index is out of bounds.")
+		incr_values = state["qndiffs"] if state["increase_freely"] else state["qnincrs"]
+		qnus = state["qnus"]
+		qnls = state["qnls"]
+		
+		is_one_series = ( np.array(qnus) == np.array(qnls) + np.array(incr_values) ).all()
+		self.trend_plots[1].setHidden(is_one_series)
+		
+		
+		for i, incr in enumerate(incr_values):
+			if incr:
+				unique_qn = f"qn{i+1}"
+				break
+		else:
+			main.notification("No quantum number is changing. Fit will not be sensible.")
+		
+		for trend_plot in self.trend_plots:
+			trend_plot.unique_qn = unique_qn
+			trend_plot.last_level = None
+			
+			trend_plot.axs[1].set_xlabel(unique_qn)
+			trend_plot.run_fit()
+		
+		if any([x.fit_data[unique_qn].duplicated().any() for x in self.trend_plots]):
+			main.notification(f"There are duplicate values in your data for your unique quantum number {unique_qn}. You might want to reset the used levels.")
 			return
-		
-		self.add_energy_level(self.predicted_levels.iloc[i-1])
-		
+	
 	def transfer_to_main_plot(self):
-		data = self.fit_data.sort_values("qn1")
+		state = self.series_selector.get_values()
+		
 		noq = main.config["series_qns"]
-		formulas = main.config["energylevelstrendwindow_qnsspecifier"].split()
-		if len(formulas) != noq:
-			main.notification("The quantum number specifier does not match the number of quantum numbers.")
+		incr_values = state["qndiffs"] if state["increase_freely"] else state["qnincrs"]
+		qnus = state["qnus"]
+		qnls = state["qnls"]
+		
+		incr_values, qnus, qnls = np.array(incr_values[:noq]), np.array(qnus[:noq]), np.array(qnls[:noq])
+		
+		is_one_series = ( np.array(qnus) == np.array(qnls) + np.array(incr_values) ).all()
+		
+		i0, i1 = (0, 0) if is_one_series else (0, 1)
+		df_upper_series, df_lower_series = self.trend_plots[i0].fit_data.copy(), self.trend_plots[i1].fit_data.copy()
+		
+		unique_qn = self.trend_plots[i0].unique_qn
+		unique_qn_index = int(unique_qn[2:]) - 1
+		
+		if df_upper_series[unique_qn].duplicated().any() or df_lower_series[unique_qn].duplicated().any():
+			main.notification(f"There are duplicate values in your data for your unique quantum number {unique_qn}.")
 			return
 		
-		quantum_numbers = np.empty((len(data), noq), dtype=int)
+		unique_qn_diff = int(incr_values[unique_qn_index])
+		unique_qn_value_reference = qnus[unique_qn_index]
+		df_upper_series["index"] = df_upper_series.eval(f"({unique_qn} - {unique_qn_value_reference}) / {unique_qn_diff}").astype(int)
+		unique_qn_value_reference = qnls[unique_qn_index]
+		df_lower_series["index"] = df_lower_series.eval(f"({unique_qn} - {unique_qn_value_reference}) / {unique_qn_diff}").astype(int)
 		
-		variables = {"i": data["qn1"].values}
-		for i, formula in enumerate(formulas):
-			quantum_numbers[:, i] = eval(formula, variables)
+		merge_df = pd.merge(df_upper_series, df_lower_series, how="inner", on="index").sort_values("index")
+		merge_df["transition"] = (merge_df["egy_x"] - merge_df["egy_y"]) * main.config["energylevelstrendwindow_egycatconversionfactor"]
 		
-		transition_quantum_numbers = list(zip(quantum_numbers[1:].tolist(), quantum_numbers[:-1].tolist()))
-		positions = np.diff(data["egy"].values) * main.config["energylevelstrendwindow_egycatconversionfactor"]
+		positions = merge_df["transition"].tolist()
+		indices = merge_df["index"].values
+		quantum_numbers = [[(qnus + incr_values * i).tolist(), (qnls + incr_values * i).tolist()] for i in indices]
 		
 		reference = main.config["series_references"][main.config["series_currenttab"]]
 		reference["method"] = "List"
-		reference["list"] = {"qns": transition_quantum_numbers, "xs": positions.tolist(), "i0": 0}
+		reference["list"] = {"qns": quantum_numbers, "xs": positions, "i0": 0}
 
 		main.mainwindow.referenceserieswindow.set_state(main.config["series_references"])
 		main.plotwidget.set_data()
 		main.plotwidget.activateWindow()
 	
-	def on_command(self, raw_command=None):
-		if not raw_command:
-			raw_command = self.command_prompt.text().lower()
-		
-		command = raw_command.split()
-		if command[0] == "del" and len(command) > 1:
-			for qn1 in command[1:]:
-				self.fit_data = self.fit_data.drop(self.fit_data[self.fit_data["qn1"] == int(qn1)].index)
-			self.run_fit()
-		
-		elif command[0] == "reset":
-			self.fit_data = self.fit_data.drop(self.fit_data.index)
-			self.predicted_levels = None
-			columns = ["egy"] + [f"qn{i+1}" for i in range(main.config["series_qns"])]
-			self.best_levels_output.setText("")
-			self.used_levels_output.setText(f"Currently used levels are:\n{self.fit_data[columns]}")
-		
-		elif command[0] == "add":
-			if len(command) == 1:
-				if self.predicted_levels is None:
-					main.notification("Please specify a level to add, currently there are no predicted level.")
-					return
-				level_to_add = self.predicted_levels.iloc[0]
-			else:
-				qns = command[1:]
-				query_string = " and ".join([f"qn{i+1} == {qn}" for i, qn in enumerate(qns)])
-
-				level_to_add = self.parent.dataframe_filtered.query(query_string)
-				if len(level_to_add) == 0:
-					main.notification("Could not fing the specified level.")
-					return
-				
-				if len(level_to_add) > 1:
-					main.notification("Specified level was ambiguous, found {len(level_to_add)} matching levels.")
-					return
-				
-				level_to_add = level_to_add.iloc[0]
-
-			self.add_energy_level(level_to_add)
-			
-		elif command[0] == "next":
-			if len(command) != 2:
-				main.notification("Please specify exactly one argument to next.")
-				return
-			
-			iterations = int(command[1])
-			for i in range(iterations):
-				response = self.add_energy_level(self.predicted_levels.iloc[0], dry=True)
-				if response < 0:
-					break
-			
-			self.update_plot()
-		
-		elif len(command) == 1 and command[0] == "run":
-			self.run_fit()
-		
-		elif len(command) == 1 and command[0] == ".":
-			if self.last_command:
-				self.on_command(raw_command=self.last_command)
-				return
-			else:
-				main.notification("No previous command specified")
-				return
-		
+	def dragEnterEvent(self, event):
+		mimeData = event.mimeData()
+		if mimeData.hasUrls() and len(mimeData.urls()) == 1:
+			event.accept()
 		else:
-			main.notification("Command was not understood.")
-			return
-		
-		self.last_command = raw_command
-		self.command_prompt.setText("")
+			event.ignore()
 
-	def add_energy_level(self, energy_level_row, dry=False):
-		new_qn1 = energy_level_row["qn1"]
-		self.fit_data = self.fit_data.drop(self.fit_data[self.fit_data["qn1"] == new_qn1].index)
-		self.fit_data = self.fit_data.append(energy_level_row)
-		columns = ["egy"] + [f"qn{i+1}" for i in range(main.config["series_qns"])]
-		self.used_levels_output.setText(f"Currently used levels are:\n{self.fit_data[columns]}")
-		resp = self.run_fit(dry=dry)
-		return(resp)
-
-	def run_fit(self, dry=False):
-		if not len(self.fit_data):
-			main.notification("No fit data.")
-			return -1
-		
-		red_egy_param = main.config["energylevelstrendwindow_reducedenergyparameter"]
-		red_egy_command = f"egy + ({red_egy_param}) * qn1 * (qn1+1)"
-		main.config["energylevelswindow_autoscale"] = False
-		
-		main.config["energylevelswindow_xvariable"] = "qn1"
-		main.config["energylevelswindow_yvariable"] = red_egy_command
-	
-		xs = self.fit_data["qn1"].values
-		ys = (self.fit_data["egy"] + red_egy_param * xs * (xs + 1)).values
-
-		xmin, xmax = xs.min(), xs.max()
-		
-		going_up = main.config["energylevelstrendwindow_goingup"]
-		next_level = xmax + 1 if going_up else xmin - 1
-		
-		fit_proximity = main.config["energylevelstrendwindow_fithorizon"]
-		if fit_proximity:
-			mask = np.abs(xs - next_level) <= fit_proximity
-			xs = xs[mask]
-			ys = ys[mask]
-		
-		if not len(xs):
-			main.notification("There is no suitable data for the fit.")
-			self.predicted_levels = None
-			self.best_levels_output.setText("")
-			return -1
-		
-		rank = min( max(0, len(xs) - 2), main.config["energylevelstrendwindow_maxrank"])
-		polynom_from_fit = np.polyfit(xs, ys, rank)
-		
-		
-		fit_xs = np.arange(next_level - fit_proximity, next_level + fit_proximity + 1, 0.2)
-		fit_ys = np.polyval(polynom_from_fit, fit_xs)
-
-		next_energy = np.polyval(polynom_from_fit, next_level) - red_egy_param * next_level * (next_level + 1)
-
-		candidates_data = self.parent.dataframe_filtered
-		max_deviation = main.config["energylevelstrendwindow_maxdeviation"]
-		possible_levels = candidates_data.query("qn1 == @next_level and abs(egy - @next_energy) < @max_deviation")
-
-		if not len(possible_levels):
-			main.notification("Did not find any possible next levels.")
-			self.predicted_levels = None
-			self.best_levels_output.setText("")
-			return -1
-		
-		possible_levels = possible_levels.copy()
-		possible_levels["dist"] = possible_levels["egy"] - next_energy
-		possible_levels["dist_abs"] = possible_levels["dist"].abs()
-		possible_levels = possible_levels.sort_values("dist_abs")
-		self.predicted_levels = possible_levels.head(10)
-		
-		self.last_update_plot_args = [fit_xs, fit_ys, next_level, fit_proximity, xmin, xmax, going_up]
-		
-		if not dry:
-			self.update_plot()
-		
-		
-		return 0
-
-	def update_plot(self):
-		if self.last_update_plot_args is None:
-			return
-		else:
-			fit_xs, fit_ys, next_level, fit_proximity, xmin, xmax, going_up = self.last_update_plot_args
-		
-		if going_up:
-			plot_xrange = (xmin - 1, next_level + fit_proximity)
-		else:
-			plot_xrange = (next_level - fit_proximity, xmax + 1)
-		
-		plot_yrange = (fit_ys.min(), fit_ys.max())
-		if plot_yrange[0] == plot_yrange[1]:
-			plot_yrange = (plot_yrange[0] - 1, plot_yrange[0] + 1)
-		
-		columns_best = ["dist", "egy"] + [f"qn{i+1}" for i in range(main.config["series_qns"])]
-		if self.predicted_levels is None:
-			self.best_levels_output.setText("")
-		else:
-			self.best_levels_output.setText(f"Current best levels are:\n{self.predicted_levels[columns_best]}")
-		
-		columns_used = ["egy"] + [f"qn{i+1}" for i in range(main.config["series_qns"])]
-		self.used_levels_output.setText(f"Currently used levels are:\n{self.fit_data[columns_used]}")
-
-		self.parent.ax.set_xlim(*plot_xrange)
-		self.parent.ax.set_ylim(*plot_yrange)
-		
-		segs = np.array(((fit_xs[:-1], fit_xs[1:]), (fit_ys[:-1], fit_ys[1:]))).T
-		alphas = np.where(np.abs(fit_xs - next_level) < 0.5, 1, 0.5)
-		colors = main.config["energylevelstrendwindow_fitcolor"]
-		
-		self.fit_line.set(segments=segs, colors=colors, alpha=alphas)
-		self.parent.plot_energylevels()
-
-	def activateWindow(self, *args, **kwargs):
-		self.register_collection()
-		return super().activateWindow(*args, **kwargs)
-
-	def closeEvent(self, *args, **kwargs):
-		self.unregister_collection()
-		return super().closeEvent(*args, **kwargs)
+	def dropEvent(self, event):
+		url = event.mimeData().urls()[0]
+		fname = url.toLocalFile()
+		self.load_file(fname)
 
 class SpectraResolverWindow(EQWidget):
 	def __init__(self, id, parent=None):
@@ -5550,7 +5454,7 @@ class FigureCanvas(FigureCanvas):
 		self.setStyleSheet('background-color: #00000000')
 
 class ProtPlot(QWidget):
-	def __init__(self, parent=None, i=None, onrange=False):
+	def __init__(self, parent=None, onrange=False):
 		super().__init__(parent)
 
 		self.parent = parent
@@ -5741,6 +5645,354 @@ class ProtPlot(QWidget):
 			self.center = (xmin+xmax)/2
 			self.width = xmax-xmin
 			self.update_plot()
+
+class TrendPlot(QWidget):
+	def __init__(self, parent=None, get_data=None, get_init_level=None):
+		super().__init__(parent)
+		
+		self.get_data = get_data
+		self.get_init_level = get_init_level
+
+		self.fit_data = pd.DataFrame(columns=pyckett.egy_dtypes.keys()).astype(pyckett.egy_dtypes)
+		self.predicted_levels = None
+		self.last_command = None
+		self.red_egy_formula = "egy"
+		self.last_level = None
+		
+		self.unique_qn = "qn1"
+		self.init_gui()
+		
+	def init_gui(self):
+		layout = QVBoxLayout()
+		self.setLayout(layout)
+
+		self.fig = figure.Figure(dpi=main.config["plot_dpi"])
+		self.plot_canvas = FigureCanvas(self.fig)
+		self.plot_canvas.setMinimumHeight(200)
+		layout.addWidget(self.plot_canvas, 1)
+		
+		self.mpltoolbar = NavigationToolbar2QT(self.plot_canvas, self)
+		layout.addWidget(self.mpltoolbar)
+		
+		self.axs = self.fig.subplots(2, sharex=True, gridspec_kw={"hspace": 0, "height_ratios": [5, 1]})
+		self.axs[0].get_xaxis().set_visible(False)
+		self.axs[1].get_yaxis().set_visible(False)
+		self.axs[1].set_ylim(-1, 1)
+		self.axs[1].get_xaxis().set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
+		
+		self.axs[0].callbacks.connect('xlim_changed', self.on_lims_change)
+		self.axs[0].callbacks.connect('ylim_changed', self.on_lims_change)
+		
+		self.fit_line = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=main.config["energylevelstrendwindow_fitcolor"])
+		self.axs[0].add_collection(self.fit_line)
+		
+		self.fig.canvas.mpl_connect("motion_notify_event", self.on_hover)
+		self.fig.canvas.mpl_connect("button_press_event", lambda x: self.on_hover(x, click=True))
+		self.current_egy_data = None
+		self.annot = self.axs[0].annotate("", xy=(0,0), xytext=(5,5), textcoords="offset points", color="black", ha="center", va="bottom", bbox=dict(boxstyle="round", fc="w"))
+		self.annot.set_visible(False)
+		
+		self.egy_scatter = self.axs[0].scatter([], [], color=[], marker=".")
+		self.ass_scatter = self.axs[0].scatter([], [], color=[], marker=".", zorder=10)
+		self.res_scatter = self.axs[1].scatter([], [], color=[], marker=".")
+
+		self.command_prompt = QQ(QLineEdit, placeholder="Enter commands (add, run, next, del, reset ...)")
+		self.command_prompt.returnPressed.connect(self.on_command)
+		layout.addWidget(self.command_prompt)
+		
+		self.best_levels_output = QQ(QTextEdit, readonly=True, maxHeight=160)
+		self.best_levels_output.setFontFamily("Courier")
+		layout.addWidget(self.best_levels_output)
+		
+		self.used_levels_output = QQ(QTextEdit, readonly=True, maxHeight=160)
+		self.used_levels_output.setFontFamily("Courier")
+		layout.addWidget(self.used_levels_output)
+
+		for i in range(10):
+			tmp = QShortcut(f"Ctrl+{i}", self.command_prompt)
+			tmp.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+			tmp.activated.connect(lambda i=i: self.quick_assign(i))
+
+	def on_lims_change(self, ax):
+		xrange, yrange = self.axs[0].get_xlim(), self.axs[0].get_ylim()
+
+		data = self.get_data().copy()
+		data["red_egy"] = data.eval(self.red_egy_formula)
+		query = f"{self.unique_qn} < {xrange[1]} and {self.unique_qn} > {xrange[0]} and red_egy < {yrange[1]} and red_egy > {yrange[0]}"
+		data = data.query(query)
+
+		offsets = data[[self.unique_qn, "red_egy"]].values
+		color = main.config["energylevelswindow_defaultcolor"]
+		self.egy_scatter.set(offsets=offsets, color=color)
+		self.current_egy_data = data
+
+	def quick_assign(self, i):
+		if i == 0:
+			i = 10
+
+		if self.predicted_levels is None:
+			main.notification("There are currently no predicted levels to be assigned.")
+			return
+		
+		if i <= 0 or i > len(self.predicted_levels):
+			main.notification("Specified index is out of bounds.")
+			return
+		
+		self.add_energy_level(self.predicted_levels.iloc[i-1])
+
+	def update_gui(self):
+		columns_best = ["dist", "egy"] + [f"qn{i+1}" for i in range(main.config["series_qns"])]
+		if self.predicted_levels is None:
+			self.best_levels_output.setText("")
+		else:
+			self.best_levels_output.setText(f"Current best levels are:\n{self.predicted_levels[columns_best]}")
+		
+		columns = ["egy"] + [f"qn{i+1}" for i in range(main.config["series_qns"])]
+		self.used_levels_output.setText(f"Currently used levels are:\n{self.fit_data.sort_values(self.unique_qn)[columns]}")
+
+	def on_command(self, command=None):
+		if command is None:
+			command = self.command_prompt.text().lower().split()
+		
+		if not len(command):
+			return
+			
+		elif command[0] == "del" and len(command) > 1:
+			for qn in command[1:]:
+				self.fit_data = self.fit_data.drop(self.fit_data[self.fit_data[self.unique_qn] == int(qn)].index)
+			self.run_fit()
+		
+		elif command[0] == "reset":
+			self.fit_data = self.fit_data.drop(self.fit_data.index)
+			self.predicted_levels = None
+			self.run_fit()
+		
+		elif command[0] == "add":
+			if len(command) == 1:
+				if self.predicted_levels is None:
+					main.notification("Please specify a level to add, currently there are no predicted level.")
+					return
+				level_to_add = self.predicted_levels.iloc[0]
+			else:
+				qns = command[1:]
+				query_string = " and ".join([f"qn{i+1} == {qn}" for i, qn in enumerate(qns)])
+
+				level_to_add = self.get_data().query(query_string)
+				if len(level_to_add) == 0:
+					main.notification("Could not fing the specified level.")
+					return
+				
+				if len(level_to_add) > 1:
+					main.notification(f"Specified level was ambiguous, found {len(level_to_add)} matching levels.")
+					return
+				
+				level_to_add = level_to_add.iloc[0]
+
+			self.add_energy_level(level_to_add)
+			
+		elif command[0] == "next":
+			if len(command) != 2:
+				main.notification("Please specify exactly one argument to next.")
+				return
+			
+			iterations = int(command[1])
+			for i in range(iterations):
+				response = self.add_energy_level(self.predicted_levels.iloc[0], dry=True)
+				if response < 0:
+					break
+				
+			self.run_fit()
+		
+		elif command[0] == "run":
+			if len(command) == 1:
+				self.run_fit()
+			elif len(command) == 2:
+				self.run_fit(next_level=int(command[1]))
+			else:
+				main.notification("Please specify exactly one or none arguments to run.")
+				return
+	
+		elif len(command) == 1 and command[0] == ".":
+			if self.last_command:
+				self.on_command(command=self.last_command)
+				return
+			else:
+				main.notification("No previous command specified")
+				return
+		
+		else:
+			main.notification("Command was not understood.")
+			return
+		
+		self.last_command = command
+		self.command_prompt.setText("")
+	
+	def run_fit(self, *args, **kwargs):
+		try:
+			resp = self.run_fit_core(*args, **kwargs)
+		except Exception as E:
+			main.notification(f"<span style='color:#eda711;'>WARNING</span>: The fit failed for the following reason:\n{E}")
+			raise E
+		if kwargs.get("dry"):
+			return(resp)
+		self.update_gui()
+		self.plot_canvas.draw()
+		return(resp)
+		
+	def run_fit_core(self, dry=False, next_level=None):
+		return_value = 0
+		red_egy_formula = self.red_egy_formula = main.config["energylevelstrendwindow_reducedenergy"] or "egy"
+		
+		assigned_xs = self.fit_data[self.unique_qn].values
+		assigned_ys = self.fit_data.eval(red_egy_formula).values
+
+		data = self.get_data().copy()
+		data["red_egy"] = data.eval(red_egy_formula)
+
+		prediction_proximity = main.config["energylevelstrendwindow_predictionproximity"]
+
+		if not len(assigned_xs):
+			main.notification("There is no suitable data for the fit.")
+			self.predicted_levels = None
+			
+			qns = self.get_init_level()[:main.config["series_qns"]]
+			query = " and ".join([f"qn{i+1} == {qn}" for i, qn in enumerate(qns)])
+			init_levels = data.query(query).copy()
+			
+			init_levels["dist"] = 0
+			init_levels["dist_abs"] = init_levels["dist"].abs()
+			init_levels = init_levels.sort_values("dist_abs")
+			self.predicted_levels = init_levels
+			
+			xinit = qns[int(self.unique_qn[2:])-1]
+			plot_xrange = (xinit - prediction_proximity, xinit + prediction_proximity)
+			
+			if len(init_levels):
+				ymean = init_levels["red_egy"].mean()
+				plot_yrange = (ymean - 1, ymean + 1)
+			else:
+				plot_yrange = (-1, 1)
+			
+			empty_offsets = np.empty((0, 2))
+			self.ass_scatter.set(offsets=empty_offsets)
+			self.res_scatter.set(offsets=empty_offsets)
+			
+			self.axs[0].set_xlim(*plot_xrange)
+			self.axs[0].set_ylim(*plot_yrange)
+			return -1
+		
+		xmin, xmax = assigned_xs.min(), assigned_xs.max()
+		
+		if next_level is not None:
+			next_level = next_level
+		elif self.last_level is not None:
+			next_level = self.last_level + 1
+		else:
+			next_level = xmax + 1
+		
+		fit_proximity = main.config["energylevelstrendwindow_fitproximity"]
+		if fit_proximity:
+			mask = np.abs(assigned_xs - next_level) <= fit_proximity
+			xs_used_in_fit = assigned_xs[mask]
+			ys_used_in_fit = assigned_ys[mask]
+		else:
+			xs_used_in_fit = assigned_xs
+			ys_used_in_fit = assigned_ys
+		
+		if not len(xs_used_in_fit):
+			main.notification("There is no suitable data for the fit.")
+			self.predicted_levels = None
+			return -1
+		
+		rank = min( max(0, len(xs_used_in_fit) - 2), main.config["energylevelstrendwindow_maxrank"])
+		polynom_from_fit = np.polyfit(xs_used_in_fit, ys_used_in_fit, rank)
+		
+		predicted_xs = np.arange(next_level - fit_proximity, next_level + fit_proximity + 1, 0.2)
+		predicted_ys = np.polyval(polynom_from_fit, predicted_xs)
+
+		next_energy = np.polyval(polynom_from_fit, next_level)
+		
+		max_deviation = main.config["energylevelstrendwindow_maxdeviation"]
+		possible_levels = data.query(f"{self.unique_qn} == {next_level} and abs(red_egy - {next_energy}) < {max_deviation}")
+		
+		if not len(possible_levels):
+			main.notification("Did not find any possible next levels.")
+			return_value = -1
+			self.predicted_levels = None
+		
+		else:
+			possible_levels = possible_levels.copy()
+			possible_levels["dist"] = possible_levels["red_egy"] - next_energy
+			possible_levels["dist_abs"] = possible_levels["dist"].abs()
+			possible_levels = possible_levels.sort_values("dist_abs")
+			self.predicted_levels = possible_levels.head(10)
+		
+		if dry:
+			return return_value
+		
+		segs = np.array(((predicted_xs[:-1], predicted_xs[1:]), (predicted_ys[:-1], predicted_ys[1:]))).T
+		color = main.config["energylevelstrendwindow_fitcolor"]
+		self.fit_line.set(segments=segs, color=color)
+		
+		offsets = np.vstack((assigned_xs, assigned_ys)).T
+		self.ass_scatter.set(offsets=offsets, color=color)
+		
+		offsets[:, 1] = 0
+		color = "green"
+		self.res_scatter.set(offsets=offsets, color=color)
+		
+		if main.config["energylevelstrendwindow_plotshowall"]:
+			plot_xrange = (xmin - prediction_proximity, xmax + prediction_proximity)
+		else:
+			plot_xrange = (next_level - prediction_proximity, next_level + prediction_proximity)
+		
+		mask = (predicted_xs >= plot_xrange[0]) & (predicted_xs <= plot_xrange[1])
+		plot_yrange = (predicted_ys[mask].min(), predicted_ys[mask].max())
+		if plot_yrange[0] == plot_yrange[1]:
+			plot_yrange = (plot_yrange[0] - 1, plot_yrange[0] + 1)
+		plot_yrange_dist = plot_yrange[1] - plot_yrange[0]
+		margin = main.config["plot_ymargin"]
+		plot_yrange = (plot_yrange[0] - plot_yrange_dist * margin, plot_yrange[1] + plot_yrange_dist * margin)
+		
+		self.axs[0].set_xlim(*plot_xrange)
+		self.axs[0].set_ylim(*plot_yrange)
+		
+		self.axs[1].set_ylim(-1, 1)
+		
+		# The total fit data is done in on_lims_change -> Allows to pan and zoom interactively
+		
+		return return_value
+	
+	def add_energy_level(self, energy_level_row, dry=False):
+		new_qn = energy_level_row[self.unique_qn]
+		self.last_level = new_qn
+		self.fit_data = self.fit_data.drop(self.fit_data[self.fit_data[self.unique_qn] == new_qn].index)
+		self.fit_data = self.fit_data.append(energy_level_row)
+		resp = self.run_fit(dry=dry)
+		return(resp)
+
+	def on_hover(self, event, click=False):
+		if event.inaxes == self.axs[0] and self.current_egy_data is not None:
+			cont, ind = self.egy_scatter.contains(event)
+			if cont:
+				indices = ind["ind"]
+				noq = main.config["series_qns"]
+				tmp_levels = self.current_egy_data.iloc[indices]
+				
+				text = []
+				for i, row in tmp_levels.iterrows():
+					text.append(",".join(str(int(row[f"qn{i+1}"])) for i in range(noq)))
+				text = "\n".join(text)
+				
+				self.annot.xy = self.egy_scatter.get_offsets()[indices[0]]
+				self.annot.set(text=text, visible=True)
+				if click:
+					level_to_add = tmp_levels.iloc[0]
+					self.add_energy_level(level_to_add)
+			else:
+				self.annot.set_visible(False)
+			self.fig.canvas.draw()
+			
 
 class NotificationsBox(QWidget):
 	def __init__(self):
@@ -6112,6 +6364,8 @@ def QQ(widgetclass, config_key=None, **kwargs):
 				widget.addItem(option)
 	if "width" in kwargs:
 		widget.setFixedWidth(kwargs["width"])
+	if "height" in kwargs:
+		widget.setFixedHeight(kwargs["height"])
 	if "tooltip" in kwargs:
 		widget.setToolTip(kwargs["tooltip"])
 	if "placeholder" in kwargs:
@@ -6614,14 +6868,15 @@ config_specs = {
 	"energylevelswindow_yvariable":			["", str],
 	"energylevelswindow_autoscale":			[True, bool],
 	
-	"energylevelstrendwindow_fitcolor":					["#000000", Color],
-	"energylevelstrendwindow_reducedenergyparameter": 	[-0.15, float],
+	"energylevelstrendwindow_fitcolor":					["#ff1a74", Color],
+	"energylevelstrendwindow_reducedenergy":		 	["", str],
 	"energylevelstrendwindow_maxrank":					[4, int],
 	"energylevelstrendwindow_maxdeviation":				[1, float],
-	"energylevelstrendwindow_fithorizon":				[20, float],
-	"energylevelstrendwindow_goingup":					[True, bool],
+	"energylevelstrendwindow_fitproximity":				[20, float],
+	"energylevelstrendwindow_predictionproximity":		[5, float],
 	"energylevelstrendwindow_egycatconversionfactor":	[29979.2458, float],
-	"energylevelstrendwindow_qnsspecifier":				["", str],
+	"energylevelstrendwindow_egyquery":					["", str],
+	"energylevelstrendwindow_plotshowall":				[False, bool],
 
 	"reportwindow_blends":					[True, bool],
 	"reportwindow_query":					["", str],
