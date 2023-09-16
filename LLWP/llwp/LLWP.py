@@ -2067,7 +2067,10 @@ class ReferenceSeriesWindow(EQDockWidget):
 
 	def set_state(self, values):
 		for i in range(self.tabs.count()):
-			self.tabs.removeTab(i)
+			tab = self.tabs.widget(i)
+			tab.deleteLater()
+		self.tabs.clear()
+		
 		for tabdata in values:
 			self.add_tab(tabdata)
 
@@ -3654,16 +3657,19 @@ class SeriesFitWindow(EQWidget):
 		qnls = np.array(qnls[:noq])
 		incrs = np.array(incr_values[:noq])
 
-		self.pred_qns = [np.concatenate((qnu+incrs*i, qnl+incrs*i)).tolist() for i in range(main.config["seriesfitwindow_maxprediction"])]
+		self.pred_qns = np.array([np.concatenate((qnus+incrs*i, qnls+incrs*i)) for i in range(main.config["seriesfitwindow_maxprediction"])])
 		self.pred_xs  = [self.function(qns, *popt) for qns in self.pred_qns]
 
 		tmp = "\n".join([f"{name} : {value:{main.config['flag_xformatfloat']}}" for name, value in zip(self.fitparams, popt)])
 		self.writelog(f"Succeeded, parameters were determined as \n{tmp}")
 
 	def show_pred_freqs(self):
+		original_shape = self.pred_qns.shape
+		new_shape = (original_shape[0], 2, -1)
+		qns = self.pred_qns.reshape(new_shape).tolist()
 		reference = main.config["series_references"][main.config["series_currenttab"]]
 		reference["method"] = "List"
-		reference["list"] = {"qns": self.pred_qns, "xs": self.pred_xs, "i0": 0}
+		reference["list"] = {"qns": qns, "xs": self.pred_xs, "i0": 0}
 		main.config["series_qns"] = self.noq
 
 		main.mainwindow.referenceserieswindow.set_state(main.config["series_references"])
@@ -4133,8 +4139,16 @@ class EnergyLevelsTrendWindow(EQWidget):
 		merge_df["transition"] = (merge_df["egy_x"] - merge_df["egy_y"]) * main.config["energylevelstrendwindow_egycatconversionfactor"]
 		
 		positions = merge_df["transition"].tolist()
-		indices = merge_df["index"].values
-		quantum_numbers = [[(qnus + incr_values * i).tolist(), (qnls + incr_values * i).tolist()] for i in indices]
+
+		if main.config["energylevelstrendwindow_egyqns"]:
+			qnu_labels = [f"qn{i+1}_x" for i in range(noq)]
+			qnl_labels = [f"qn{i+1}_y" for i in range(noq)]
+			qnus = merge_df[qnu_labels].values.tolist()
+			qnls = merge_df[qnl_labels].values.tolist()
+			quantum_numbers = list(zip(qnus, qnls))
+		else:
+			indices = merge_df["index"].values
+			quantum_numbers = [[(qnus + incr_values * i).tolist(), (qnls + incr_values * i).tolist()] for i in indices]
 		
 		reference = main.config["series_references"][main.config["series_currenttab"]]
 		reference["method"] = "List"
@@ -6877,6 +6891,7 @@ config_specs = {
 	"energylevelstrendwindow_egycatconversionfactor":	[29979.2458, float],
 	"energylevelstrendwindow_egyquery":					["", str],
 	"energylevelstrendwindow_plotshowall":				[False, bool],
+	"energylevelstrendwindow_egyqns":					[True, bool],
 
 	"reportwindow_blends":					[True, bool],
 	"reportwindow_query":					["", str],
