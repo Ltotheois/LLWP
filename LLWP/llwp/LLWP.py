@@ -631,6 +631,15 @@ class MainWindow(QMainWindow):
 		geometry = main.config.get("windowgeometry_mainwindow")
 		if geometry:
 			self.setGeometry(*json.loads(geometry))
+			
+			screen_box = self.screen().geometry()
+			widget_top_left = self.geometry().topLeft()
+			widget_bottom_right = self.geometry().bottomRight()
+			
+			if not (screen_box.contains(widget_top_left) and screen_box.contains(widget_bottom_right)):
+				primary_screen = QApplication.instance().primaryScreen()
+				self.move(primary_screen.geometry().center()- self.rect().center())
+
 
 		try:
 			possible_folders = [os.path.dirname(os.path.realpath(__file__)), os.getcwd()]
