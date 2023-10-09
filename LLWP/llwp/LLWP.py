@@ -1653,11 +1653,11 @@ class PlotWidget(QGroupBox):
 			for ax in self.fig.get_axes():
 				self.fig.delaxes(ax)
 
-			breakpoint(ownid, self.create_plots_id)
+			earlyreturn(ownid, self.create_plots_id)
 
 			tmp = self.fig.subplots(rows, cols, gridspec_kw=main.config["plot_matplotlibkwargs"], squeeze=False)
 
-			breakpoint(ownid, self.create_plots_id)
+			earlyreturn(ownid, self.create_plots_id)
 
 			self.axs = {
 				"ax": np.empty(tmp.shape, dtype=object),
@@ -1670,7 +1670,7 @@ class PlotWidget(QGroupBox):
 				"width": np.full(tmp.shape, main.config["plot_width"], dtype=np.float64),
 			}
 
-			breakpoint(ownid, self.create_plots_id)
+			earlyreturn(ownid, self.create_plots_id)
 
 			for i, row in enumerate(tmp):
 				for j, ax in enumerate(row):
@@ -1690,12 +1690,12 @@ class PlotWidget(QGroupBox):
 					ax.yaxis.set_visible(False)
 					ax.xaxis.set_visible(False)
 
-			breakpoint(ownid, self.create_plots_id)
+			earlyreturn(ownid, self.create_plots_id)
 
 			for bottomax in self.axs["ax"][-1, :]:
 				bottomax.xaxis.set_visible(True)
 
-			breakpoint(ownid, self.create_plots_id)
+			earlyreturn(ownid, self.create_plots_id)
 
 			main.signalclass.createdplots.emit()
 			self.set_data()
@@ -1724,7 +1724,7 @@ class PlotWidget(QGroupBox):
 			if not main.config["flag_automatic_draw"]:
 				return
 
-			breakpoint(ownid, self.set_data_id)
+			earlyreturn(ownid, self.set_data_id)
 
 			# set x-ranges
 			cat_df = main.get_visible_data("cat", scale=False)
@@ -1736,7 +1736,7 @@ class PlotWidget(QGroupBox):
 			xmax = xpos + offsets + widths/2
 			xmin = xpos + offsets - widths/2
 
-			breakpoint(ownid, self.set_data_id)
+			earlyreturn(ownid, self.set_data_id)
 
 			# set ticks for bottom row
 			i = -1
@@ -1760,7 +1760,7 @@ class PlotWidget(QGroupBox):
 				ax.set_xticks(ticks)
 				ax.set_xticklabels(ticklabels)
 
-			breakpoint(ownid, self.set_data_id)
+			earlyreturn(ownid, self.set_data_id)
 
 			# set data and set y-ranges of data
 			bins = main.config["plot_bins"]
@@ -1778,7 +1778,7 @@ class PlotWidget(QGroupBox):
 
 			for i in range(self.axs["ax"].shape[0]):
 				for j in range(self.axs["ax"].shape[1]):
-					breakpoint(ownid, self.set_data_id)
+					earlyreturn(ownid, self.set_data_id)
 					ax = self.axs["ax"][i, j]
 					ax.set_xlim(xmin[i,j], xmax[i,j])
 
@@ -1865,10 +1865,10 @@ class PlotWidget(QGroupBox):
 					ax.set_ylim(yrange)
 
 
-			breakpoint(ownid, self.set_data_id)
+			earlyreturn(ownid, self.set_data_id)
 			self.plot_annotations(xpos, qns)
 
-			breakpoint(ownid, self.set_data_id)
+			earlyreturn(ownid, self.set_data_id)
 			main.signalclass.drawplot.emit()
 
 		except CustomError as E:
@@ -2240,6 +2240,17 @@ class EQWidget(QWidget):
 
 	def moveEvent(self, event):
 		main.config[f"windowgeometry_{self.id}"] = self.geometry().getRect()
+
+	def show(self, *args, **kwargs):
+		screen_box = self.screen().geometry()
+		widget_top_left = self.geometry().topLeft()
+		widget_bottom_right = self.geometry().bottomRight()
+		
+		if not (screen_box.contains(widget_top_left) and screen_box.contains(widget_bottom_right)):
+			primary_screen = QApplication.instance().primaryScreen()
+			self.move(primary_screen.geometry().center()- self.rect().center())
+		
+		return(super().show(*args, **kwargs))
 
 class CreditsWindow(EQWidget):
 	def __init__(self, id, parent=None):
@@ -2639,13 +2650,13 @@ class BlendedLinesWindow(EQWidget):
 
 					xrange = [self.center-self.width/2, self.center+self.width/2]
 
-					breakpoint(ownid, self.fit_thread_id)
+					earlyreturn(ownid, self.fit_thread_id)
 
 					df_exp = main.get_visible_data("exp", xrange=xrange)
 					exp_xs = df_exp["x"].to_numpy()
 					exp_ys = df_exp["y"].to_numpy()
 
-					breakpoint(ownid, self.fit_thread_id)
+					earlyreturn(ownid, self.fit_thread_id)
 
 					df_cat = main.get_visible_data("cat", xrange=xrange)
 					if len(df_cat) != 0:
@@ -2659,7 +2670,7 @@ class BlendedLinesWindow(EQWidget):
 						colors = create_colors(df_cat, main.config["files_cat"])
 						self.cat_line.set(segments=segs, colors=colors)
 
-					breakpoint(ownid, self.fit_thread_id)
+					earlyreturn(ownid, self.fit_thread_id)
 
 					xs = []
 					ys = []
@@ -2733,7 +2744,7 @@ class BlendedLinesWindow(EQWidget):
 						res_ys = res_xs*0
 						res_exp_ys = exp_xs*0
 
-					breakpoint(ownid, self.fit_thread_id)
+					earlyreturn(ownid, self.fit_thread_id)
 
 
 					self.fit_line.set_data(res_xs, res_ys)
@@ -2769,7 +2780,7 @@ class BlendedLinesWindow(EQWidget):
 					rms_ys = np.sqrt(np.sum((exp_ys - res_exp_ys)**2) / len(exp_ys)) if len(exp_ys) else 0
 					self.parent.params = opt_param, err_param, profile, derivative, noa, now, self.center, baseline_args, rms_ys
 
-					breakpoint(ownid, self.fit_thread_id)
+					earlyreturn(ownid, self.fit_thread_id)
 
 					main.signalclass.blwfit.emit()
 					main.signalclass.fitindicator.emit("Ready")
@@ -6602,7 +6613,7 @@ def except_hook(cls, exception, traceback):
 	except Exception as E:
 		pass
 
-def breakpoint(ownid, lastid):
+def earlyreturn(ownid, lastid):
 	if ownid != lastid:
 		raise CustomError()
 
