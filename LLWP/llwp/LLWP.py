@@ -4883,9 +4883,10 @@ class CalibrateSpectrumWindow(EQWidget):
 			if main.config["calibratewindow_querycat"].strip():
 				cat_df = cat_df.query(main.config["calibratewindow_querycat"])
 			
+			lineshape_type = main.config["calibratewindow_lineshape"]
 			blendwidth = main.config["calibratewindow_blendwidth"] / 2
 			fitwidth = main.config["calibratewindow_fitwidth"] / 2
-			fitfunction = lambda *args: lineshape(main.config["calibratewindow_lineshape"], main.config["calibratewindow_derivative"], *args[:-1]) + args[-1]
+			fitfunction = lambda *args: lineshape(lineshape_type, main.config["calibratewindow_derivative"], *args[:-1]) + args[-1]
 			
 			xs = cat_df["x"].to_numpy()
 			
@@ -4913,6 +4914,12 @@ class CalibrateSpectrumWindow(EQWidget):
 					[x0+0.2, 2*ymax, fitwidth/2.5, fitwidth/2.5, ymax/2],
 				]
 				
+				if lineshape_type != "Voigt":
+					del p0[2]
+					del bounds[0][2]
+					del bounds[1][2]
+				
+				
 				popt, pcov = optimize.curve_fit(fitfunction, xs, ys, p0=p0, bounds=bounds)
 				calibration_points.append((popt[0], y0/popt[1]))
 				
@@ -4938,11 +4945,11 @@ class CalibrateSpectrumWindow(EQWidget):
 			
 			main.notification(f"Used {len(calibration_points)} of {len(cat_df)} predictions for calibration.")
 			
+			self.calibration_points = calibration_points
+			self.cal_df = exp_df
 		except Exception as E:
 			raise
 		finally:
-			self.calibration_points = calibration_points
-			self.cal_df = exp_df
 			main.signalclass.calibrationend.emit()
 	
 	def after_calibration(self):
@@ -5371,8 +5378,8 @@ class SeriesSelector(QWidget):
 		layout = QGridLayout()
 
 		self.labels  = [QQ(QLabel, text=f"QN {x+1}") for x in range(6)]
-		self.qnus    = [QQ(QSpinBox, minWidth=40, maxWidth=60, range=(0, None), singlestep=1, change=lambda x: self.changed()) for x in range(6)]
-		self.qnls    = [QQ(QSpinBox, minWidth=40, maxWidth=60, range=(0, None), singlestep=1, change=lambda x: self.changed()) for x in range(6)]
+		self.qnus    = [QQ(QSpinBox, minWidth=40, maxWidth=60, range=(None, None), singlestep=1, change=lambda x: self.changed()) for x in range(6)]
+		self.qnls    = [QQ(QSpinBox, minWidth=40, maxWidth=60, range=(None, None), singlestep=1, change=lambda x: self.changed()) for x in range(6)]
 		self.qnincrs = [QQ(QCheckBox, text="Incr", minWidth=40, maxWidth=60, change=lambda x: self.changed()) for x in range(6)]
 		self.qndiffs = [QQ(QSpinBox, minWidth=40, maxWidth=60, range=(None, None), singlestep=1, change=lambda x: self.changed()) for x in range(6)]
 
