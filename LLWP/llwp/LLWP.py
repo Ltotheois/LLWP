@@ -1188,10 +1188,14 @@ class PlotWidget(QGroupBox):
 		qnus, qnls = np.array(transition["qnus"][:noq]), np.array(transition["qnls"][:noq])
 		diffs = np.array(transition["qndiffs"][:noq]) if transition["increase_freely"] else np.array(transition["qnincrs"][:noq])
 
+		# @Luis: Think about alternating signs
+		# alternating_signs = np.array([1, -1, 1, 1, 1, 1][:noq])
+
 		qns = []
 
 		for i in range(nop):
 			ind = nop-i-1
+			# upper, lower = (qnus+ind*diffs) * alternating_signs ** ind, (qnls+ind*diffs) * alternating_signs ** ind
 			upper, lower = qnus+ind*diffs, qnls+ind*diffs
 			qns.append((upper, lower))
 
@@ -1213,9 +1217,10 @@ class PlotWidget(QGroupBox):
 		conditions = []
 		conditions_incr = []
 		for i, qnu, qnl, diff in zip(range(noq), qnus, qnls, diffs):
+			diff = int(diff)
 			if diff:
-				conditions_incr.append(f"(qnu{i+1} - {qnu})*{diff}")
-				conditions_incr.append(f"(qnl{i+1} - {qnl})*{diff}")
+				conditions_incr.append(f"((qnu{i+1} - {qnu})/{diff})")
+				conditions_incr.append(f"((qnl{i+1} - {qnl})/{diff})")
 			else:
 				conditions.append(f"(qnu{i+1} == {qnu})")
 				conditions.append(f"(qnl{i+1} == {qnl})")
