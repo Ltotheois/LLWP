@@ -1419,6 +1419,7 @@ class PlotWidget(QGroupBox):
 		exp_ys = data["y"].to_numpy()
 		fit_xs = np.linspace(xmin, xmax, main.config["fit_xpoints"])
 
+		amplitude_direction = main.config["fit_amplitudedirection"]
 		fitfunction = main.config["fit_function"]
 		if len(exp_xs) < 2 and fitfunction != "Pgopher":
 			main.notification("<span style='color:#eda711;'>WARNING</span>: You did select less than two points of your spectrum, this fit will not work.")
@@ -1431,15 +1432,25 @@ class PlotWidget(QGroupBox):
 			self.fitcurve.remove()
 			self.fitcurve = None
 
+		# @Luis: 
 		try:
 			if fitfunction == "Pgopher":
 				ymin, ymax = np.min(exp_ys), np.max(exp_ys)
-				cutoff = ymax - (ymax-ymin)/2
+				
+				if amplitude_direction < 0:
+					cutoff = ymin + (ymax-ymin)/2
+					mask = (exp_ys <= cutoff)
+				else:
+					cutoff = ymax - (ymax-ymin)/2
+					mask = (exp_ys >= cutoff)
 
-				mask = (exp_ys >= cutoff)
 				fit_xs = exp_xs[mask]
 				fit_ys = exp_ys[mask]
 
+				# @Luis: Check for the correct sign of exp_ys here
+
+				# @Luis: Check if average here should use relative fit_ys
+				# to correct for offsets in intensity
 				xmiddle = np.sum(fit_xs*fit_ys)/np.sum(fit_ys)
 				xuncert = 0
 			elif fitfunction == "Polynom":
@@ -1450,7 +1461,11 @@ class PlotWidget(QGroupBox):
 				polynom = np.poly1d(popt)
 				fit_ys = polynom(fit_xs)
 
-				xmiddle = fit_xs[np.argmax(fit_ys)]
+				if amplitude_direction < 0:
+					xmiddle = fit_xs[np.argmin(fit_ys)]
+				else:
+					xmiddle = fit_xs[np.argmax(fit_ys)]
+				
 				xuncert = 0 # @Luis: Find real error for this part
 
 			elif fitfunction == "Polynom Autorank":
@@ -1477,40 +1492,54 @@ class PlotWidget(QGroupBox):
 				polynom = np.poly1d(popt)
 				fit_ys = polynom(fit_xs)
 
-				xmiddle = fit_xs[np.argmax(fit_ys)]
+				if amplitude_direction < 0:
+					xmiddle = fit_xs[np.argmin(fit_ys)]
+				else:
+					xmiddle = fit_xs[np.argmax(fit_ys)]
 				xuncert = 0 # @Luis: Find real error for this part
 
 			else:
 				x0 = (xmin+xmax)/2
 				ymin, ymax = np.min(exp_ys), np.max(exp_ys)
 				ymean = np.mean(exp_ys)
-				y0 = ymax-ymin
+				yptp = ymax-ymin
 				w0 = (xmax-xmin)
+				y0 = 0
+
+				amp_min, amp_max = -3*yptp, 3*yptp
+				if amplitude_direction < 0:
+					amp_max = 0
+					y0 = -yptp
+				if amplitude_direction > 0:
+					amp_min = 0
+					y0 = yptp
 
 				if main.config["fit_offset"]:
 					function, p0, bounds = {
-						"Gauss":					(lambda *x: lineshape("Gauss", 0, *x[:-1])+x[-1],   (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
-						"Lorentz":					(lambda *x: lineshape("Lorentz", 0, *x[:-1])+x[-1], (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
-						"Voigt":					(lambda *x: lineshape("Voigt", 0, *x[:-1])+x[-1],   (x0, y0, w0, w0, ymean),  ((xmin, 0, 0, 0, ymin), (xmax, 3*y0, 5*w0, 5*w0, ymax))),
-						"Gauss 1st Derivative":		(lambda *x: lineshape("Gauss", 1, *x[:-1])+x[-1],   (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
-						"Lorentz 1st Derivative":	(lambda *x: lineshape("Lorentz", 1, *x[:-1])+x[-1], (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
-						"Voigt 1st Derivative":		(lambda *x: lineshape("Voigt", 1, *x[:-1])+x[-1],   (x0, y0, w0, w0, ymean),  ((xmin, 0, 0, 0, ymin), (xmax, 3*y0, 5*w0, 5*w0, ymax))),
-						"Gauss 2nd Derivative":		(lambda *x: lineshape("Gauss", 2, *x[:-1])+x[-1],   (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
-						"Lorentz 2nd Derivative":	(lambda *x: lineshape("Lorentz", 2, *x[:-1])+x[-1], (x0, y0, w0, ymean),      ((xmin, 0, 0, ymin),    (xmax, 3*y0, 10*w0, ymax))),
-						"Voigt 2nd Derivative":		(lambda *x: lineshape("Voigt", 2, *x[:-1])+x[-1],   (x0, y0, w0, w0, ymean),  ((xmin, 0, 0, 0, ymin), (xmax, 3*y0, 5*w0, 5*w0, ymax))),
+						"Gauss":					(lambda *x: lineshape("Gauss", 0, *x[:-1])+x[-1],   (x0, y0, w0, ymean),      ((xmin, amp_min, 0, ymin),    (xmax, amp_max, 10*w0, ymax))),
+						"Lorentz":					(lambda *x: lineshape("Lorentz", 0, *x[:-1])+x[-1], (x0, y0, w0, ymean),      ((xmin, amp_min, 0, ymin),    (xmax, amp_max, 10*w0, ymax))),
+						"Voigt":					(lambda *x: lineshape("Voigt", 0, *x[:-1])+x[-1],   (x0, y0, w0, w0, ymean),  ((xmin, amp_min, 0, 0, ymin), (xmax, amp_max, 5*w0, 5*w0, ymax))),
+						"Gauss 1st Derivative":		(lambda *x: lineshape("Gauss", 1, *x[:-1])+x[-1],   (x0, y0, w0, ymean),      ((xmin, amp_min, 0, ymin),    (xmax, amp_max, 10*w0, ymax))),
+						"Lorentz 1st Derivative":	(lambda *x: lineshape("Lorentz", 1, *x[:-1])+x[-1], (x0, y0, w0, ymean),      ((xmin, amp_min, 0, ymin),    (xmax, amp_max, 10*w0, ymax))),
+						"Voigt 1st Derivative":		(lambda *x: lineshape("Voigt", 1, *x[:-1])+x[-1],   (x0, y0, w0, w0, ymean),  ((xmin, amp_min, 0, 0, ymin), (xmax, amp_max, 5*w0, 5*w0, ymax))),
+						"Gauss 2nd Derivative":		(lambda *x: lineshape("Gauss", 2, *x[:-1])+x[-1],   (x0, y0, w0, ymean),      ((xmin, amp_min, 0, ymin),    (xmax, amp_max, 10*w0, ymax))),
+						"Lorentz 2nd Derivative":	(lambda *x: lineshape("Lorentz", 2, *x[:-1])+x[-1], (x0, y0, w0, ymean),      ((xmin, amp_min, 0, ymin),    (xmax, amp_max, 10*w0, ymax))),
+						"Voigt 2nd Derivative":		(lambda *x: lineshape("Voigt", 2, *x[:-1])+x[-1],   (x0, y0, w0, w0, ymean),  ((xmin, amp_min, 0, 0, ymin), (xmax, amp_max, 5*w0, 5*w0, ymax))),
 					}.get(fitfunction)
 				else:
 					function, p0, bounds = {
-						"Gauss":					(lambda *x: lineshape("Gauss", 0, *x),   (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
-						"Lorentz":					(lambda *x: lineshape("Lorentz", 0, *x), (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
-						"Voigt":					(lambda *x: lineshape("Voigt", 0, *x),   (x0, y0, w0, w0),  ((xmin, 0, 0, 0), (xmax, 3*y0, 5*w0, 5*w0))),
-						"Gauss 1st Derivative":		(lambda *x: lineshape("Gauss", 1, *x),   (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
-						"Lorentz 1st Derivative":	(lambda *x: lineshape("Lorentz", 1, *x), (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
-						"Voigt 1st Derivative":		(lambda *x: lineshape("Voigt", 1, *x),   (x0, y0, w0, w0),  ((xmin, 0, 0, 0), (xmax, 3*y0, 5*w0, 5*w0))),
-						"Gauss 2nd Derivative":		(lambda *x: lineshape("Gauss", 2, *x),   (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
-						"Lorentz 2nd Derivative":	(lambda *x: lineshape("Lorentz", 2, *x), (x0, y0, w0),      ((xmin, 0, 0),    (xmax, 3*y0, 10*w0))),
-						"Voigt 2nd Derivative":		(lambda *x: lineshape("Voigt", 2, *x),   (x0, y0, w0, w0),  ((xmin, 0, 0, 0), (xmax, 3*y0, 5*w0, 5*w0))),
+						"Gauss":					(lambda *x: lineshape("Gauss", 0, *x),   (x0, y0, w0),      ((xmin, amp_min, 0),    (xmax, amp_max, 10*w0))),
+						"Lorentz":					(lambda *x: lineshape("Lorentz", 0, *x), (x0, y0, w0),      ((xmin, amp_min, 0),    (xmax, amp_max, 10*w0))),
+						"Voigt":					(lambda *x: lineshape("Voigt", 0, *x),   (x0, y0, w0, w0),  ((xmin, amp_min, 0, 0), (xmax, amp_max, 5*w0, 5*w0))),
+						"Gauss 1st Derivative":		(lambda *x: lineshape("Gauss", 1, *x),   (x0, y0, w0),      ((xmin, amp_min, 0),    (xmax, amp_max, 10*w0))),
+						"Lorentz 1st Derivative":	(lambda *x: lineshape("Lorentz", 1, *x), (x0, y0, w0),      ((xmin, amp_min, 0),    (xmax, amp_max, 10*w0))),
+						"Voigt 1st Derivative":		(lambda *x: lineshape("Voigt", 1, *x),   (x0, y0, w0, w0),  ((xmin, amp_min, 0, 0), (xmax, amp_max, 5*w0, 5*w0))),
+						"Gauss 2nd Derivative":		(lambda *x: lineshape("Gauss", 2, *x),   (x0, y0, w0),      ((xmin, amp_min, 0),    (xmax, amp_max, 10*w0))),
+						"Lorentz 2nd Derivative":	(lambda *x: lineshape("Lorentz", 2, *x), (x0, y0, w0),      ((xmin, amp_min, 0),    (xmax, amp_max, 10*w0))),
+						"Voigt 2nd Derivative":		(lambda *x: lineshape("Voigt", 2, *x),   (x0, y0, w0, w0),  ((xmin, amp_min, 0, 0), (xmax, amp_max, 5*w0, 5*w0))),
 					}.get(fitfunction)
+
+				print(f"{p0=}\n{bounds=}")
 
 				try:
 					popt, pcov = optimize.curve_fit(function, exp_xs, exp_ys, p0=p0, bounds=bounds)
@@ -2652,6 +2681,7 @@ class BlendedLinesWindow(EQWidget):
 					derivative = main.config["blendedlineswindow_derivative"]
 					polynomrank = main.config["blendedlineswindow_polynom"]+1
 					fixedwidth = main.config["blendedlineswindow_fixedwidth"]
+					amplitude_direction = main.config["fit_amplitudedirection"]
 					now = 2 if profile == "Voigt" else 1
 					noa = 2 + now * (not fixedwidth)
 
@@ -2693,12 +2723,16 @@ class BlendedLinesWindow(EQWidget):
 					if len(exp_ys) and (polynomrank + len(peaks)):
 						if main.config["blendedlineswindow_autopositionpeaks"]:
 							exp_mean = exp_ys.mean()
-						p0 = []
-						bounds = [[],[]]
 
-						y0 = 4*(np.amax(exp_ys)-np.amin(exp_ys))
+						yptp = 4*(np.amax(exp_ys)-np.amin(exp_ys))
 						w0 = xrange[1] - xrange[0]
 						wmax = main.config["blendedlineswindow_maxfwhm"] or w0
+						amp_min, amp_max = -3*yptp, 3*yptp
+						if amplitude_direction < 0:
+							amp_max = 0
+						if amplitude_direction > 0:
+							amp_min = 0
+						
 						for peak in peaks:
 							x, y, x_rel = peak
 
@@ -2706,12 +2740,12 @@ class BlendedLinesWindow(EQWidget):
 								x = self.center + x_rel
 								if not xrange[0] < x < xrange[1]:
 									x = sum(xrange)/2
-								y = y0/2
-							elif not 0 < y < y0:
-								y = y0/2
+								y = yptp * np.sign(amplitude_direction)
+							elif not amp_min < y < amp_max:
+								y = yptp * np.sign(amplitude_direction)
 
 							xs.append((x, *xrange))
-							ys.append((y, 0, y0))
+							ys.append((y, amp_min, amp_max))
 							ws.append((wmax/4, 0, wmax))
 
 						p0 = []
@@ -2743,6 +2777,7 @@ class BlendedLinesWindow(EQWidget):
 						bounds[0].extend([-np.inf]*polynomrank)
 						bounds[1].extend([+np.inf]*polynomrank)
 
+						# @Luis: Work on the bounds and p0s here
 						try:
 							popt, pcov = optimize.curve_fit(fitfunction, exp_xs, exp_ys, p0=p0, bounds=bounds)
 						except Exception as E:
@@ -6786,6 +6821,7 @@ config_specs = {
 	"fit_offset":							[True, bool],
 	"fit_comment":							["", str],
 	"fit_clipboard":						[True, bool],
+	"fit_amplitudedirection":				[1, int],
 
 	"plot_dpi":								[100, float],
 	"plot_annotations_dict":				[{"x": 1, "y": 1, "horizontalalignment": "right", "verticalalignment": "top"}, dict],
