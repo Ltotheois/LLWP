@@ -1,0 +1,5496 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+# Author: Luis Bonah
+# Description: Loomis-Wood Plot Software for Assigning experimental Spectra to Quantum Numbers
+
+CREDITSSTRING = """Made by Luis Bonah
+
+As this programs GUI is based on PyQt6, which is GNU GPL v3 licensed, this program is also licensed under GNU GPL v3 (See the bottom paragraph).
+
+pandas, matplotlib, scipy and numpy were used for this program, speeding up the development process massively.
+
+Copyright (C) 2024
+
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+##
+## Global Constants and Imports
+##
+
+APP_TAG = "LLWP"
+
+import os
+import sys
+import re
+import io
+import time
+import wrapt
+import random
+import pickle
+import json
+import queue
+import threading
+import configparser
+import traceback as tb
+import numpy as np
+import pandas as pd
+import subprocess
+import webbrowser
+import pyckett
+
+from scipy import optimize, special, signal
+
+from PyQt6.QtCore import *
+from PyQt6.QtWidgets import *
+from PyQt6.QtGui import *
+
+import matplotlib
+from matplotlib.backends.backend_qtagg import FigureCanvas, NavigationToolbar2QT
+
+import warnings
+warnings.simplefilter('ignore', np.RankWarning) 
+
+QLocale.setDefault(QLocale('en_EN'))
+matplotlib.rcParams['axes.formatter.useoffset'] = False
+
+
+def status_d(func):
+	def _wrapper(*args, **kwargs):
+		mw = mainwindow
+		tmp = mw.status_counter.increase()
+		if tmp:
+			mw.working.emit()
+
+		try:
+			return(func(*args, **kwargs))
+		except Exception as E:
+			raise
+		finally:
+			tmp = mw.status_counter.decrease()
+			if not tmp:
+				mw.waiting.emit()
+	return(_wrapper)
+
+def lock_d(lock):
+	@wrapt.decorator
+	def _wrapper(wrapped, instance, args, kwargs):
+		with lock:
+			return wrapped(*args, **kwargs)
+	return _wrapper
+
+class Color(str):
+	@staticmethod
+	def trgb_to_rgbt(color):
+		if len(color) == 9:
+			color = f"#{color[3:]}{color[1:3]}"
+		return(color)
+
+	@staticmethod
+	def rgbt_to_trgb(color):
+		if len(color) == 9:
+			color = f"#{color[-2:]}{color[1:-2]}"
+		return(color)
+
+	def __new__(cls, color):
+		cls.validate_color(cls, color)
+		return super().__new__(cls, color)
+
+	def __assign__(self, color):
+		self.validate_color(color)
+		return super().__new__(color)
+
+	def validate_color(self, color):
+		match = re.search(r'^#(?:[0-9a-fA-F]{3}?){1,2}$|^#(?:[0-9a-fA-F]{8}?)$', color)
+		if match:
+			if len(color) == 9 and color[-2:] == "ff":
+				color = color[:-2]
+			return(color)
+		else:
+			raise CustomError(f"Invalid Color: '{color}' is not a valid color.")
+
+class CustomError(Exception):
+	pass
+
+class EarlyReturnError(Exception):
+	pass
+
+class GUIAbortedError(Exception):
+	pass
+
+class AtomicCounter():
+	def __init__(self, initial=0):
+		self.value = initial
+		self._lock = threading.Lock()
+
+	def increase(self, num=1):
+		with self._lock:
+			self.value += num
+			return self.value
+			
+	def decrease(self, num=1):
+		return(self.increase(-num))
+
+	def get_value(self):
+		with self._lock:
+			return(self.value)
+
+class DynamicDecorator():
+	def __init__(self): 
+		self.init_func = lambda *args, **kwargs: None
+		self.exit_func = lambda *args, **kwargs: None
+		self.callback_kwargs = {}
+
+	def d(self, func):
+		def _wrapper(*args, **kwargs):
+			self.init_func(**self.callback_kwargs)
+			try:
+				return(func(*args, **kwargs))
+			except Exception as E:
+				raise E
+			finally:
+				self.exit_func(**self.callback_kwargs)
+		return(_wrapper)	
+
+class Config(dict):
+	initial_values = {
+		'plot_dpi': (100, int),
+		'plot_width': (20, float),
+		'plot_offset': (0, float),
+		'plot_offsetisrelative': (True, bool),
+		'plot_rows': (5, int),
+		'plot_cols': (1, int),
+		'plot_widthexpression': ('', str),
+		'plot_offsetexpression': ('', str),
+
+		'plot_yscale': ("Per Plot", str),
+		'plot_expcat_factor': (1, float),
+		'plot_expcat_exponent': (10, int),
+		'plot_yscale_min': (-100, float),
+		'plot_yscale_max': (300, float),
+		'plot_ymargin': (0.1, float),
+		'plot_xticks': (3, int),
+		'plot_xtickformat': ('offset', str),
+
+		'plot_gridspeckwargs': ({"hspace": 0, "wspace": 0}, dict),
+		'plot_fontdict': ({"size":10}, dict),
+		'plot_bins': (4000, int),
+		'plot_skipbinning': (1000, int),
+		'plot_hovercutoff': (20, float),
+
+		'convolution_kernel': ([], list),
+		'convolution_stepwidth': (0.2, float),
+		'convolution_kernelwidth': (2, float),
+		'convolution_derivative': (0, int),
+		'convolution_amplitude': (1, float),
+		'convolution_function': ('Off', str),
+		'convolution_widthgauss': (1, float),
+		'convolution_widthlorentz': (1, float),
+
+		'series_currenttab': (0, int),
+		'series_references': ([], list),
+		'series_blendwidth': (0, float),
+		'series_qns': (4, float),
+		'series_blendminrelratio': (0, float),
+
+		'fit_fitmethod': ('Pgopher', str),
+		'fit_uncertainty': (0.05, float),
+		'fit_uncertaintystep': (0.01, float),
+		'fit_copytoclipboard': (True, bool),
+		'fit_xpoints': (1000, int),
+		'fit_peakdirection': (1, int),
+		'fit_comment': ('', str),
+		'fit_polynomrank': (2, int),
+		'fit_polynommaxrank': (10, int),
+		'fit_offset': (True, bool),
+
+		'isvisible_matplotlibtoolbar': (False, bool),
+		'isvisible_controlsmainplot': (True, bool),
+		'isvisible_controlsrowscols': (True, bool),
+		'isvisible_controlswidth': (True, bool),
+		
+		'color_exp': ('#ff0000', Color),
+		'color_cat': ('#00ff00', Color),
+		'color_lin': ('#0000ff', Color),
+		'color_ref': ('#00ffff', Color),
+		'color_fit': ('#0000ff', Color),
+
+		'flag_expformats': ({}, dict),
+		'flag_catformats': ({}, dict),
+		'flag_linformats': ({}, dict),
+
+		'flag_saveformat':  ({}, dict),
+
+		'flag_tableformatint': ('.0f', str),
+		'flag_tableformatfloat': ('.2f', str),
+
+		'flag_extensions': ({"exp": [".csv"], "cat": [".cat"], "lin": [".lin"], "project": [".files"]}, dict),
+		'flag_notificationtime': (2000, int),
+		'flag_logmaxrows': (1000, int),
+		'flag_xformatfloat': (".4f", str),
+		'flag_syncreferencestocolumns': (True, bool),
+		'flag_appendonsave': (True, bool),
+		'flag_showmainplotposition': (True, bool),
+		
+		'commandlinedialog_commands': ([], list),
+		'commandlinedialog_current': (0, int),
+
+		'closebylines_cattemplate': ('{x:12.4f} {qns} {ylog}', str),
+		'closebylines_lintemplate': ('{x:12.4f} {qns}', str),
+
+		'residuals_defaultcolor': ("#000000", Color),
+		'residuals_query': ("", str),
+		'residuals_colorinput': ("", str),
+		'residuals_xvariable': ("", str),
+		'residuals_yvariable': ("", str),
+		'residuals_autoscale': (True, bool),
+		'residuals_blends': (False, bool),
+
+	}
+
+	def __init__(self, signal, *args, **kwargs):
+		super().__init__({key: value[0] for key, value in self.initial_values.items()}, *args, **kwargs)
+		self._group_callbacks_counter = AtomicCounter()
+		self._grouped_callbacks = set()
+		self._grouped_callbacks_lock = threading.Lock()
+		self.valuechanged = signal
+		self.valuechanged.connect(self.callback)
+		self.callbacks = pd.DataFrame(columns=["id", "key", "widget", "function"], dtype="object").astype({"id": np.uint})
+
+	def __setitem__(self, key, value, widget=None):
+		if self.get(key) != value:
+			super().__setitem__(key, value)
+			self.valuechanged.emit((key, value, widget))
+
+	def callback(self, args):
+		key, value, widget = args
+		if widget:
+			callbacks = self.callbacks.query(f"key == @key and widget != @widget")["function"].values
+		else:
+			callbacks = self.callbacks.query(f"key == @key")["function"].values
+		
+		counter_value = self._group_callbacks_counter.get_value()
+		if counter_value:
+			with self._grouped_callbacks_lock:
+				self._grouped_callbacks.update(callbacks)
+		else:
+			for callback in callbacks:
+				callback()
+
+	def register(self, keys, function):
+		if not isinstance(keys, (tuple, list)):
+			keys = [keys]
+		for key in keys:
+			# id is only needed for callback tied to widgets -> al here
+			id = 0
+			df = self.callbacks
+			df.loc[len(df), ["id", "key", "function"]] = id, key, function
+
+	def register_widget(self, key, widget, function):
+		ids = set(self.callbacks["id"])
+		id = 1
+		while id in ids:
+			id += 1
+		df = self.callbacks
+		df.loc[len(df), ["id", "key", "function", "widget"]] = id, key, function, widget
+		widget.destroyed.connect(lambda x, id=id: self.unregister_widget(id))
+
+	def unregister_widget(self, id):
+		self.callbacks.drop(self.callbacks[self.callbacks["id"] == id].index, inplace=True)
+
+	def load(self):
+		fname = llwpfile(".ini")
+		config_parser = configparser.ConfigParser(interpolation=None)
+		config_parser.read(fname)
+
+		self.messages = []
+		for section in config_parser.sections():
+			for key, value in config_parser.items(section):
+				fullkey = f"{section.lower()}_{key.lower()}"
+				if fullkey in self.initial_values:
+					try:
+						class_ = self.initial_values[fullkey][1]
+						if class_ in (dict, list, tuple):
+							value = json.loads(value)
+						elif class_ == bool:
+							value = True if value in ["True", "1"] else False
+						elif class_ == str:
+							value = value.encode("utf-8").decode("unicode_escape")
+						value = class_(value)
+						self[fullkey] = value
+					except Exception as E:
+						message = f"The value for the option {fullkey} from the option file was not understood."
+						self.messages.append(message)
+						print(message)
+				else:
+					self[fullkey] = value
+		
+		# Special case changing colors for better contrast
+		for key, value in self.items():
+			if key in self.initial_values and self.initial_values[key][1] == Color:
+				if is_dark_theme():
+					if value in ("#000000", ):
+						self[key] = "#ffffff"
+						self.messages.append(f"Changed the color of '{key}' from black to white as it is otherwise invisible.")
+				else:
+					if value in ("#ffffff", ):
+						self[key] = "#000000"
+						self.messages.append(f"Changed the color of '{key}' from white to black as it is otherwise invisible.")
+	
+	def save(self):
+		output_dict = {}
+		for key, value in self.items():
+			category, name = key.split("_", 1)
+			category = category.capitalize()
+			if category not in output_dict:
+				output_dict[category] = {}
+			if type(value) in (dict, list, tuple):
+				value = json.dumps(value)
+			elif type(value) == str:
+				value = value.encode("unicode_escape").decode("utf-8")
+
+			output_dict[category][name] = value
+
+		config_parser = configparser.ConfigParser(interpolation=None)
+		for section in output_dict:
+			config_parser.add_section(section)
+			for key in output_dict[section]:
+				config_parser.set(section, key, str(output_dict[section][key]))
+
+		with open(llwpfile(".ini"), "w+", encoding="utf-8") as file:
+			config_parser.write(file)
+		notify_info.emit("Options were saved successfully!")
+
+	def __enter__(self):
+		self._group_callbacks_counter.increase()
+
+	def __exit__(self, type, value, traceback):
+		counter_value = self._group_callbacks_counter.decrease()
+		if counter_value != 0:
+			return
+		
+		with self._grouped_callbacks_lock:
+			for callback in self._grouped_callbacks:
+				callback()
+			self._grouped_callbacks = set()
+			
+class Geometry():
+	_data = {}
+	
+	@classmethod
+	def set(cls, key, value):
+		cls._data[key] = value
+	
+	@classmethod
+	def get(cls, key, default=None):
+		return(cls._data.get(key, default))
+
+	@classmethod
+	def load(cls):
+		filename = llwpfile('.geometry')
+		if not os.path.isfile(filename):
+			return
+		
+		with open(filename, 'rb') as file:
+			cls._data = pickle.load(file)
+	
+	@classmethod
+	def save(cls):
+		filename = llwpfile('.geometry')
+		with open(filename, 'wb') as file:
+			pickle.dump(cls._data, file)
+
+	@classmethod
+	def save_widget_geometry(cls, widget):
+		key = widget.__class__.__name__
+		geometry = widget.geometry()
+		cls.set(key, geometry)
+	
+	@classmethod
+	def load_widget_geometry(cls, widget):
+		key = widget.__class__.__name__
+		geometry = cls.get(key)
+		if geometry:
+			widget.setGeometry(geometry)
+
+class ProtPlot(QWidget):
+	request_redraw = pyqtSignal()
+
+	def __init__(self, parent=None):
+		super().__init__(parent)
+
+		self.parent = parent
+		self.shortcuts()
+		self.from_current_plot()
+
+		self.from_current_plot(update=False)
+		self.gui()
+
+		self.span_selector = matplotlib.widgets.SpanSelector(self.ax, self.on_range, 'horizontal', useblit=True)
+
+	def gui(self):
+		layout = QVBoxLayout()
+		self.setLayout(layout)
+
+		tmp_layout = QHBoxLayout()
+		layout.addLayout(tmp_layout)
+
+		for dir in ("in", "out", "left", "right"):
+			tmp_layout.addWidget(QQ(QPushButton, text=dir, change=lambda x, dir=dir: self.move_plot(dir)))
+
+		tmp_layout.addStretch()
+		tmp_layout.addWidget(QQ(QPushButton, text="From Current Plot", change=lambda x: self.from_current_plot()))
+
+		self.fig = figure.Figure(dpi=config["plot_dpi"])
+		self.plot_canvas = FigureCanvas(self.fig)
+		layout.addWidget(self.plot_canvas, 6)
+		layout.addStretch()
+
+		self.ax = self.fig.subplots()
+
+		self.exp_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_exp"])
+		self.cat_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_cat"])
+		self.lin_coll = ax.scatter([], [], color=config['color_ref'], marker="*", zorder=100)
+		self.ax.add_collection(self.exp_coll)
+		self.ax.add_collection(self.cat_coll)
+
+		self.request_redraw.connect(self.plot_canvas.draw)
+
+	def from_current_plot(self):
+		tmp_ax = mainwindow.lwpwidget.get_current_ax()
+		self.index = (tmp_ax.row_i, tmp_ax.col_i)
+		self.xrange = tmp_ax.xrange
+
+		self.update_plot()
+
+	def update_plot(self):
+		# Exp Data
+		exp_df = ExpFile.get_data(xrange=self.xrange, binning=True)
+		self.exp_xs = xs = exp_df["x"].to_numpy()
+		self.exp_ys = ys = exp_df["y"].to_numpy()
+		exp_yrange = (ys.min(), ys.max()) if len(ys) else (-1, 1)
+		segs, colors = [], []
+
+		filenames = exp_df['filename']
+		unique_filenames = filenames.unique()
+		for unique_filename in unique_filenames:
+			mask = (filenames == unique_filename)
+			tmp_xs, tmp_ys = xs[mask], ys[mask]
+
+			colors.append( exp_df.loc[mask, 'color'].values )
+			if cls.ids[unique_filename].is_stickspectrum:
+				segs.append( np.array(((tmp_xs, tmp_xs), (np.zeros(tmp_ys.shape), tmp_ys))).T )
+			else:
+				segs.append( np.array(((tmp_xs[:-1], tmp_xs[1:]), (tmp_ys[:-1], tmp_ys[1:]))).T )
+
+		if segs:
+			segs = np.concatenate(segs)
+			colors = np.concatenate(colors)
+
+		self.exp_coll.set(segments=segs, colors=colors)
+
+		# Cat Data
+		cat_df = CatFile.get_data(xrange=self.xrange, binning=True)
+		self.cat_xs = xs = cat_df["x"].to_numpy()
+		self.cat_ys = ys = cat_df["y"].to_numpy()
+		cat_yrange = (ys.min(), ys.max()) if len(ys) else (-1, 1)
+
+		if scaling == 'Per Plot':
+			ys *= exp_yrange[1] / cat_yrange[1]
+		elif scaling in ['Global', 'Custom']:
+			ys = ys * config['plot_expcat_factor'] * 10 ** config['plot_expcat_exponent']
+
+		if config['convolution_kernel']:
+			kernel_ys = np.array(config['convolution_kernel'])
+			convolution_padding = len(kernel_ys) // 2
+			stepwidth = config['convolution_stepwidth']
+
+			n_xs = (xmax - xmin) // stepwidth + 1
+			con_xs = np.arange(-n_xs, n_xs+1) * stepwidth + (xmax + xmin) / 2
+
+			segs, colors = [], []
+
+			filenames = cat_df['filename']
+			unique_filenames = filenames.unique()
+			for unique_filename in unique_filenames:
+				mask = (filenames == unique_filename)
+				tmp_xs, tmp_ys = xs[mask], ys[mask]
+
+				hist_ys, _ = np.histogram(tmp_xs, bins=con_xs, weights=tmp_ys)
+				con_ys = np.convolve(hist_ys, kernel_ys, 'full')
+
+				con_ys = con_ys[convolution_padding:-convolution_padding]
+				con_xs = con_xs[:-1]
+				
+				colors.append( cat_df.loc[mask, 'color'].values )
+				segs.append( np.array(((con_xs[:-1], con_xs[1:]), (con_ys[:-1], con_ys[1:]))).T )
+
+			if segs:
+				segs = np.concatenate(segs)
+				colors = np.concatenate(colors)
+
+		else:
+			segs = np.array(((xs, xs), (ys*0, ys))).T
+			colors = cat_df['color'].to_numpy()
+
+			mask = (xs == self.ref_position)
+			colors[mask] = config['color_ref']
+
+		self.cat_coll.set(segments=segs, colors=colors)
+
+		# Lin Data
+		lin_df = LinFile.get_data(xrange=self.xrange, binning=True)
+		self.lin_xs = xs = lin_df["x"].to_numpy()
+		tuples = map(lambda x: (x, 0), xs)
+		tuples = tuples if len(tuples)!=0 else [[None,None]]
+		colors = lin_df['color'].to_numpy()
+
+		self.lin_coll.set_offsets(tuples)
+		self.lin_coll.set_color(colors)
+
+		# Set Limits
+		self.ax.set_xlim(self.xrange)
+
+		if scaling == 'Per Plot':
+			yrange = exp_yrange
+		elif scaling == 'Global':
+			yrange = ExpFile.yrange
+		else:
+			yrange = (config['plot_yscale_min'], config['plot_yscale_max'])
+		margin = config['plot_ymargin']
+		yrange = [yrange[0]-margin*(yrange[1]-yrange[0]), yrange[1]+margin*(yrange[1]-yrange[0])]
+		if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
+			yrange = [-1,+1]
+		ax.set_ylim(yrange)
+
+		self.request_redraw.emit()
+
+	def move_plot(self, dir, factor=None):
+		xmin, xmax = self.xrange
+		width = xmax - xmin
+		center = (xmax + xmin)/2
+
+		if dir == "in":
+			width /= 2
+		elif dir == "out":
+			width *= 2
+		elif dir == "left":
+			center -= width/2
+		elif dir == "right":
+			center += width/2
+		elif dir == "sin":
+			width *= 3/4
+		elif dir == "sout":
+			width /= 3/4
+		elif dir == "sleft":
+			center -= width/4
+		elif dir == "sright":
+			center += width/4
+		elif dir == "wheel" and factor != None:
+			width *= factor
+
+		self.xrange = center - width/2, center + width/2
+		self.update_plot()
+
+	def change_index(self, pos, dir):
+		index = list(self.index)
+		index[pos] += dir
+		
+		shape = mainwindow.lwpwidget.lwpaxes.shape
+		is_valid_plot = (0 <= index[0] < shape[0] and 0 <= index[1] < shape[1])
+
+		if is_valid_plot:
+			self.index = tuple(index)
+			tmp_ax = mainwindow.lwpwidget.lwpaxes[self.index]
+			xmin, xmax = self.xrange
+			curr_width = xmax - xmin
+
+			xmin, xmax = tmp_ax.xrange
+			new_center = (xmax + xmin)/2
+
+			self.range = (new_center - curr_width/2, new_center + curr_width/2)
+			self.update_plot()
+
+	def wheelEvent(self,event):
+		steps = event.angleDelta().y() // 120
+		factor = 2**(-steps)
+		self.move_plot("wheel", factor)
+
+	def shortcuts(self):
+		shortcuts_dict = {
+			"w": lambda: self.move_plot("in"),
+			"s": lambda: self.move_plot("out"),
+			"a": lambda: self.move_plot("left"),
+			"d": lambda: self.move_plot("right"),
+
+			"Shift+w": lambda: self.move_plot("sin"),
+			"Shift+s": lambda: self.move_plot("sout"),
+			"Shift+a": lambda: self.move_plot("sleft"),
+			"Shift+d": lambda: self.move_plot("sright"),
+			
+			# We cannot use shortcuts that are also used in the menu bar here, as these are global shortcuts on MacOS, as the MenuBar is always active
+			"Alt+w": lambda: self.change_index(0, -1),
+			"Alt+s": lambda: self.change_index(0, +1),
+			"Alt+a": lambda: self.change_index(1, -1),
+			"Alt+d": lambda: self.change_index(1, +1),
+		}
+
+
+		for keys, function in shortcuts_dict.items():
+			QShortcut(keys, self.parent).activated.connect(function)
+
+	def on_range(self, xmin, xmax):
+		self.xrange = (xmin, xmax)
+		self.update_plot()
+
+
+drawplot_decorator = DynamicDecorator()
+matplotlib_lock = threading.RLock()
+
+##
+## Customized PyQt classes
+##
+class QThread(QThread):
+	active_runnables = {}
+	lock = threading.RLock()
+	threads = set()
+
+	@classmethod
+	def threaded_d(cls, func):
+		def wrapper(*args, **kwargs):
+			thread = cls(func, *args, **kwargs)
+			thread.start()
+			return(thread)
+		return(wrapper)
+
+	def __init__(self, function, *args, **kwargs):
+		super().__init__()
+		self.function, self.args, self.kwargs = function, args, kwargs
+		self.threads.add(self)
+		self.finished.connect(lambda x=self: self.threads.remove(x))
+
+	def earlyreturn(self):
+		if self.active_runnables[self.function] != self.thread_id:
+			raise EarlyReturnError
+
+	def run(self):
+		try:
+			with self.lock:
+				self.thread_id = threading.current_thread().ident
+				self.active_runnables[self.function] = self.thread_id
+			self.function(*self.args, **self.kwargs, thread=self)
+		except EarlyReturnError as E:
+			pass
+		except Exception as E:
+			raise
+
+class QTableWidget(QTableWidget):
+	def keyPressEvent(self, event):
+		if not csv_copypaste(self, event):
+			super().keyPressEvent(event)
+
+class QTableView(QTableView):
+	def keyPressEvent(self, event):
+		if not csv_copypaste(self, event):
+			super().keyPressEvent(event)
+
+class QSpinBox(QSpinBox):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		# AdaptiveDecimalStepType is not implemented in earlier versions of PyQt5
+		try:
+			self.setStepType(QAbstractSpinBox.StepType.AdaptiveDecimalStepType)
+		except:
+			pass
+
+	def setSingleStep(self, value):
+		self.setStepType(QAbstractSpinBox.StepType.DefaultStepType)
+		super().setSingleStep(value)
+
+	def setValue(self, value):
+		if value < -2147483647 or value > 2147483647:
+			value = 0
+		return super().setValue(value)
+
+	def setRange(self, min, max):
+		min = min if not min is None else -2147483647
+		max = max if not max is None else +2147483647
+		return super().setRange(min, max)
+
+class QDoubleSpinBox(QDoubleSpinBox):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setDecimals(20)
+		# AdaptiveDecimalStepType is not implemented in earlier versions of PyQt5
+		try:
+			self.setStepType(QAbstractSpinBox.StepType.AdaptiveDecimalStepType)
+		except:
+			pass
+
+	def setSingleStep(self, value):
+		self.setStepType(QAbstractSpinBox.StepType.DefaultStepType)
+		super().setSingleStep(value)
+
+	def textFromValue(self, value):
+		if value and abs(np.log10(abs(value))) > 5:
+			return(f"{value:.2e}")
+		else:
+			return(f"{value:.10f}".rstrip("0").rstrip("."))
+
+	def valueFromText(self, text):
+		return(np.float64(text))
+
+	def setRange(self, min, max):
+		min = min if not min is None else -np.inf
+		max = max if not max is None else +np.inf
+		return super().setRange(min, max)
+
+	def validate(self, text, position):
+		try:
+			np.float64(text)
+			return(QValidator.State(2), text, position)
+		except ValueError:
+			if text.strip() in ["+", "-", ""]:
+				return(QValidator.State(1), text, position)
+			elif re.match(r"^[+-]?\d+\.?\d*[Ee][+-]?\d?$", text):
+				return(QValidator.State(1), text, position)
+			else:
+				return(QValidator.State(0), text, position)
+
+	def fixup(self, text):
+		tmp = re.search(r"[+-]?\d+\.?\d*", text)
+		if tmp:
+			return(tmp[0])
+		else:
+			return(str(0))
+
+class QHBoxLayout(QHBoxLayout):
+	def __init__(self, *args, **kwargs):
+		margin = kwargs.pop("margin", False)
+		super().__init__(*args, **kwargs)
+		if not margin:
+			self.setContentsMargins(0, 0, 0, 0)
+
+class QVBoxLayout(QVBoxLayout):
+	def __init__(self, *args, **kwargs):
+		margin = kwargs.pop("margin", False)
+		super().__init__(*args, **kwargs)
+		if not margin:
+			self.setContentsMargins(0, 0, 0, 0)
+
+class QGridLayout(QGridLayout):
+	def __init__(self, *args, **kwargs):
+		margin = kwargs.pop("margin", False)
+		super().__init__(*args, **kwargs)
+		if not margin:
+			self.setContentsMargins(0, 0, 0, 0)
+
+class FigureCanvas(FigureCanvas):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.wheelEvent = lambda event: event.ignore()
+		# self.setStyleSheet('background-color: #00000000')
+
+		app = QApplication.instance()
+		app.styleHints().colorSchemeChanged.connect(self.update_theme)
+		self.update_theme()
+
+	def update_theme(self):
+		background = 'black' if is_dark_theme() else 'white'
+		textcolor = 'white' if is_dark_theme() else 'black'
+		
+		figure = self.figure
+
+		for ax in figure.get_axes():
+			ax.tick_params(color=textcolor, labelcolor=textcolor)
+			for spine in ax.spines.values():
+				spine.set_edgecolor(textcolor)
+
+		self.setStyleSheet(f'background-color: {background}')
+		self.draw()
+
+class EQDockWidgetMeta(type(QDockWidget)):
+	def __call__(cls, *args, **kwargs):
+		if hasattr(cls, '_instance'):
+			cls._instance.show()
+			cls._instance.raise_()
+			cls._instance.activateWindow()
+			return(cls._instance)
+		
+		obj = cls.__new__(cls, *args, **kwargs)
+		cls._instance = obj
+		cls.__init__(obj, *args, **kwargs)
+		
+		return(obj)
+
+class EQDockWidget(QDockWidget, metaclass=EQDockWidgetMeta):
+	default_position = 2
+	default_visible = False
+	
+	def __init__(self, *args, **kwargs):
+		super().__init__(mainwindow, *args, **kwargs)
+		Geometry.load_widget_geometry(self)
+		self.is_instantiated = True
+		self.show()
+		self.activateWindow()
+		self.raise_()
+		self.setObjectName(self.__class__.__name__)
+
+		if self.default_position is None:
+			self.setFloating(True)
+		else:
+			mainwindow.addDockWidget(Qt.DockWidgetArea(self.default_position), self)
+		self.setVisible(self.default_visible)
+		QShortcut("Esc", self).activated.connect(self.close)
+
+	def moveEvent(self, *args, **kwargs):
+		Geometry.save_widget_geometry(self)
+		return super().moveEvent(*args, **kwargs)
+
+	def resizeEvent(self, *args, **kwargs):
+		Geometry.save_widget_geometry(self)
+		return super().resizeEvent(*args, **kwargs)
+
+	def show(self, *args, **kwargs):
+		screen_box = self.screen().geometry()
+		widget_top_left = self.geometry().topLeft()
+		widget_bottom_right = self.geometry().bottomRight()
+		
+		if not (screen_box.contains(widget_top_left) and screen_box.contains(widget_bottom_right)):
+			primary_screen = QApplication.instance().primaryScreen()
+			self.move(primary_screen.geometry().center()- self.rect().center())
+		
+		return(super().show(*args, **kwargs))
+
+class QDialog(QDialog):
+	def __init__(self, *args, **kwargs):
+		super().__init__()
+		Geometry.load_widget_geometry(self)
+		QShortcut("Esc", self).activated.connect(lambda: self.done(0))
+
+	def moveEvent(self, *args, **kwargs):
+		Geometry.save_widget_geometry(self)
+		return super().moveEvent(*args, **kwargs)
+
+	def resizeEvent(self, *args, **kwargs):
+		Geometry.save_widget_geometry(self)
+		return super().resizeEvent(*args, **kwargs)
+
+
+##
+## File claasses
+##
+class File():
+	ids = {}
+	lock = threading.RLock()
+	sortdf_counter = AtomicCounter()
+
+	default_color_key = ""
+	has_y_data = True
+
+	yrange = [0, 0]
+
+	additional_dtypes = {
+		'x0': np.float64,
+		'y0': np.float64,
+		'color': str,
+		'visible': bool,
+		'filename': 'category',
+	}
+
+	def __new__(cls, filename, *args, load_manually=False, **kwargs):
+		if cls == NewAssignments:
+			id = filename
+		else:
+			id = os.path.abspath(filename)
+		if id in cls.ids.keys():
+			existing_file = cls.ids[id]
+			if not load_manually:
+				existing_file.load_file()
+			return(existing_file)
+		
+		return super().__new__(cls)
+
+	def __init__(self, filename, load_manually=False, default_values={}):
+		if hasattr(self, 'is_initialized'):
+			return
+		
+		filename = os.path.abspath(filename)
+		self.filename_abs = filename
+		self.dirname_abs, self.basename = os.path.split(filename)
+		self.extension = os.path.splitext(filename)[1]
+		
+		self.filename_rel = os.path.relpath(filename, start=llwpfile())
+		self.dirname_rel = os.path.dirname(self.filename_rel)
+
+		self.ids[self.filename_abs] = self
+
+		self.gui_widgets = {}
+		self._color = None
+		self._is_visible = None
+		self.set_default_values(default_values)
+		
+		if not load_manually:
+			self.load_file()
+		
+		if hasattr(FileWindow, '_instance'):
+			FileWindow._instance.fileaddition_requested.emit(self.__class__, self.filename_abs)
+		self.is_initialized = True
+
+	# @Luis: Think where the x-column is changed -> Resort
+	def set_default_values(self, default_values={}):
+		self.color = default_values.get('color', config[self.default_color_key])
+		self.color_query = default_values.get('color_query')
+		self.query = default_values.get('query')
+		self.is_visible = default_values.get('visible', True)
+		self.xtransformation = default_values.get('xtransformation')
+		self.ytransformation = default_values.get('ytransformation')
+
+	def apply_all(self):
+		self.apply_color()
+		self.apply_visibility()
+		self.apply_xtransformation()
+		self.apply_ytransformation()
+
+	def check_file(self):
+		fname = self.filename_abs
+		if not os.path.isfile(fname):
+			notify_error.emit(f"The file {fname} could not be found. Please check the file.")
+			raise CustomError(f"The file {fname} could not be found. Please check the file.")
+		
+		if os.path.getsize(fname) == 0:
+			notify_warning.emit(f"<span style='color:#eda711;'>WARNING</span>: The file {fname} is empty and was therefore skipped.")
+			raise CustomError(f"The file {fname} is empty and was therefore skipped.")
+	
+	def load_file(self, thread=None):
+		self.check_file()
+		data = self.load_file_core()
+
+		# Add additional columns
+		data['x0'] = data['x']
+		if self.has_y_data:
+			data['y0'] = data['y']
+		data['color'] = self.color
+		data['visible'] = True
+		
+		with self.lock:
+			mask = self.df[self.df['filename'] == self.filename_abs].index
+			self.__class__.df = pd.concat([self.df.drop(mask), data], ignore_index=True)
+			self.apply_all()
+
+		df = self.__class__.df
+		mask = (df['filename'] == self.filename_abs)
+		xs = df.loc[mask, 'x']
+		self.xmin, self.xmax = xs.min(), xs.max()
+		notify_info.emit(f"Succesfully loaded '{self.basename}'")
+	
+	def to_dict(self):
+		dict_ = {
+			'filename': self.filename_abs,
+			'color': self.color,
+			'color_query': self.color_query,
+			'query': self.query,
+			'visible': self.is_visible,
+			'xtransformation': self.xtransformation,
+			'ytransformation': self.ytransformation,
+		}
+		return(dict_)
+
+	@classmethod
+	def save_files_gui(cls):
+		savepath, filter = QFileDialog.getSaveFileName(None, 'Project file', '')
+		if not savepath:
+			return
+
+		cls.save_files(savepath)
+		notify_info(f'Saved the current files as project \'{savepath}\'.')
+
+	@classmethod
+	def save_files(cls, filename):
+		dict_ = {}
+		for subclass in cls.__subclasses__():
+			tmp = [instance.to_dict() for instance in subclass.ids.values() if not isinstance(instance, NewAssignments)] 
+			dict_[subclass.__name__] = tmp
+
+		with open(filename, 'w+') as file:
+			json.dump(dict_, file, indent=4)
+
+	@classmethod
+	def load_files_gui(cls):
+		filename, filter = QFileDialog.getOpenFileName(None, 'Choose Project to load')
+		if not filename:
+			return
+		
+		thread = cls.load_files(filename)
+		thread.wait()
+		notify_info(f'Loaded the project \'{filename}\'.')
+
+	
+	@classmethod
+	@QThread.threaded_d
+	def load_files(cls, filename, thread=None):
+		with open(filename, 'r') as file:
+			dict_ = json.load(file)
+
+		label_to_class = {subclass.__name__: subclass for subclass in cls.__subclasses__()}
+		threads = []
+		for label, filedicts in dict_.items():
+			subclass = label_to_class[label]
+			for filedict in filedicts:
+				filename = filedict.pop('filename')
+				tmp_file = subclass(filename, default_values=filedict, load_manually=True)
+				threads.append(tmp_file.load_file())
+		
+		for thread_ in threads:
+			thread_.wait()
+		
+	@classmethod
+	def get_data(cls, xrange=None, binning=False):
+		df = cls.df
+
+		if xrange is not None:
+			x_start = df["x"].searchsorted(xrange[0], side="left")
+			x_stop  = df["x"].searchsorted(xrange[1], side="right")
+			df = df.iloc[x_start:x_stop].copy()
+
+		df = df[df['visible']]
+
+		if binning and xrange is not None:
+			bins = config['plot_bins']
+			nobinning = config['plot_skipbinning']
+			binwidth = (xrange[1]-xrange[0]) / bins
+
+			if len(df) > max(bins, nobinning)  and binwidth != 0:
+				df = bin_data(df, binwidth, xrange)
+
+		return(df)
+
+	@classmethod
+	def xs_to_indices(cls, xmins, xmaxs):
+		minindices = cls.df["x"].searchsorted(xmins, side="left")
+		maxindices = cls.df["x"].searchsorted(xmaxs, side="right")
+		return(minindices, maxindices)
+
+	@classmethod
+	def sort_df(cls):
+		with cls.lock:
+			# @Luis: Think about checking df.x.is_monotonic
+			cls.df = cls.df.sort_values('x')
+			if cls.has_y_data:
+				tmp = cls.df[ cls.df['visible'] ]['y']
+				cls.yrange = tmp.min(), tmp.max()
+		mainwindow.lwpwidget.set_data()
+
+	@staticmethod
+	def sort_files_by_type(files):
+		types = config['flag_extensions']
+		files_by_type = {key: [] for key in list(types.keys())}
+
+		for file in files:
+			path, extension = os.path.splitext(file)
+			extension = extension if extension else os.path.basename(path)
+			type = None
+			for key, value in types.items():
+				if extension in value:
+					type = key
+					break
+
+			if type is None:
+				item, ok = QInputDialog.getItem(None, "Choose File Type", f"Choose the file type for the extension \"{extension}\":", [x.capitalize() for x in types], editable=False)
+				if not (ok and item):
+					continue
+				types[item.lower()].append(extension)
+				type = item.lower()
+
+			files_by_type[type].append(file)
+		return(files_by_type)
+
+	@classmethod
+	@QThread.threaded_d
+	def add_multiple(cls, files, thread=None):
+		files = [cls(file, load_manually=True) for file in files]
+		file_threads = [file.load_file() for file in files]
+		for file_thread in file_threads:
+			file_thread.wait()
+
+	@staticmethod
+	def add_files_dialog():
+		files = QFileDialog.getOpenFileNames(None, f'Choose File(s)',)[0]
+		files_by_type = File.sort_files_by_type(files)
+		File.add_multiple_files_by_type(files_by_type)
+
+	@staticmethod
+	@QThread.threaded_d
+	def add_multiple_files_by_type(files_by_type, thread=None):
+		threads = (
+			ExpFile.add_multiple(files_by_type.get("exp", [])),
+			CatFile.add_multiple(files_by_type.get("cat", [])),
+			LinFile.add_multiple(files_by_type.get("lin", [])),
+		)
+
+		for thread_ in threads:
+			thread_.wait()
+
+		threads = (File.load_files(project) for project in files_by_type['project'])
+		for thread_ in threads:
+			thread_.wait()
+
+		# @Luis: Call update function after files are loaded
+
+	@classmethod
+	def gui_settings_general(cls):
+		layout = QVBoxLayout()
+		
+
+		buttons_dict = {
+			'Reread': cls.reread_all,
+			'Reset': cls.reset_all,
+			'Hide/Show': cls.toggle_all,
+			'Delete': cls.delete_all,
+		}
+
+		dcolor = config[cls.default_color_key]
+		stylesheet = f"background-color: {Color.rgbt_to_trgb(dcolor)}"
+		color_label = QQ(QLabel, text='Default Color: ')
+		color_input = QQ(QLineEdit, text=dcolor, maxWidth=200, change=cls.gui_change_color_all)
+		color_picker = QQ(QToolButton, stylesheet=stylesheet, change=cls.gui_change_color_all)
+		
+		tmp_layout = QHBoxLayout()
+		layout.addLayout(tmp_layout)
+		
+		for key, callback in buttons_dict.items():
+			tmp_layout.addWidget(QQ(QPushButton, text=key, change=lambda x, callback=callback: callback()))
+		tmp_layout.addStretch(1)
+		
+		tmp_layout = QHBoxLayout()
+		layout.addLayout(tmp_layout)
+		
+		for widget in (color_label, color_input, color_picker):
+			tmp_layout.addWidget(widget)
+		tmp_layout.addStretch(1)
+		
+		cls.gui_widgets_class = {
+			'color_picker': color_picker,
+			'color_input': color_input,
+		}
+
+		return(layout)
+
+	def gui_settings_widgets(self):
+		dcolor = self.color
+		stylesheet = f"background-color: {Color.rgbt_to_trgb(dcolor)}"
+		toggle_text = 'Hide' if self.is_visible else 'Show'
+		
+		widgets = {
+			'label': QQ(QLabel, text=self.basename, tooltip=self.filename_abs, enabled=self.is_visible),
+			'color_input': QQ(QLineEdit, text=dcolor, maxWidth=200, change=self.gui_change_color),
+			'color_picker': QQ(QToolButton, stylesheet=stylesheet, change=self.gui_change_color),
+			'toggle_visibility': QQ(QToolButton, text=toggle_text, change=self.gui_toggle_visbility),
+			'settings_dialog': QQ(QToolButton, text='⚙', change=self.gui_more_settings_dialog),
+			'reread': QQ(QToolButton, text='⟲', change=lambda x: self.load_file()),
+			'delete': QQ(QToolButton, text='×', change=lambda x: self.delete()),
+		}
+
+		for widget in self.gui_widgets.values():
+			widget.setParent(None)
+
+		self.gui_widgets = widgets
+		return(widgets.values())
+		
+	def gui_more_settings_dialog(self):
+		FileAdditionalSettingsDialog.show_dialoag(self)
+			
+	@classmethod
+	def gui_change_color_all(cls, argument):
+		dcolor = config[cls.default_color_key]
+		if type(argument) == str:
+			color = argument
+		else:
+			color = QColorDialog.getColor(initial=QColor(Color.rgbt_to_trgb(dcolor)), options=QColorDialog.ColorDialogOption.ShowAlphaChannel)
+			if color.isValid():
+				color = Color.trgb_to_rgbt(color.name(QColor.NameFormat.HexArgb))
+			else:
+				return
+		
+		try:
+			color = Color(color)
+		except CustomError:
+			return
+
+		config[cls.default_color_key] = color
+
+		color_input = cls.gui_widgets_class.get('color_input')
+		if color_input and color_input.text() != color:
+			color_input.setText(color)
+		color_picker = cls.gui_widgets_class.get('color_picker')
+		if color_picker:
+			color_picker.setStyleSheet(f"background-color: {Color.rgbt_to_trgb(color)}")
+		
+	def gui_change_color(self, argument):
+		if type(argument) == str:
+			color = argument
+		else:
+			color = QColorDialog.getColor(initial=QColor(Color.rgbt_to_trgb(self.color)), options=QColorDialog.ColorDialogOption.ShowAlphaChannel)
+			if color.isValid():
+				color = Color.trgb_to_rgbt(color.name(QColor.NameFormat.HexArgb))
+			else:
+				return
+		
+		try:
+			color = Color(color)
+		except CustomError:
+			return
+		
+		self.color = color
+		self.apply_color()
+
+	def gui_toggle_visbility(self, _):
+		self.toggle_visibility()
+		self.apply_visibility()
+
+	@classmethod
+	def reread_all(cls):
+		if cls == File:
+			for subcls in cls.__subclasses__():
+				print(subcls.__name__)
+				subcls.reread_all()
+		else:
+			for file in cls.ids.values():
+				file.load_file()
+	
+	@classmethod
+	def reset_all(cls):
+		for file in cls.ids.values():
+			file.set_default_values()
+	
+	@classmethod
+	def delete_all(cls):
+		for file in reversed(cls.ids.values()):
+			file.load_file()
+	
+	@classmethod
+	def toggle_all(cls):
+		files = cls.ids.values()
+		all_are_visible = all([file.is_visible for file in files])
+		visibility = not all_are_visible
+
+		for file in cls.ids.values():
+			file.is_visible = visibility
+	
+
+
+	@property
+	def color(self):
+		return(self._color)
+	
+	@color.setter
+	def color(self, value):
+		self._color = value
+		
+		color_input = self.gui_widgets.get('color_input')
+		if color_input and color_input.text() != value:
+			color_input.setText(value)
+		color_picker = self.gui_widgets.get('color_picker')
+		if color_picker:
+			color_picker.setStyleSheet(f"background-color: {Color.rgbt_to_trgb(value)}")
+
+	def apply_color(self):
+		df = self.__class__.df
+		mask = (df['filename'] == self.filename_abs)
+
+		df.loc[mask, 'color'] = self.color
+		
+		# Color query
+		if not self.color_query:
+			return()
+		
+		for command in self.color_query.split("\n"):
+			if not command.strip():
+				continue
+			color, query = command.split(";")
+			indices = (df.loc[mask].query(query)).index
+			df.loc[indices, "color"] = color
+
+
+	def toggle_visibility(self):
+		self.is_visible = not self.is_visible
+
+	@property
+	def is_visible(self):
+		return(self._is_visible)
+	
+	@is_visible.setter
+	def is_visible(self, value):
+		self._is_visible = value
+
+		widget = self.gui_widgets.get('toggle_visibility')
+		if widget:
+			widget.setText('Hide' if self.is_visible else 'Show')
+		label = self.gui_widgets.get('label')
+		if label:
+			label.setEnabled(self.is_visible)
+
+	def apply_visibility(self):
+		df = self.__class__.df
+		mask = (df['filename'] == self.filename_abs)
+		
+		if self.is_visible and not self.query:
+			df.loc[mask, 'visible'] = True
+		elif self.is_visible and self.query:
+			df.loc[mask, 'visible'] = df.loc[mask].eval(self.query)
+		else:
+			df.loc[mask, 'visible'] = False
+		
+
+	def apply_transformation(self, col, transform, fallback_col):
+		df = self.__class__.df
+		mask = (df['filename'] == self.filename_abs)
+		
+		if not transform:
+			df.loc[mask, col] = df.loc[mask, fallback_col]
+		else:
+			df.loc[mask, col] = df.loc[mask].eval(transform)
+
+	def apply_xtransformation(self):
+		self.apply_transformation('x', self.xtransformation, 'x0')
+
+	def apply_ytransformation(self):
+		self.apply_transformation('y', self.ytransformation, 'y0')
+
+
+	def delete(self):
+		for widget in self.gui_widgets.values():
+			widget.setParent(None)
+		self.gui_widgets = None
+
+		with self.lock:
+			df = self.__class__.df
+			mask = df[df['filename'] == self.filename_abs].index
+			self.__class__.df = df.drop(mask)
+			del self.ids[self.filename_abs]
+		
+		del self
+	
+# @Luis: continue here
+# - cache the query results -> for cat query
+# - maybe do so in File class
+class CatFile(File):
+	ids = {}
+	lock = threading.RLock()
+	sortdf_counter = AtomicCounter()
+	decorator = DynamicDecorator()
+	
+	default_color_key = "color_cat"
+	dtypes = {**pyckett.cat_dtypes, **File.additional_dtypes}
+	df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
+	
+	@QThread.threaded_d
+	@status_d
+	@decorator.d
+	def load_file(self, *args, **kwargs):
+		return(super().load_file(*args, **kwargs))
+
+	def load_file_core(self):
+		if self.extension not in config['flag_catformats']:
+			data = pyckett.cat_to_df(self.filename_abs)
+			data['filename'] = data['filename'].astype('category')
+		else:
+			kwargs = config['flag_catformats'][self.extension].copy()
+			y_is_log = format.pop('y_is_log', False)
+
+			data = pd.read_fwf(self.filename_abs, **kwargs)
+			data['filename'] = pd.Series(self.filename_abs, index=data.index, dtype='category')
+
+			if y_is_log:
+				data['y'] = 10 ** data['y']
+			for column in dtypes.columns:
+				if column not in data.columns:
+					data[column] = pyckett.SENTINEL
+			data = data[cat_dtypes.keys()]
+
+		return(data)
+
+	@decorator.d
+	def apply_xtransformation(self, *args, **kwargs):
+		return(super().apply_xtransformation(*args, **kwargs))
+
+class LinFile(File):
+	ids = {}
+	lock = threading.RLock()
+	sortdf_counter = AtomicCounter()
+	decorator = DynamicDecorator()
+	
+	default_color_key = "color_lin"
+	dtypes = {**pyckett.lin_dtypes, **File.additional_dtypes}
+	df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
+	has_y_data = False
+
+	@QThread.threaded_d
+	@status_d
+	@decorator.d
+	def load_file(self, *args, **kwargs):
+		return(super().load_file(*args, **kwargs))
+
+	def load_file_core(self):
+		if self.extension not in config['flag_linformats']:
+			data = pyckett.lin_to_df(self.filename_abs)
+			data['filename'] = data['filename'].astype('category')
+		else:
+			kwargs = config['flag_linformats'][self.extension].copy()
+
+			data = pd.read_fwf(self.filename_abs, **kwargs)
+			data['filename'] = pd.Series(self.filename_abs, index=data.index, dtype='category')
+
+			for column in dtypes.columns:
+				if column not in data.columns:
+					data[column] = pyckett.SENTINEL
+			data = data[cat_dtypes.keys()]
+
+		return(data)
+	
+	@decorator.d
+	def apply_xtransformation(self, *args, **kwargs):
+		return(super().apply_xtransformation(*args, **kwargs))
+
+class ExpFile(File):
+	ids = {}
+	lock = threading.RLock()
+	sortdf_counter = AtomicCounter()
+	decorator = DynamicDecorator()
+	
+	default_color_key = "color_exp"
+	dtypes = {'x': np.float64, 'y': np.float64, **File.additional_dtypes}
+	df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
+	
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.is_stickspectrum = False
+		# @Luis: Add a function for this to more settings dialog
+	
+	@QThread.threaded_d
+	@status_d
+	@decorator.d
+	def load_file(self, *args, **kwargs):
+		return(super().load_file(*args, **kwargs))
+
+	def load_file_core(self):
+		kwargs = config['flag_expformats'].get(self.extension, {})
+		data = exp_to_df(self.filename_abs, **kwargs)
+		return(data)
+	
+	@decorator.d
+	def apply_xtransformation(self, *args, **kwargs):
+		return(super().apply_xtransformation(*args, **kwargs))
+
+class NewAssignments(LinFile):
+	_instance = None
+	def __init__(self, filename, load_manually=False):
+		if hasattr(self, 'is_initialized'):
+			return
+		self.is_initialized = True
+		self.__class__._instance = self
+
+		dtypes = pyckett.lin_dtypes
+		self.new_assignments_df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
+		self.filename_abs = filename
+		self.basename = "New Assignments"
+		self.dirname_abs = self.extension = self.filename_rel = self.dirname_rel = None
+		
+		self.ids[self.filename_abs] = self
+		self.gui_widgets = {}
+		self._color = None
+		self._is_visible = None
+		self.set_default_values()
+		
+		if not load_manually:
+			self.load_file()
+		
+		if hasattr(FileWindow, '_instance'):
+			FileWindow._instance.fileaddition_requested.emit(self.LinFile, self.filename_abs)
+
+	def check_file(self):
+		return
+	
+	def load_file_core(self, thread=None):
+		return(self.new_assignments_df.copy())
+	
+	# @Luis: Check if this can be done more beautifully
+	@QThread.threaded_d
+	@status_d
+	@LinFile.decorator.d
+	def load_file(self, thread=None):
+		data = self.load_file_core()
+
+		# Add additional columns
+		data['x0'] = data['x']
+		if self.has_y_data:
+			data['y0'] = data['y']
+		data['color'] = self.color
+		data['visible'] = True
+		
+		with self.lock:
+			mask = self.df[self.df['filename'] == self.filename_abs].index
+			LinFile.df = pd.concat([self.df.drop(mask), data], ignore_index=True)
+			self.apply_all()
+
+		df = LinFile.df
+		mask = (df['filename'] == self.filename_abs)
+		xs = df.loc[mask, 'x']
+		self.xmin, self.xmax = xs.min(), xs.max()
+		notify_info.emit(f"Succesfully loaded '{self.basename}'")
+
+	def gui_settings_widgets(self):
+		dcolor = self.color
+		stylesheet = f"background-color: {Color.rgbt_to_trgb(dcolor)}"
+		toggle_text = 'Hide' if self.is_visible else 'Show'
+		
+		widgets = {
+			'label': QQ(QLabel, text=self.basename, tooltip=self.filename_abs, enabled=self.is_visible),
+			'color_input': QQ(QLineEdit, text=dcolor, maxWidth=200, change=self.gui_change_color),
+			'color_picker': QQ(QToolButton, stylesheet=stylesheet, change=self.gui_change_color),
+			'toggle_visibility': QQ(QToolButton, text=toggle_text, change=self.gui_toggle_visbility),
+			'settings_dialog': QQ(QToolButton, text='⚙', change=self.gui_more_settings_dialog),
+		}
+
+		for widget in self.gui_widgets.values():
+			widget.setParent(None)
+
+		self.gui_widgets = widgets
+		return(widgets.values())
+	
+	def delete(self):
+		return
+	
+	def add_row(self, row_dict):
+		rows_dict = {key: [value] for key, value in row_dict.items()}
+		self.add_rows(rows_dict)
+
+	def add_rows(self, rows_dict):
+		dtypes = pyckett.lin_dtypes
+		new_row = pd.DataFrame(rows_dict).astype(dtypes)[dtypes.keys()]
+		self.new_assignments_df = pd.concat( (self.new_assignments_df, new_row) ).reset_index(drop=True)
+		self.load_file()
+		new_assignments_window = NewAssignmentsWindow._instance
+		new_assignments_window.model.update()
+		new_assignments_window.model.resize_columns()
+		new_assignments_window.scroll_bottom()
+
+	@classmethod
+	def get_instance(cls):
+		if cls._instance is None:
+			return(cls('__newassignments__'))
+		else:
+			return(cls._instance)
+	
+	def get_df(self):
+		return(self.new_assignments_df)
+	
+
+	def save_gui(self):
+		append = config['flag_appendonsave']
+		format = config['flag_saveformat']
+		
+		options = {"options": QFileDialog.Option.DontConfirmOverwrite} if append else {}
+		savepath, extension = QFileDialog.getSaveFileName(None, 'Save file', '', **options)
+		if not savepath:
+			return
+
+		self.save(savepath, append, format)
+		notify_info.emit(f"The {len(self.new_assignments_df)} new assignments were saved to the file {savepath}.")
+
+	def save_backup(self):
+		savepath = llwpfile('.lin')
+		self.save(savepath, False, None)
+	
+	def save(self, savepath, append, format):
+		handle = "a+" if append else "w+"
+		df = self.get_df().copy()
+
+		with open(savepath, handle, encoding="utf-8") as file:
+			if format:
+				np.savetxt(file, df[format.get("names", df.columns)], delimiter=format.get("delimiter", " "), fmt=format.get("format", '%.18e'))
+			else:
+				file.write(pyckett.df_to_lin(df))
+
+# @Luis: Update dialog entries when changed in file
+class FileAdditionalSettingsDialog(QDialog):
+	open_dialogs = {}
+
+	@classmethod
+	def show_dialoag(cls, file):
+		if file in cls.open_dialogs:
+			dialog = cls.open_dialogs[file]
+			dialog.done(0)
+		
+		else:
+			dialog = cls(file)
+			cls.open_dialogs[file] = dialog
+			dialog.show()
+	
+	def __init__(self, file):
+		super().__init__()
+
+		self.setModal(False)
+		self.setWindowTitle(f'Settings for {file.basename}')
+		self.file = file
+		self.finished.connect(self.on_exit)
+		
+		self.layout = QVBoxLayout(margin=True)
+		self.setLayout(self.layout)
+
+		ph_colorq = "Enter custom color and query to color specific lines differently. E.g. enter '#ff0000; qn1 < 20' to color all levels with the first quantum number below 20 red."
+
+		self.widgets = {
+			'query': {
+				'label': QQ(QLabel, text='Filter: '),
+				'widget': QQ(QPlainTextEdit, value=file.query),
+				'button': QQ(QToolButton, text='Update', change=self.update_query),
+			},
+			'xtransformation': {
+				'label': QQ(QLabel, text='x-Transformation: '),
+				'widget': QQ(QPlainTextEdit, value=file.xtransformation),
+				'button': QQ(QToolButton, text='Update', change=self.update_xtransformation),
+			},
+			'ytransformation': {
+				'label': QQ(QLabel, text='y-Transformation: '),
+				'widget': QQ(QPlainTextEdit, value=file.ytransformation),
+				'button': QQ(QToolButton, text='Update', change=self.update_ytransformation),
+			} if self.file.has_y_data else {},
+			'color_query': {
+				'label': QQ(QLabel, text='Color Query: '),
+				'widget': QQ(QPlainTextEdit, value=file.color_query, placeholder=ph_colorq),
+				'button': QQ(QToolButton, text='Update', change=self.update_color_query),
+			},
+		}
+
+		for _, tmp in self.widgets.items():
+			if not tmp:
+				continue
+			tmp_layout = QHBoxLayout()
+			tmp_layout.addWidget(tmp['label'])
+			tmp_layout.addStretch(1)
+			tmp_layout.addWidget(tmp['button'])
+
+			self.layout.addLayout(tmp_layout)
+			self.layout.addWidget(tmp['widget'])
+
+		self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+		self.button_box.rejected.connect(lambda: self.done(0))
+
+		self.layout.addWidget(self.button_box)
+
+	def update_query(self, _):
+		file = self.file
+		query = self.widgets['query']['widget'].toPlainText()
+		file.query = query
+		file.apply_visibility()
+		
+	def update_xtransformation(self, _):
+		file = self.file
+		xtransformation = self.widgets['xtransformation']['widget'].toPlainText()
+		file.xtransformation = xtransformation
+		file.apply_xtransformation()
+
+	def update_ytransformation(self, _):
+		file = self.file
+		ytransformation = self.widgets['ytransformation']['widget'].toPlainText()
+		file.ytransformation = ytransformation
+		file.apply_ytransformation()
+
+	def update_color_query(self, _):
+		file = self.file
+		color_query = self.widgets['color_query']['widget'].toPlainText()
+		file.color_query = color_query
+		file.apply_color()
+
+	def on_exit(self, _):
+		del self.__class__.open_dialogs[self.file]
+
+
+##
+## Application and MainWindow
+##
+class LWPWidget(QGroupBox):
+	drawplot = pyqtSignal()
+	plotscreated = pyqtSignal()
+	draw_counter = AtomicCounter()
+	_active_ax_index = (0, 0)
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.initialize_dynamic_decorator_for_drawing_plot()
+
+		with matplotlib_lock:
+			self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
+			self.listener_onclick = self.fig.canvas.mpl_connect('button_press_event', self.on_click)
+			self.listener_onhover = self.fig.canvas.mpl_connect("motion_notify_event", self.on_hover)
+			self.plotcanvas = FigureCanvas(self.fig)
+	
+		config.register("plot_dpi", lambda: self.fig.set_dpi(config["plot_dpi"]))
+		
+		self.plotcanvas.setMinimumHeight(200)
+		self.plotcanvas.setMinimumWidth(200)
+		
+		self.drawplot.connect(self.draw_canvas)
+		# @Luis: Add here list of additional stuff
+		config.register(('plot_width', 'plot_widthexpression', 'plot_offset', 'plot_offsetexpression', 'plot_offsetisrelative', "series_annotate_xs", "plot_annotate", "plot_bins", "flag_automatic_draw"), lambda: self.set_data())
+
+		self.mpltoolbar = NavigationToolbar2QT(self.plotcanvas, self)
+		self.mpltoolbar.setVisible(config["isvisible_matplotlibtoolbar"])
+		config.register('isvisible_matplotlibtoolbar', lambda: self.mpltoolbar.setVisible(config['isvisible_matplotlibtoolbar']))
+
+		toplayout = QHBoxLayout()
+
+		buttonsdict = {
+			'in':			lambda _: WidthDialog.gui_set_width('++'),
+			'out':			lambda _: WidthDialog.gui_set_width('--'),
+			'left':			lambda _: OffsetDialog.gui_set_offset('-'),
+			'right':		lambda _: OffsetDialog.gui_set_offset('+'),
+		}
+
+		for label, func in buttonsdict.items():
+			button = QQ(QPushButton, text=label, change=func, visible=config['isvisible_controlsmainplot'])
+			toplayout.addWidget(button)
+			config.register('isvisible_controlsmainplot', lambda button=button: button.setVisible(config['isvisible_controlsmainplot']))
+
+		toplayout.addStretch(1)
+
+		rows_cols_elements = (
+			QQ(QLabel, text="Plots: ", visible=config["isvisible_controlsrowscols"]),
+			QQ(QSpinBox, "plot_rows", range=(1, None), maxWidth=45, visible=config["isvisible_controlsrowscols"]),
+			QQ(QLabel, text="x", visible=config["isvisible_controlsrowscols"]),
+			QQ(QSpinBox, "plot_cols", range=(1, None), maxWidth=45, visible=config["isvisible_controlsrowscols"]),
+		)
+		for elem in rows_cols_elements:
+			toplayout.addWidget(elem)
+			config.register("isvisible_controlsrowscols", lambda elem=elem: elem.setVisible(config["isvisible_controlsrowscols"]))
+
+		width_elements = (
+			QQ(QLabel, text="    Width: ", visible=config["isvisible_controlswidth"]),
+			QQ(QDoubleSpinBox, "plot_width", range=(0, None), minWidth=85, visible=config["isvisible_controlswidth"]),
+		)
+		for elem in width_elements:
+			toplayout.addWidget(elem)
+			config.register("isvisible_controlswidth", lambda elem=elem: elem.setVisible(config["isvisible_controlswidth"]))
+
+		layout = QVBoxLayout()
+		layout.addLayout(toplayout)
+		layout.addWidget(self.plotcanvas, 1)
+		layout.addWidget(self.mpltoolbar)
+		self.setLayout(layout)
+
+		self.lwpaxes = np.zeros((0, config['plot_cols']))
+
+		config.register(("plot_rows", "plot_cols"), self.create_plots)
+		self.create_plots()
+
+	def initialize_dynamic_decorator_for_drawing_plot(self):
+		def exit_func():
+			counter_value = self.draw_counter.decrease()
+			if not counter_value:
+				self.drawplot.emit()
+
+		def init_func():
+			self.draw_counter.increase()
+
+		drawplot_decorator.init_func = init_func
+		drawplot_decorator.exit_func = exit_func
+
+	def draw_canvas(self):
+		with matplotlib_lock:
+			self.plotcanvas.draw()
+
+	def on_click(self, event):
+		ax = event.inaxes
+		index = np.asarray(np.where(self.axes  == ax)).T
+		if len(index):
+			self._active_ax_index = tuple(index[0])
+
+	def on_hover(self, event):
+		x = event.xdata
+		y = event.ydata
+
+		if not all([x, y, event.inaxes]):
+			text_cursor = ""
+		else:
+			if config['flag_showmainplotposition']:
+				text_cursor = f"  ({x=:{config['flag_xformatfloat']}}, {y=:{config['flag_xformatfloat']}})  "
+			else:
+				text_cursor = ""
+
+			CloseByLinesWindow._instance.cursor_changed.emit(x, y)
+		mainwindow.statusbar.position_label.setText(text_cursor)
+
+	@QThread.threaded_d
+	@lock_d(matplotlib_lock)
+	@status_d
+	def create_plots(self, thread=None):
+		n_rows = max(config["plot_rows"], 1)
+		n_cols = max(config["plot_cols"], 1)
+		gridspec_kw = config["plot_gridspeckwargs"]
+
+		# The following performed better than self.fig.clf()
+		for ax in self.fig.get_axes():
+			self.fig.delaxes(ax)
+
+		thread.earlyreturn()
+
+		axes = self.fig.subplots(n_rows, n_cols, gridspec_kw=gridspec_kw, squeeze=False)[::-1]
+		self.axes = axes
+
+		thread.earlyreturn()
+
+		indices = np.indices(axes.shape)
+		vLWPAx = np.vectorize(LWPAx, otypes=[object])
+		self.lwpaxes = vLWPAx(axes, *indices)
+
+		thread.earlyreturn()
+
+		self.set_data()
+		self.plotscreated.emit()
+
+		# if not hasattr(ReferenceSeriesWindow, '_instance'):
+		# 	return
+
+		# tab_widget = ReferenceSeriesWindow._instance.tab
+		# n_widgets = tab_widget.count()
+		# for i_col in range(n_widgets):
+		# 	if i_col > n_cols:
+		# 		continue
+
+		# 	thread.earlyreturn()
+		# 	refwidget = tab_widget.widget(i_col)
+		# 	refs, qns = refwidget.calc_references()
+		# 	thread.earlyreturn()
+		# 	mainwindow.lwpwidget.set_column_references(i_col, refs, qns)
+
+		# thread.earlyreturn()
+
+		# for i_col in range(n_widgets, n_cols):
+		# 	mainwindow.lwpwidget.set_column_references(i_col, refs, qns)
+
+		# thread.earlyreturn()
+		# # @Luis: Manage the repushing of references from here
+		# # - Get references for all available ReferenceSelectors
+		# # - Use from the last also for all others
+		# # - Call set_column_references in a loop for the columns
+		# self.plotscreated.emit()
+	
+	def calculate_widths(self):
+		expression = config['plot_widthexpression']
+		value = config['plot_width']
+		if not expression:
+			return(value)
+		
+		compiled_expression = compile(expression, '', 'eval')
+		return(compiled_expression)
+		
+	@QThread.threaded_d
+	@status_d
+	@drawplot_decorator.d
+	def set_data(self, thread=None):
+		if not hasattr(ReferenceSeriesWindow, '_instance'):
+			return
+		
+		if not hasattr(ReferenceSeriesWindow._instance, 'tab'):
+			return
+
+		n_rows = config['plot_rows']
+		n_cols = config['plot_cols']
+		n_qns = config['series_qns']
+
+		# Setup arrays to hold final data
+		positions_shape = (n_rows, n_cols)
+		positions = np.empty(positions_shape, dtype=np.float64)
+		qns_shape = (n_rows, n_cols, 2, n_qns)
+		qns = np.empty(qns_shape, dtype=np.int64)
+
+		thread.earlyreturn()
+
+		# Calculate positions and qns for each column
+		tab_widget = ReferenceSeriesWindow._instance.tab
+		n_widgets = tab_widget.count()
+
+		for i_col in range(n_widgets):
+			thread.earlyreturn()
+			if i_col > n_cols:
+				continue
+
+			# refwidget = tab_widget.widget(i_col)
+			# positions[:, i_col], qns[:, i_col] = refwidget.calc_references(n_rows, n_qns)
+
+			refwidget = tab_widget.widget(i_col)
+			positions[:, i_col], qns[:, i_col] = refwidget.calc_references(n_rows, n_qns)
+		
+		thread.earlyreturn()
+
+		# Edge cases of no reference tabs and too few tabs
+		if n_widgets < 1:
+			positions[:] = 0
+			qns[:] = 0
+
+		elif n_widgets < n_cols:
+			for i_col in range(n_widgets, n_cols):
+				positions[:, i_col] = positions[:, n_widgets - 1]
+				qns[:, i_col] = qns[:, n_widgets - 1]
+
+		thread.earlyreturn()
+
+		# Calculate the widths and offsets
+		width_value = config['plot_width']
+		width_expr = config['plot_widthexpression']
+
+		offset_value = config['plot_offset']
+		offset_expr = config['plot_offsetexpression']
+
+		if not width_expr:
+			widths = width_value
+		else:
+			width_expr_comp = compile(width_expr, '', 'eval')
+			i_rows, i_cols = np.indices((n_rows, n_cols))
+			vars = {'x': positions, 'w': width_value, 'i_row': i_rows, 'i_col': i_cols}
+			for i in range(n_qns):
+				vars[f'qnu{i+1}'] = qns[:,:,0,i]
+				vars[f'qnl{i+1}'] = qns[:,:,1,i]
+
+			widths = eval(width_expr_comp, vars)
+		
+		if not offset_expr:
+			offsets = offset_value
+		else:
+			offset_expr_comp = compile(offset_expr, '', 'eval')
+			i_rows, i_cols = np.indices((n_rows, n_cols))
+			vars = {'x': positions, 'o': offset_value, 'i_row': i_rows, 'i_col': i_cols}
+			for i in range(n_qns):
+				vars[f'qnu{i+1}'] = qns[:,:,0,i]
+				vars[f'qnl{i+1}'] = qns[:,:,1,i]
+
+			offsets = eval(offset_expr_comp, vars)
+
+		thread.earlyreturn()
+
+		# Calculate the plot positions and get indices
+		xmins = positions + offsets - widths/2
+		xmaxs = xmins + widths
+
+		min_indices, max_indices = {}, {}
+		for label, cls in {'exp': ExpFile, 'cat': CatFile, 'lin': LinFile}.items():
+			min_indices[label], max_indices[label] = cls.xs_to_indices(xmins, xmaxs)
+		
+		thread.earlyreturn()
+
+		# Set the correct values to the LWPAxes
+		# @Luis: Check here, that we are in sync with create plots
+		threads = []
+		for i_row in range(n_rows):
+			for i_col in range(n_cols):
+				ax = self.lwpaxes[i_row, i_col]
+				ax.ref_position = positions[i_row, i_col]
+				ax.xrange = (xmins[i_row, i_col], xmaxs[i_row, i_col])
+				ax.qns = qns[i_row, i_col]
+				ax.indices = {label: (min_indices[label][i_row, i_col], max_indices[label][i_row, i_col]) for label in ('exp', 'cat', 'lin')}
+				threads.append(ax.update())
+
+		thread.earlyreturn()
+
+		for thread_ in threads:
+			thread_.wait()
+
+	def get_current_ax(self):
+		shape = self.lwpaxes.shape
+		index = self.__class__._active_ax_index
+		if 0 <= index[0] < shape[0] and 0 <= index[1] < shape[1]:
+			return(self.lwpaxes[index])
+		else:
+			return(self.lwpaxes[0,0])
+
+
+	# @drawplot_decorator.d
+	# def set_column_references(self, i_col, refs, qns):
+	# 	if not (0 <= i_col < config['plot_cols']):
+	# 		return
+	
+	# 	# @Luis: Better way to get widths here -> also allow for dynamic widths
+	# 	widths = config['plot_width']
+	# 	offsets = config['plot_offset']
+
+	# 	if qns is None:
+	# 		qns = [None] * len(refs)
+		
+	# 	xmins, xmaxs = refs + offsets - widths/2, refs + offsets + widths/2
+	# 	min_indices, max_indices = {}, {}
+	# 	for label, cls in {'exp': ExpFile, 'cat': CatFile, 'lin': LinFile}.items():
+	# 		min_indices[label], max_indices[label] = cls.xs_to_indices(xmins, xmaxs)
+
+	# 	threads = []
+	# 	column_axes = self.lwpaxes[:, i_col]
+	# 	for i_row, (ref_pos, lwpax, xmin, xmax) in enumerate(zip(refs, column_axes, xmins, xmaxs)):
+	# 		lwpax.ref_position = ref_pos
+	# 		lwpax.xrange = (xmin, xmax)
+	# 		lwpax.qns = None if qns is None else qns[i_row]
+	# 		lwpax.indices = {label: (min_indices[label][i_row], max_indices[label][i_row]) for label in ('exp', 'cat', 'lin')}
+	# 		threads.append(lwpax.update())
+	# 	[thread.wait() for thread in threads ]
+
+class LWPAx():
+	fit_vline = None
+	fit_curve = None
+	fit_methods = ('Pgopher', 'Polynom', 'MultiPolynom', 'Gauss', 'Lorentz',
+				'Voigt', 'Gauss 1st Derivative', 'Lorentz 1st Derivative', 'Voigt 1st Derivative',
+				'Gauss 2nd Derivative', 'Lorentz 2nd Derivative', 'Voigt 2nd Derivative', )
+
+	def __init__(self, ax, row_i, col_i):
+		self.ax = ax
+		self.row_i = row_i
+		self.col_i = col_i
+		
+		self.ref_position = None
+		self.xrange = None
+		self.indices = None
+		self.annotation = None
+		self.qns = None
+		
+		# @Luis: Maybe register different span selectors for different mouse buttons, via the button=x keyword
+		with matplotlib_lock:
+			self.span =  matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax: self.on_range(xmin, xmax), 'horizontal', useblit=True)
+		
+		self.exp_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_exp"])
+		self.cat_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_cat"])
+		self.lin_coll = ax.scatter([], [], color=config['color_ref'], marker="*", zorder=100)
+
+		with matplotlib_lock:
+			ax.add_collection(self.exp_coll)
+			ax.add_collection(self.cat_coll)
+			
+			ax.yaxis.set_visible(False)
+			if row_i:
+				ax.xaxis.set_visible(False)
+			else:
+				ax.set_xticks([])
+
+	# @status_d
+	@QThread.threaded_d
+	@drawplot_decorator.d
+	def update(self, thread=None):
+		ax = self.ax
+		ax.set_xlim(self.xrange)
+
+		self.set_xticklabels()
+
+		yrange_exp = [-1, 1]
+
+		for datatype, cls in {'exp': ExpFile, 'cat': CatFile, 'lin': LinFile}.items():
+			minindex, maxindex = self.indices[datatype]
+			xmin, xmax = self.xrange
+			dataframe = cls.df.iloc[minindex:maxindex].copy()
+			bins = config['plot_bins']
+			nobinning = config['plot_skipbinning']
+			scaling = config["plot_yscale"]
+
+			dataframe = dataframe[dataframe['visible']]
+
+			# Tested to thread this part as the bin_data function uses pandas functions that release the Global Interpreter Lock (GIL)
+			# However, threading would only help in engineered cases where the data in each plot is huge (meaning high binning parameter but
+			# even higher number of points)
+			# It was decided, that the added complexity was not worth the benefit for these extreme cases. Additionally, the overhead of threads
+			# would reduce performance for the majority of use cases
+			binwidth = (xmax - xmin) / bins
+			if len(dataframe) > max(bins, nobinning) and binwidth:
+				dataframe = bin_data(dataframe, binwidth, (xmin, xmax))
+
+			xs = dataframe['x'].to_numpy()
+			ys = dataframe['y'].to_numpy() if datatype != 'lin' else np.zeros(xs.shape)
+
+			if datatype == 'exp':
+				if scaling == 'Per Plot' and len(ys):
+					yrange_exp = [ys.min(), ys.max()]
+
+				segs, colors = [], []
+
+				filenames = dataframe['filename']
+				unique_filenames = filenames.unique()
+				for unique_filename in unique_filenames:
+					mask = (filenames == unique_filename)
+					tmp_xs, tmp_ys = xs[mask], ys[mask]
+
+					colors.append( dataframe.loc[mask, 'color'].values )
+					if cls.ids[unique_filename].is_stickspectrum:
+						segs.append( np.array(((tmp_xs, tmp_xs), (np.zeros(tmp_ys.shape), tmp_ys))).T )
+					else:
+						segs.append( np.array(((tmp_xs[:-1], tmp_xs[1:]), (tmp_ys[:-1], tmp_ys[1:]))).T )
+
+				if segs:
+					segs = np.concatenate(segs)
+					colors = np.concatenate(colors)
+
+				self.exp_coll.set(segments=segs, colors=colors)
+
+			elif datatype == 'cat':
+				if scaling == 'Per Plot':
+					yrange_cat = [ys.min(), ys.max()] if len(ys) else [-1, 1]
+					ys = ys * yrange_exp[1] / yrange_cat[1]
+				elif scaling in ['Global', 'Custom']:
+					ys = ys * config['plot_expcat_factor'] * 10 ** config['plot_expcat_exponent']
+
+				if config['convolution_kernel']:
+					kernel_ys = np.array(config['convolution_kernel'])
+					convolution_padding = len(kernel_ys) // 2
+					stepwidth = config['convolution_stepwidth']
+
+					n_xs = (xmax - xmin) // stepwidth + 1
+					con_xs = np.arange(-n_xs, n_xs+1) * stepwidth + (xmax + xmin) / 2
+
+					segs, colors = [], []
+
+					filenames = dataframe['filename']
+					unique_filenames = filenames.unique()
+					for unique_filename in unique_filenames:
+						mask = (filenames == unique_filename)
+						tmp_xs, tmp_ys = xs[mask], ys[mask]
+
+						hist_ys, _ = np.histogram(tmp_xs, bins=con_xs, weights=tmp_ys)
+						con_ys = np.convolve(hist_ys, kernel_ys, 'full')
+
+						con_ys = con_ys[convolution_padding:-convolution_padding]
+						con_xs = con_xs[:-1]
+						
+						colors.append( dataframe.loc[mask, 'color'].values )
+						segs.append( np.array(((con_xs[:-1], con_xs[1:]), (con_ys[:-1], con_ys[1:]))).T )
+
+					if segs:
+						segs = np.concatenate(segs)
+						colors = np.concatenate(colors)
+
+				else:
+					segs = np.array(((xs, xs), (ys*0, ys))).T
+					colors = dataframe['color'].to_numpy()
+
+					mask = (xs == self.ref_position)
+					colors[mask] = config['color_ref']
+
+				self.cat_coll.set(segments=segs, colors=colors)
+			
+			elif datatype == 'lin':
+				tuples = list(zip(xs,ys))
+				tuples = tuples if len(tuples)!=0 else [[None,None]]
+				colors = dataframe['color'].to_numpy()
+
+				self.lin_coll.set_offsets(tuples)
+				self.lin_coll.set_color(colors)
+
+		if scaling == 'Per Plot':
+			yrange = yrange_exp
+		elif scaling == 'Global':
+			yrange = ExpFile.yrange
+		else:
+			yrange = (config['plot_yscale_min'], config['plot_yscale_max'])
+
+		margin = config['plot_ymargin']
+
+		yrange = [yrange[0]-margin*(yrange[1]-yrange[0]), yrange[1]+margin*(yrange[1]-yrange[0])]
+		if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
+			yrange = [-1,+1]
+		ax.set_ylim(yrange)
+
+	def set_xticklabels(self):
+		if self.row_i:
+			return
+		
+		ax = self.ax
+		ticks = np.linspace(*self.xrange, config['plot_xticks'])
+		tickformat = config['plot_xtickformat']
+
+		if tickformat == 'absolute':
+			ticklabels = symmetric_ticklabels(ticks)		
+		elif tickformat == 'scientific':
+			ticklabels = [f"{x:.2e}".replace("e+00", "").rstrip("0").rstrip(".") for x in ticks]
+		else: # 'offset' tickformat
+			ticklabels = symmetric_ticklabels(ticks - self.ref_position)
+
+		if self.col_i and len(ticks) > 1:
+			ticks = ticks[1:]
+			ticklabels = ticklabels[1:]
+		ax.set_xticks(ticks)
+		ax.set_xticklabels(ticklabels)
+
+	def on_range(self, xmin, xmax):
+		# @Luis: Come back here; Problem when self.xrange is None
+		xmin_ax, xmax_ax = self.xrange if self.xrange is not None else (-np.inf, +np.inf)
+		if xmax == xmin or xmax > xmax_ax or xmin < xmin_ax:
+			return
+
+		is_shift_pressed = (QApplication.keyboardModifiers() == Qt.KeyboardModifier.ShiftModifier)
+		if is_shift_pressed: # Zoom xrange
+			center, width = (xmin + xmax) / 2, xmax - xmin
+			offset = center - self.ref_position
+
+			config['plot_offset'] = offset
+			config['plot_width'] = width
+		else: # Fit xrange
+			self.fit_data(xmin, xmax)
+	
+	def create_qns_dict(self, complete=False):
+		qns_dict = {} if not complete else {f'qn{ul}{i+1}': pyckett.SENTINEL for ul in 'ul' for i in range(6)}
+		if self.qns is None:
+			return(qns_dict)
+		
+		qnus, qnls = self.qns
+		for i, (qnu, qnl) in enumerate(zip(qnus, qnls)):
+			qns_dict[f'qnu{i+1}'] = qnu
+			qns_dict[f'qnl{i+1}'] = qnl
+		return(qns_dict)
+
+	def fit_determine_uncert(self, xmiddle, xuncert):
+		error_param = config['fit_uncertainty']
+		if error_param > 0:
+			return(error_param)
+		elif error_param >= -1:
+			return( abs(xmiddle - self.ref_position) )
+		elif error_param >= -2:
+			resp, rc = QInputDialog.getText(self, 'Set error', 'Error:')
+			if rc:
+				try:
+					return(float(resp))
+				except ValueError:
+					notify_error.emit("Did not understand the given value for the error. The line was not assigned.")
+					raise CustomError("Did not understand the given value for the error. The line was not assigned.")
+			else:
+				GUIAbortedError
+		
+		elif error_value >= -3:
+			return(xuncert)
+
+	def fit_data(self, xmin, xmax):
+		# Delete artists highlighting previous fit
+		if self.__class__.fit_vline is not None:
+			self.__class__.fit_vline.remove()
+			self.__class__.fit_vline = None
+		if self.__class__.fit_curve is not None:
+			self.__class__.fit_curve.remove()
+			self.__class__.fit_curve = None
+		
+		# Fit the data
+		xmiddle, xuncert, fit_xs, fit_ys = self.fit_peak(xmin, xmax)			
+		if config['fit_copytoclipboard']:
+			QApplication.clipboard().setText(str(xmiddle))
+
+		# Highlight fit in plot
+		self.__class__.fit_curve = self.ax.plot(fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1)[0]
+		self.__class__.fit_vline = self.ax.axvline(x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1)
+
+		# Create assignment object
+		new_assignment = {'x': xmiddle, 'error': self.fit_determine_uncert(xmiddle, xuncert), 'xpre': self.ref_position}
+		new_assignment.update(self.create_qns_dict(complete=True))
+		new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
+		
+		self.check_blends(new_assignment)
+
+		# @Luis: change annotation color, add color and offset for lin_coll 
+		NewAssignments.get_instance().add_row(new_assignment)
+
+	def fit_peak(self, xmin, xmax):
+		indices_exp = self.indices.get('exp')
+		if not indices_exp:
+			raise GUIAbortedError
+		
+		df = ExpFile.df.iloc[indices_exp[0]:indices_exp[1]]
+		df = df.query(f'(visible) and x < @xmax and x > @xmin').copy()
+
+		exp_xs, exp_ys = df['x'].to_numpy(), df['y'].to_numpy()
+		fit_xs = np.linspace(xmin, xmax, config['fit_xpoints'])
+
+		peakdirection = config['fit_peakdirection']
+		fitmethod = config['fit_fitmethod']
+
+		# @Luis: Check if pgopher works with a single point
+		if (len(exp_xs) < 2) and fitmethod != 'Pgopher':
+			notify_error.emit('The data could not be fit as there were too few points selected.')
+			return CustomError('The data could not be fit as there were too few points selected.')
+
+		try:
+			function_to_call = {
+				'Pgopher': fit_pgopher,
+				'Polynom': lambda *args: fit_polynom(*args, config['fit_polynomrank']),
+				'MultiPolynom': lambda *args: fit_polynom_multirank(*args, config['fit_polynommaxrank']),
+			}.get(fitmethod)
+			
+			if not function_to_call:
+				offset = config['fit_offset']
+				profilname, derivative = {
+					'Gauss':					('Gauss', 0),
+					'Lorentz':					('Lorentz', 0),
+					'Voigt':					('Voigt', 0),
+					'Gauss 1st Derivative':		('Gauss', 1),
+					'Lorentz 1st Derivative':	('Lorentz', 1),
+					'Voigt 1st Derivative':		('Voigt', 1),
+					'Gauss 2nd Derivative':		('Gauss', 2),
+					'Lorentz 2nd Derivative':	('Lorentz', 2),
+					'Voigt 2nd Derivative':		('Voigt', 2),
+				}[fitmethod]
+				function_to_call = lambda *args: fit_lineshape(*args, profilname, derivative, offset)
+
+			xmiddle, xuncert, fit_xs, fit_ys = function_to_call(exp_xs, exp_ys, peakdirection, fit_xs)
+
+		except Exception as E:
+			self.fitcurve = None
+			self.fitline = None
+			notify_error.emit(f"The fitting failed with the following error message : {str(E)}")
+			raise
+
+		return(xmiddle, xuncert, fit_xs, fit_ys)
+
+	def check_blends(self, new_assignment):
+		if not config['series_blendwidth']:
+			return
+		reference_states = ReferenceSeriesWindow._instance.get_state()
+		if self.col_i > len(reference_states):
+			return
+		reference_state = reference_states[self.col_i]
+		if not reference_state['check_blends']:
+			return
+
+		
+		if reference_state['method'] == 'Transition':
+			file_to_limit_data_to = reference_state['transition'].get('file')
+		
+		blendwidth = config['series_blendwidth']
+		xpre = new_assignment['xpre']
+		xmin, xmax = xpre - blendwidth, xpre + blendwidth
+		
+		condition = "@xmin < x and x < @xmax and visible"
+		if file_to_limit_data_to:
+			condition += ' and filename == @file_to_limit_data_to'
+		
+		entries = CatFile.df.query(condition)
+		if len(entries) < 2:
+			return
+		
+		# After guard clauses we want to show the dialog
+		AssignBlendsDialog.show_dialog(new_assignment, entries)
+		raise GUIAbortedError
+
+	# @Luis:
+	# - If ref_position, width, or offset change, we have to recalculate the xrange and set the limits accordingly
+	# - If annotation changes we have to set the annotation properly
+	# - we should think about caching some of this stuff here
+	# - think about providing indices from some higher instance function -> possible to have speed gains with numpy
+	# search sorted
+	# - think about keeping twice the width in memory -> simpe zoom in is almost instantaneous
+
+class MainWindow(QMainWindow):
+	notify_info = pyqtSignal(str)
+	notify_warning = pyqtSignal(str)
+	notify_error = pyqtSignal(str)
+
+	status_counter = AtomicCounter()
+	working = pyqtSignal()
+	waiting = pyqtSignal()
+
+	def __init__(self, app, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+		self.setWindowTitle(APP_TAG)
+		self.setAcceptDrops(True)
+		Geometry.load_widget_geometry(self)
+		# @Luis: Shortctuts
+		
+		try:
+			# Set LLWP logo as icon
+			possible_folders = [os.path.dirname(os.path.realpath(__file__)), os.getcwd()]
+			for folder in possible_folders:
+				iconpath = os.path.join(folder, "LLWP.svg")
+				if os.path.isfile(iconpath):
+					icon = QIcon(iconpath)
+					break
+			
+			# Make LLWP appear separate from python scripts in taskbar
+			app.setWindowIcon(QIcon(iconpath))
+			import ctypes
+			ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_TAG)
+		except Exception as E:
+			pass
+		
+	def create_gui_components(self):
+		global notify_info, notify_warning, notify_error
+		notify_info = self.notify_info
+		notify_warning = self.notify_warning
+		notify_error = self.notify_error
+
+
+		self.statusbar = StatusBar()
+		self.setStatusBar(self.statusbar)
+
+		self.notificationsbox = NotificationsBox()
+
+		self.lwpwidget = LWPWidget()
+		self.setCentralWidget(self.lwpwidget)
+				
+		NewAssignments.get_instance()
+		
+		for subclass in EQDockWidget.__subclasses__():
+			subclass()
+		dockstate = Geometry.get('__dockstate__')
+		if dockstate:
+			self.restoreState(dockstate)		
+		
+		self.menu = Menu(self)
+		self.shortcuts()
+
+	def shortcuts(self):
+		shortcuts_dict = {
+			"w": lambda: WidthDialog.gui_set_width("++"),
+			"s": lambda: WidthDialog.gui_set_width("--"),
+			"a": lambda: OffsetDialog.gui_set_offset("--"),
+			"d": lambda: OffsetDialog.gui_set_offset("++"),
+
+			"Shift+w": lambda: WidthDialog.gui_set_width("+"),
+			"Shift+s": lambda: WidthDialog.gui_set_width("-"),
+			"Shift+a": lambda: OffsetDialog.gui_set_offset("-"),
+			"Shift+d": lambda: OffsetDialog.gui_set_offset("+"),
+
+			"Ctrl+k": lambda: ConsoleDialog.show_dialog(),
+			"Ctrl+Shift+k": lambda: ConsoleDialog.run_current_command(),
+
+			"Ctrl+Alt+f": lambda: CloseByLinesWindow._instance.toggle_text_is_frozen(),
+
+			"F11": lambda: self.togglefullscreen(),
+		}
+
+
+		for keys, function in shortcuts_dict.items():
+			QShortcut(keys, self).activated.connect(function)
+
+	def togglefullscreen(self):
+		if self.isFullScreen():
+			self.showNormal()
+		else:
+			self.showFullScreen()
+	
+
+	def dragEnterEvent(self, event):
+		if event.mimeData().hasUrls():
+			event.accept()
+		else:
+			event.ignore()
+
+	def dropEvent(self, event):
+		event.accept()
+		files_by_type = File.sort_files_by_type([url.toLocalFile() for url in event.mimeData().urls()])
+		File.add_multiple_files_by_type(files_by_type)
+
+	def moveEvent(self, *args, **kwargs):
+		Geometry.save_widget_geometry(self)
+		return super().moveEvent(*args, **kwargs)
+
+	def resizeEvent(self, *args, **kwargs):
+		Geometry.save_widget_geometry(self)
+		return super().resizeEvent(*args, **kwargs)
+
+	def closeEvent(self, *args, **kwargs):
+		Geometry.set("__dockstate__", self.saveState())
+		Geometry.save()
+		config.save()
+
+class Menu():
+	def __init__(self, parent, *args, **kwargs):
+		mb = parent.menuBar()
+		
+		# Create top level menus
+		top_menu_labels = ("Files", "View", "Fit", "Plot", "Modules", "Info")
+		self.top_menus = {}
+		for label in top_menu_labels:
+			menu = mb.addMenu(f'&{label}')
+			self.top_menus[label] = menu
+		
+
+		toggleaction_files = FileWindow._instance.toggleViewAction()
+		toggleaction_files.setText('&Edit Files')
+		toggleaction_convolution = ConvolutionWindow._instance.toggleViewAction()
+		toggleaction_convolution.setText('&Sticks to Lineshape')
+		toggleaction_convolution.setToolTip('Choose a function to create a spectrum from stick data')
+		toggleaction_credits = CreditsWindow._instance.toggleViewAction()
+		toggleaction_credits.setText("&Credits and License")
+		toggleaction_credits.setToolTip("See the Credits and License")
+
+
+		fitfunction_menu = QMenu("Choose Fit Function", parent=parent)
+		self.fitfunction_actions = {}
+
+		current_method = config['fit_fitmethod']
+		for method in LWPAx.fit_methods:
+			is_checked = (method == current_method)
+			callback = lambda _, method=method: self.set_fitmethod(method)
+			self.fitfunction_actions[method] = QQ(QAction, parent=parent, text=f"&{method}", change=callback, checkable=True, value=is_checked)
+			fitfunction_menu.addAction(self.fitfunction_actions[method])
+		config.register('fit_fitmethod', self.on_fitfunction_changed)
+
+		actions = {
+			'Files': (
+				QQ(QAction, parent=parent, text="&Add Files", change=File.add_files_dialog, tooltip="Add Files"),
+				QQ(QAction, parent=parent, text='&Reread All Files', change=lambda _: File.reread_all(), tooltip="Reread all Exp, Cat and Lin files"),
+				None,
+				toggleaction_files,
+				None,
+				QQ(QAction, parent=parent, text="&Save current values as default", tooltip="Save current configuration as default", change=lambda _: config.save()),
+				None,
+				QQ(QAction, parent=parent, text="&Save Files as Project", change=lambda _: File.save_files_gui(), tooltip="Save all loaded files and their parameters as a project."),
+				QQ(QAction, parent=parent, text="&Load Project", change=lambda _: File.load_files_gui(), tooltip="Load a project."),
+
+			),
+			'Fit': (
+				fitfunction_menu,
+				QQ(QAction, parent=parent, text="&Change Function", shortcut="Ctrl+F", tooltip="Cycle through the available fit-functions", change=lambda _: self.next_fitmethod()),
+				None,
+				QQ(QAction, parent=parent, text="&Change Fit Color", tooltip="Change the color of the fitfunction", change=lambda _: self.change_fitcolor()),
+			),
+			'Plot': (
+				QQ(QAction, parent=parent, text="&# Plots", shortcut="Ctrl+N", tooltip="Change number of plots", change=lambda _: self.plot_number()),
+				None,
+				QQ(QAction, parent=parent, text="&Set Width", shortcut="Ctrl+W", change=lambda _: WidthDialog.show_dialog()),
+				QQ(QAction, parent=parent, text="&Set Offset", shortcut="Ctrl+G", change=lambda _: OffsetDialog.show_dialog()),
+				None,
+				toggleaction_convolution,
+			),
+			'View': (
+				ConfigWindow._instance.toggleViewAction(),
+				None,
+				ReferenceSeriesWindow._instance.toggleViewAction(),
+				NewAssignmentsWindow._instance.toggleViewAction(),
+				CloseByLinesWindow._instance.toggleViewAction(),
+				LogWindow._instance.toggleViewAction(),
+				None,
+				QQ(QAction, parent=parent, text='Open Console', shortcut='CTRL+K', change= lambda _: ConsoleDialog.show_dialog()),
+				None,
+			),
+			'Modules': (
+				ResidualsWindow._instance.toggleViewAction(),
+			),
+			'Info': (
+				QQ(QAction, parent=parent, text="&Send Mail to Author", tooltip="Send a mail to the developer", change=lambda x: self.send_mail_to_author()),
+				toggleaction_credits,
+			)
+			
+		}
+
+		for label, menu in self.top_menus.items():
+			for widget in actions.get(label, []):
+				if widget is None:
+					menu.addSeparator()
+				elif isinstance(widget, QAction):
+					menu.addAction(widget)
+				else:
+					menu.addMenu(widget)
+		
+	def next_fitmethod(self):
+		fitmethods = LWPAx.fit_methods
+		newindex = fitmethods.index( config['fit_fitmethod'] ) + 1
+		newindex = newindex % len(fitmethods)
+		newvalue = fitmethods[newindex]
+		config['fit_fitmethod'] = newvalue
+
+	def set_fitmethod(self, method):
+		config['fit_fitmethod'] = method
+
+	def on_fitfunction_changed(self, nextfunction=False):
+		value = config["fit_fitmethod"]
+		for fitfunction, action in self.fitfunction_actions.items():
+			action.setChecked(fitfunction == value)
+		notify_info.emit(f"Fitting with method '{value}'")
+
+	def change_fitcolor(self):
+		color = QColorDialog.getColor(initial=QColor(Color.rgbt_to_trgb(config['color_fit'])), options=QColorDialog.ColorDialogOption.ShowAlphaChannel)
+		color = Color(Color.trgb_to_rgbt(color.name(QColor.NameFormat.HexArgb)))
+		config['color_fit'] = color
+	
+	def plot_number(self):
+		resp, rc = QInputDialog.getText(self, 'How many plots do you want: ', 'Number:')
+		if not rc:
+			return
+		resp = resp.split("x")
+		try:
+			if len(resp) == 1:
+				config["plot_rows"] = int(resp[0])
+			elif len(resp) == 2:
+				config["plot_rows"] = int(resp[0])
+				config["plot_cols"] = int(resp[1])
+		except ValueError:
+			notify_warning("The entered value was not understood.")
+			return
+		
+	def send_mail_to_author(self):
+		webbrowser.open(f"mailto:bonah@ph1.uni-koeln.de?subject={APP_TAG}")
+
+class StatusBar(QStatusBar):
+	set_cursor_text = pyqtSignal(str)
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+
+		self._disappearing_messages = []
+		self._disappearing_messages_timer = QTimer()
+		self._disappearing_messages_timer.setSingleShot(True)
+		self._disappearing_messages_timer.timeout.connect(self.next_disappearing_message)
+
+		self.setStyleSheet("QStatusBar::item {border-left: 1px solid inherit;}")
+
+		self.messages_label = QQ(QLabel, text='')
+		self.addPermanentWidget(self.messages_label, 1)
+
+		self.position_label = QQ(QLabel, text='')
+		self.addPermanentWidget(self.position_label)
+
+		self.working_label = QQ(QLabel, text='')
+		self.addPermanentWidget(self.working_label)
+		
+		mainwindow.working.connect(lambda: self.working_label.setText("   Working ...  "))
+		mainwindow.waiting.connect(lambda: self.working_label.setText("   Ready  "))
+
+		notify_error.connect(lambda x: self.disappearing_message(x, style='error'))
+		notify_warning.connect(lambda x: self.disappearing_message(x, style='warning'))
+		notify_info.connect(lambda x: self.disappearing_message(x, style='info'))
+
+	def disappearing_message(self, text, style=None):
+		style_string = {
+			'error': "<span style='color:#ff0000;'>ERROR</span>: ",
+			'warning': "<span style='color:#eda711;'>WARNING</span>: ",
+		}.get(style, '')
+
+		text = f'  {style_string}{text}'
+		self._disappearing_messages.append(text)
+
+		if not self._disappearing_messages_timer.isActive():
+			self.next_disappearing_message()
+
+	def next_disappearing_message(self):
+		try:
+			next_message = self._disappearing_messages.pop()
+		except IndexError:
+			self.messages_label.setText('')
+			return
+		
+		self.messages_label.setText(next_message)
+		self._disappearing_messages_timer.start(config['flag_notificationtime'])
+
+class NotificationsBox(QScrollArea):
+	layout_updated = pyqtSignal()
+
+	def __init__(self):
+		super().__init__()
+		
+		self.setWindowFlags(
+			Qt.WindowType.Window | Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint |
+			Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.X11BypassWindowManagerHint)
+		
+		self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+		self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+		
+		self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+		self.messages = []
+
+		self.widget = QWidget()
+		self.setWidget(self.widget)
+		self.layout = QVBoxLayout()
+		self.widget.setLayout(self.layout)
+
+		available_geometry = QApplication.primaryScreen().availableGeometry()
+		self.available_height = available_geometry.height()
+		self.available_width = available_geometry.width()
+
+		self.padding = 10
+		self.width_ = 300
+		window_position = QPoint(self.available_width - self.width_ - self.padding, self.padding)
+		self.move(window_position)
+
+		self.max_height = self.available_height - 2 * self.padding
+		self.setFixedHeight(self.max_height)
+		self.setFixedWidth(self.width_)
+
+
+		self.setStyleSheet(f"""
+			background-color: transparent;
+		""")
+
+
+		self.widget.setStyleSheet("""
+			background-color: transparent;
+		""")
+
+		self.layout_updated.connect(self.update_layout)
+
+		notify_error.connect(lambda x: self.add_message(x, style='error'))
+		notify_warning.connect(lambda x: self.add_message(x, style='warning'))
+		notify_info.connect(lambda x: self.add_message(x, style='info'))
+
+
+	def add_message(self, text, style=None):
+		style_string = {
+			'error': "<span style='color:#ff0000;'>ERROR</span>: ",
+			'warning': "<span style='color:#eda711;'>WARNING</span>: ",
+		}.get(style, '')
+
+		text = f'{style_string}{text}'
+
+		label = QQ(QLabel, text=text, width=self.width_-20, wordwrap=True)
+		label.setStyleSheet("""
+			padding: 5px;
+			border-radius: 5px;
+			color: white;
+			background-color: #bf29292a;
+		""")
+
+		self.layout.addWidget(label)
+		self.messages.append(label)
+
+		self.show()
+
+		disappear_timer = QTimer(self)
+		disappear_timer.setSingleShot(True)
+		disappear_timer.timeout.connect(self.unshow_message)
+		disappear_timer.start(config["flag_notificationtime"])
+		self.layout_updated.emit()
+
+	def update_layout(self):
+		layout_timer = QTimer(self)
+		layout_timer.setSingleShot(True)
+		layout_timer.timeout.connect(lambda: [self.widget.adjustSize(), self.adjustSize()])
+		layout_timer.start(0)
+
+	def unshow_message(self):
+		label = self.messages.pop()
+		label.hide()
+		label.deleteLater()
+		if not self.messages:
+			self.hide()
+		self.layout_updated.emit()
+
+class LLWP(QApplication):
+	configsignal = pyqtSignal(tuple)
+	
+	def __init__(self, *args, **kwargs):
+		super().__init__(sys.argv, *args, **kwargs)
+		self.setStyle("Fusion")
+
+		Geometry().load()
+
+		global config
+		config = Config(self.configsignal)
+		config.load()
+		messages = config.messages
+		
+		self.initialize_matplotlib_settings()
+		self.initialize_dynamic_decorators_for_file_classes()
+
+		with config:
+			global mainwindow
+			mainwindow = MainWindow(self)
+			mainwindow.create_gui_components()
+
+			if len(sys.argv) > 1:
+				project = sys.argv[1]
+				File.load_files(project)
+
+			mainwindow.show()
+			
+			if messages:
+				notify_warning.emit('\n'.join(messages))
+			
+			self.debug_setup()
+
+		sys.exit(self.exec())
+	
+	# Used to automatically reproduce behavior when testing
+	def debug_setup(self):
+		pass
+
+	def initialize_matplotlib_settings(self):
+		matplotlib.rc('font', **config["plot_fontdict"])
+		config.register('plot_fontdict', lambda: matplotlib.rc('font', **config['plot_fontdict']))
+		self.styleHints().colorSchemeChanged.connect(self.update_matplotlib_theme)
+		self.update_matplotlib_theme()
+
+	def update_matplotlib_theme(self):
+		matplotlib.style.use('dark_background' if is_dark_theme() else 'default')
+		matplotlib.rcParams['figure.facecolor'] = '#00000000'
+		matplotlib.rcParams['axes.facecolor'] = '#00000000'
+
+	def initialize_dynamic_decorators_for_file_classes(self):
+		for cls in (ExpFile, CatFile, LinFile):
+			def exit_func(cls=cls):
+				counter_value = cls.sortdf_counter.decrease()
+				if not counter_value:
+					cls.sort_df()
+
+			def init_func(cls=cls):
+				cls.sortdf_counter.increase()
+				
+			cls.decorator.init_func = init_func
+			cls.decorator.exit_func = exit_func
+
+##
+## Dialogs
+##
+class AssignBlendsDialog(QDialog):
+	_instance = None
+
+	@classmethod
+	def show_dialog(cls, new_assignment, entries):
+		dialog = cls(new_assignment, entries)
+		dialog.show()
+
+	def __init__(self, new_assignment, entries):
+		super().__init__()
+		self.setModal(False)
+		
+		self.setWindowTitle("Assign Blends")
+
+		self.finished.connect(self.on_exit)
+		if self._instance:
+			self._instance.done(0)
+		self.__class__._instance = self
+		
+
+		self.init_gui()
+		self.update_gui(new_assignment, entries)
+
+	def update_gui(self, new_assignment, entries):
+		
+		if config['series_blendminrelratio']:
+			qn_labels = [f'qn{ul}{i+1}'for ul in 'ul' for i in range(6)]
+			query = ' and '.join([f'( {label} == {dict_[label]} )' for label in qn_labels if dict_[label] != pyckett.SENTINEL])
+			tmp_cat = tmp_cat.query(query)
+			y_at_xpre = tmp_cat["y"].values[0]
+		
+			min_y_value = y_at_xpre * config['series_blendminrelratio']
+			entries = entries.query('y >= @min_y_value')
+		
+		self.noq = config["series_qns"]
+		self.entries = entries.reset_index(drop=True)
+		self.xmiddle = new_assignment['x']
+		self.error = new_assignment['error']
+
+		self.label.setText(f'Assigning Blend for position {self.xmiddle}.')
+
+		self.entries["dist"] = self.entries["x"] - self.xmiddle
+		self.entries["absdist"] = abs(self.entries["dist"])
+		self.entries.sort_values(by=["absdist"], inplace=True)
+		self.entries["y"] = np.log(self.entries["y"])/np.log(10)
+
+		noq = config["series_qns"]
+		self.checkboxes = []
+		table = self.table
+		table.setRowCount(0)
+
+		for i, entry in self.entries.iterrows():
+			currRowCount = table.rowCount()
+			table.insertRow(currRowCount)
+
+			for j, val in enumerate(self.cols):
+				if val not in entry:
+					text = ""
+				elif val == "filename":
+					text = entry[val]
+				else:
+					text = f"{entry[val]:{config['flag_xformatfloat']}}".rstrip("0").rstrip(".")
+				table.setItem(currRowCount, j+1, QTableWidgetItem(text))
+			checkbox = QQ(QCheckBox, value=True)
+			self.checkboxes.append(checkbox)
+			table.setCellWidget(currRowCount, 0, checkbox)
+
+		for i in range(6):
+			table.setColumnHidden(i+ 4, i>=noq)
+			table.setColumnHidden(i+10, i>=noq)
+
+		table.resizeColumnsToContents()
+
+	def init_gui(self):
+		layout = QVBoxLayout(margin=True)
+		self.setLayout(layout)
+
+		self.label = QQ(QLabel)
+		layout.addWidget(self.label)
+
+		self.table = QTableWidget()
+		self.cols = ["x", "y", "dist"] + [f"qn{ul}{i+1}" for ul in ("u", "l") for i in range(6)] + ["filename"]
+		self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+		self.table.setRowCount(0)
+		self.table.setColumnCount(len(self.cols)+1)
+		self.table.setHorizontalHeaderLabels(["Y/N", "x", "log. y", "Dist"] +  [f"{ul}{i+1}" for ul in ("U", "L") for i in range(6)] + ["Filename"])
+		layout.addWidget(self.table)
+
+		buttons_layout = QHBoxLayout()
+
+		buttons_layout.addStretch()
+		buttons_layout.addWidget(QQ(QPushButton, text="Assign All", shortcut="Ctrl+Return", change=lambda x: self.blendassign()))
+		buttons_layout.addWidget(QQ(QPushButton, text="Assign Marked", shortcut="Return", change=lambda x: self.blendassign(False)))
+		buttons_layout.addWidget(QQ(QPushButton, text="Select All", shortcut="Ctrl+A", change=lambda x: self.set_all(True)))
+		buttons_layout.addWidget(QQ(QPushButton, text="Unselect All", shortcut="Ctrl+U", change=lambda x: self.set_all(False)))
+		buttons_layout.addWidget(QQ(QPushButton, text="Cancel", change=lambda x: self.close()))
+		buttons_layout.addStretch()
+
+		layout.addLayout(buttons_layout)
+
+	def set_all(self, state):
+		for cb in self.checkboxes:
+			cb.setChecked(state)
+
+	def blendassign(self, all=True):
+		checked = True if all else [x.isChecked() for x in self.checkboxes]
+		self.entries['checked'] = checked
+
+		selected_rows = self.entries.query('checked == True')
+		max_predicted = selected_rows['y'].max()
+
+		new_assignments = {
+			'x': self.xmiddle,
+			'weight': 10 ** (selected_rows['y'] - max_predicted),
+			'error': self.error,
+			'comment': config['fit_comment'],
+			'filename': '__newassignments__',
+		}
+
+		for i in range(self.noq):
+			new_assignments[f'qnu{i+1}'] = selected_rows[f'qnu{i+1}']
+			new_assignments[f'qnl{i+1}'] = selected_rows[f'qnl{i+1}']
+		
+		for i in range(self.noq, 6):
+			new_assignments[f'qnu{i+1}'] = pyckett.SENTINEL
+			new_assignments[f'qnl{i+1}'] = pyckett.SENTINEL
+
+		NewAssignments.get_instance().add_rows(new_assignments)
+		self.done(0)
+
+	def on_exit(self):
+		self.__class__._instance = None
+
+class ConsoleDialog(QDialog):
+	def __init__(self):
+		super().__init__()
+		self.setWindowTitle('Command Line Dialog')
+
+		self.tabs = QTabWidget()
+		self.tabs.setTabsClosable(True)
+		self.tabs.setMovable(True)
+		self.tabs.setDocumentMode(True)
+
+		initial_values = config['commandlinedialog_commands']
+		if initial_values:
+			for title, command in initial_values:
+				self.add_tab(title, command)
+		else:
+			self.add_tab()
+
+		self.tabs.tabCloseRequested.connect(self.close_tab)
+		self.tabs.tabBarDoubleClicked.connect(self.renameoradd_tab)
+		self.tabs.setCurrentIndex(config['commandlinedialog_current'])
+
+		layout = QVBoxLayout()
+		self.setLayout(layout)
+
+		layout.addWidget(self.tabs)
+		buttons_layout = QHBoxLayout()
+		buttons_layout.addStretch()
+		buttons_layout.addWidget(QQ(QPushButton, text='Run', change=lambda x: self.done(1), shortcut='Ctrl+Return'))
+		buttons_layout.addWidget(QQ(QPushButton, text='Cancel', change=lambda x: self.done(0), shortcut='Esc'))
+		buttons_layout.addStretch()
+		layout.addLayout(buttons_layout)
+
+	def add_tab(self, title='Command', command=''):
+		textarea = QQ(QPlainTextEdit, value=command)
+		cursor = textarea.textCursor()
+		cursor.movePosition(QTextCursor.MoveOperation.End)
+		textarea.setTextCursor(cursor)
+		self.tabs.addTab(textarea, title)
+
+	def close_tab(self, index):
+		tab = self.tabs.widget(index)
+		tab.deleteLater()
+		self.tabs.removeTab(index)
+		if self.tabs.count() == 0:
+			self.add_tab()
+
+	def renameoradd_tab(self, index):
+		if index == -1:
+			self.add_tab()
+		elif self.tabs.widget(index) != 0:
+			text, ok = QInputDialog().getText(self, "Tab Name","Enter the Tabs Name:")
+			if ok and text:
+				self.tabs.setTabText(index, text)
+
+	def done(self, val):
+		commands = []
+		for i in range(self.tabs.count()):
+			tab = self.tabs.widget(i)
+			title = self.tabs.tabText(i)
+			command = tab.toPlainText()
+			commands.append((title, command))
+
+		config['commandlinedialog_commands'] = commands
+		config['commandlinedialog_current'] = self.tabs.currentIndex()
+
+		super().done(val)
+	
+	@staticmethod
+	def run_current_command():
+		commands = config['commandlinedialog_commands']
+		if not commands:
+			notify_warning.emit('No commands specified. Therfore no command was executed.')
+			return
+	
+		index = config['commandlinedialog_current']
+		if index >= len(commands):
+			notify_warning.emit('The index of the command is out of the range.')
+			return
+		
+		title, command = commands[index]
+		if not command.strip():
+			return
+		
+		message = []
+		old_stdout = sys.stdout
+		red_output = sys.stdout = io.StringIO()
+		try:
+			exec(command)
+		except Exception as E:
+			message.append(f'Executing the code raised an error: {str(E)}')
+			raise
+		finally:
+			sys.stdout = old_stdout
+
+		message.append('\n'.join([f'>>> {line}' for line in command.split('\n')]))
+		message.append(red_output.getvalue())
+		notify_info.emit('\n'.join(message))
+	
+	@classmethod
+	def show_dialog(cls):
+		dialog = cls()
+		dialog.exec()
+		
+		if dialog.result() != 1:
+			return
+		
+		cls.run_current_command()
+
+class WidthDialog(QDialog):
+	@classmethod
+	def show_dialog(cls):
+		dialog = cls()
+		dialog.exec()
+
+		if dialog.result():
+			return
+		
+		value = dialog.input_width_value.value()
+		expr = dialog.input_width_expression.toPlainText()
+
+		with config:
+			config['plot_width'] = value
+			config['plot_widthexpression'] = expr
+
+	def __init__(self):
+		super().__init__()
+		self.setWindowTitle('Width Dialog')
+		self.layout = QFormLayout()
+		self.setLayout(self.layout)
+
+		self.input_width_value = QQ(QDoubleSpinBox, value=config['plot_width'], range=(0, None))
+		self.layout.addRow('Width: ', self.input_width_value)
+
+		expression = config['plot_widthexpression']
+
+		self.input_width_expression = QQ(QPlainTextEdit, value=expression)
+		self.layout.addRow('Expression: ', self.input_width_expression)
+
+		buttons = QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Reset 
+		self.button_box = QDialogButtonBox(buttons)
+		self.button_box.rejected.connect(lambda: self.done(1))
+		self.button_box.accepted.connect(lambda: self.done(0))
+		self.button_box.button(QDialogButtonBox.StandardButton.Reset).clicked.connect(lambda _: self.reset())
+		self.layout.addRow(self.button_box)
+
+	def reset(self):
+		self.input_width_value.setValue(Config.initial_values['plot_width'][0])
+		self.input_width_expression.setPlainText(Config.initial_values['plot_widthexpression'][0])
+
+	@staticmethod
+	def gui_set_width(value):
+		width = config['plot_width']
+
+		if value == "+":
+			width *= 3/4
+		elif value == "-":
+			width /= 3/4
+		elif value == "++":
+			width *= 1/2
+		elif value == "--":
+			width /= 1/2
+		else:
+			width *= value
+
+		config['plot_width'] = width
+
+class OffsetDialog(QDialog):
+	@classmethod
+	def show_dialog(cls):
+		dialog = cls()
+		dialog.exec()
+
+		if dialog.result():
+			return
+
+		value = dialog.input_offset_value.value()
+		expr = dialog.input_offset_expression.toPlainText()
+		is_relative = dialog.input_offset_isrelative.isChecked()
+
+		if not is_relative:
+			ref_position = mainwindow.lwpwidget.get_current_ax().ref_position
+			value -= ref_position
+
+		with config:
+			config['plot_offset'] = value
+			config['plot_offsetexpression'] = expr
+			config['plot_offsetisrelative'] = is_relative
+
+	def __init__(self):
+		super().__init__()
+		self.setWindowTitle('Offset Dialog')
+		self.layout = QFormLayout()
+		self.setLayout(self.layout)
+
+		self.input_offset_value = QQ(QDoubleSpinBox, value=config['plot_offset'], range=(None, None))
+		self.layout.addRow('Offset: ', self.input_offset_value)
+
+		is_relative = config['plot_offsetisrelative']
+		self.input_offset_isrelative = QQ(QCheckBox, value=is_relative, text='Offset is relative')
+		self.layout.addRow(self.input_offset_isrelative)
+
+		expression = config['plot_offsetexpression']
+
+		self.input_offset_expression = QQ(QPlainTextEdit, value=expression)
+		self.layout.addRow('Expression: ', self.input_offset_expression)
+
+		buttons = QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Reset 
+		self.button_box = QDialogButtonBox(buttons)
+		self.button_box.rejected.connect(lambda: self.done(1))
+		self.button_box.accepted.connect(lambda: self.done(0))
+		self.button_box.button(QDialogButtonBox.StandardButton.Reset).clicked.connect(lambda _: self.reset())
+		self.layout.addRow(self.button_box)
+
+	def reset(self):
+		self.input_offset_value.setValue(Config.initial_values['plot_offset'][0])
+		self.input_offset_expression.setPlainText(Config.initial_values['plot_offsetexpression'][0])
+		self.input_offset_isrelative.setChecked(Config.initial_values['plot_offsetisrelative'][0])
+
+	@staticmethod
+	def gui_set_offset(value):
+		offset = config['plot_offset']
+		width = config['plot_width']
+
+		if value == "+":
+			offset += width/4
+		elif value == "-":
+			offset -= width/4
+		elif value == "++":
+			offset += width/2
+		elif value == "--":
+			offset -= width/2
+		else:
+			offset += value
+
+		config['plot_offset'] = offset
+
+##
+## Additional Winodws
+##
+class FileWindow(EQDockWidget):
+	fileaddition_requested = pyqtSignal(type, str)
+	default_position = None
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle('Files Window')
+		
+		self.setAcceptDrops(True)
+		
+		mainwidget = QWidget()
+		self.setWidget(mainwidget)
+		mainlayout = QVBoxLayout()
+		mainwidget.setLayout(mainlayout)
+		self.tab = QTabWidget()
+		mainlayout.addWidget(self.tab)
+		
+		self.fileclasses = {'exp': ExpFile, 'cat': CatFile, 'lin': LinFile}
+		
+		self.components = {key: {
+			'layout': QVBoxLayout(margin=True),
+			'toplayout': cls.gui_settings_general(),
+			'scrollarea': QScrollArea(),
+			'scrolllayout': QGridLayout(margin=True),
+			'counter': AtomicCounter(),			
+		} for key, cls in self.fileclasses.items()}
+		
+		
+		for key, components in self.components.items():
+			layout = components['layout']
+			
+			widget = QWidget()
+			widget.setLayout(layout)
+			scrollwidget = QWidget()
+			scrollwidget.setLayout(components['scrolllayout'])
+			
+			scrollarea = components['scrollarea']
+			layout.addLayout(components['toplayout'])
+			
+			scrollarea.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+			scrollarea.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+			scrollarea.setWidgetResizable(True)
+			scrollarea.setWidget(scrollwidget)
+			
+			layout.addWidget(scrollarea)
+			self.tab.addTab(widget, key.capitalize())
+		
+			cls = self.fileclasses[key]
+			for key in cls.ids.keys():
+				self.gui_add_file(cls, key)
+		
+
+		self.fileaddition_requested.connect(self.gui_add_file)
+
+	def gui_add_file(self, cls, id):
+		file = cls.ids[id]
+		key = next(key for key, value in self.fileclasses.items() if value == cls)
+		
+		components = self.components[key]
+		scrolllayout = components['scrolllayout']
+		i_row = components['counter'].increase()
+
+		row_widgets = file.gui_settings_widgets()
+		scrolllayout.setRowStretch(i_row, 0)
+		for i_col, widget in enumerate(row_widgets):
+			scrolllayout.addWidget(widget, i_row, i_col)
+		scrolllayout.setRowStretch(i_row + 1, 1)
+		
+	def dragEnterEvent(self, event):
+		if event.mimeData().hasUrls():
+			event.accept()
+		else:
+			event.ignore()
+
+	def dropEvent(self, event):
+		event.accept()
+		files_by_type = File.sort_files_by_type([url.toLocalFile() for url in event.mimeData().urls()])
+		File.add_multiple_files_by_type(files_by_type)
+
+class ReferenceSelector(QTabWidget):
+	methods = ('Transition', 'List', 'Expression')
+	values_changed = pyqtSignal()
+	
+	def __init__(self, parent, initial_values={}):
+		super().__init__(parent)
+		self.parent = parent
+		self.column = self.parent.tab.indexOf(self)
+		self.state = {
+			'method': self.methods[0],
+			'check_blends': False,
+			'transition': {},
+			'list': {
+				'qns': None,
+				'xs': [],
+				'i0': 0,
+			},
+			'expression': {
+				'expression':	'',
+				'N0':			0,
+			},
+		}
+		self.state.update(initial_values)
+
+		self.tabwidgets = {}
+		for label in self.methods:
+			self.tabwidgets[label] = QWidget()
+			self.addTab(self.tabwidgets[label], label)
+
+		self.setCurrentIndex(self.methods.index(self.state['method']))
+		self.currentChanged.connect(lambda x: self.update_method())
+
+		# Tab 1: Transition
+		layout = QVBoxLayout(margin=True)
+
+		text = self.state['transition'].get('file') if self.state.get('transition') else None
+		text = os.path.split(text)[-1] if text else "All"
+		tooltip = "Select if the first transition out of all visible files will be used or only predictions from a selected file should be used."
+		
+		self.activefilebutton = QQ(QPushButton, text=text, tooltip=tooltip, change=self.seriesselector_file)
+		tmplayout = QHBoxLayout()
+		tmplayout.addWidget(QQ(QLabel, text="File: "))
+		tmplayout.addWidget(self.activefilebutton, 1)
+
+		self.series_selector = SeriesSelector(self, self.state["transition"])
+		self.series_selector.values_changed.connect(self.seriesselector_changed)
+		self.seriesselector_changed(silent=True) # Call to set 'transition' field in state properly
+
+		layout.addLayout(tmplayout)
+		layout.addWidget(self.series_selector)
+
+		# button_apply = QQ(QPushButton, text="Apply", change=lambda x: mainwindow.lwpwidget.reset_offsets())
+
+		label_blend = QLabel("Blend Width: ")
+		width_blend = QQ(QDoubleSpinBox, "series_blendwidth", minWidth=85, range=(0, None))
+
+		button_box = QHBoxLayout()
+		button_box.addWidget(label_blend)
+		button_box.addWidget(width_blend)
+		button_box.addStretch(1)
+
+		layout.addLayout(button_box)
+		layout.addStretch(1)
+		self.tabwidgets["Transition"].setLayout(layout)
+
+
+		# Tab 2: List
+		layout = QVBoxLayout(margin=True)
+
+		self.listtable = QQ(QTableWidget, rowCount=0, columnCount=2, move=(0, 0))
+		self.listtable.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+		self.listtable.setHorizontalHeaderLabels(["#", "Frequency"])
+		layout.addWidget(self.listtable)
+		
+		if len(self.state['list']['xs']):
+			self.list_load(values=self.state["list"]["xs"])
+
+		button_open = QQ(QToolButton, text="Open List", change=lambda x: self.list_load(dialog=False))
+		button_write = QQ(QToolButton, text="Write List", change=lambda x: self.list_load(dialog=True))
+
+		label_startat = QLabel("Start at Index: ")
+		spinbox_startat = QQ(QSpinBox, value=self.state["list"]["i0"], range=(0, None), singlestep=1, change=self.list_indexupdate)
+		self.spinbox_startat = spinbox_startat
+		# button_apply = QQ(QPushButton, text="Apply", change=lambda x: mainwindow.lwpwidget.reset_offsets())
+
+		hbox = QHBoxLayout()
+		[ hbox.addWidget(label_startat), hbox.addWidget(spinbox_startat), hbox.addStretch(1)]
+		layout.addLayout(hbox)
+
+		hbox = QHBoxLayout()
+		[hbox.addWidget(button_open), hbox.addWidget(button_write), hbox.addStretch(1)]
+		layout.addLayout(hbox)
+
+		self.tabwidgets["List"].setLayout(layout)
+
+		# Tab 3: Expression
+		layout = QVBoxLayout(margin=True)
+
+		placeholder = "Enter expression here\ne.g. for a linear molecule with B=4000 use: (N+N0)*4000*2"
+		self.input_expr = QQ(QPlainTextEdit, value=self.state["expression"]["expression"], placeholder=placeholder, change=lambda: self.state["expression"].__setitem__("expression", self.input_expr.toPlainText()))		
+		# button_apply = QQ(QPushButton, text="Apply", change=lambda x: mainwindow.lwpwidget.reset_offsets())
+		button_update = QQ(QPushButton, text="Update", change=lambda x: self.expression_update(type='expresion'))
+
+		label_N0 = QQ(QLabel, text="N0: ")
+		self.input_N0 = QQ(QSpinBox, value=self.state["expression"]["N0"], range=(0, None), change=lambda x: self.expression_update(type='index'))
+
+		layout.addWidget(self.input_expr)
+		hbox = QHBoxLayout()
+		[hbox.addWidget(label_N0),
+		hbox.addWidget(self.input_N0), hbox.addStretch(1), hbox.addWidget(button_update)]
+		layout.addLayout(hbox)
+
+		self.tabwidgets["Expression"].setLayout(layout)
+
+	def update_method(self):
+		current_tab = self.currentIndex()
+		self.state['method'] = self.methods[current_tab]
+		self.changed()
+
+	def seriesselector_file(self):
+		options = ["All", *CatFile.ids.keys()]
+		current_file = self.state['transition'].get("file")
+		if current_file in options:
+			current = options.index(current_file)
+		else:
+			current = 0
+		item, ok = QInputDialog.getItem(self, "Choose File", f"Limit this series to the following file:", options, current=current, editable=False)
+		if not (ok and item):
+			return
+
+		if item == "All":
+			item, itemshort = None, "All"
+		else:
+			itemshort = os.path.split(item)[-1]
+
+		self.state['transition']['file'] = item
+		self.activefilebutton.setText(itemshort)
+		self.changed()
+
+	def seriesselector_changed(self, silent=False):
+		self.state['transition'] = self.series_selector.state.copy()
+		if not silent:
+			self.changed()
+
+	def list_indexupdate(self):
+		self.state['list']['i0'] = self.spinbox_startat.value()
+		self.changed()
+
+	def list_load(self, values=None, dialog=False):
+		if values is not None:
+			xs = values
+			self.state["list"]["xs"] = xs
+
+		elif dialog:
+			line, ok = QInputDialog().getMultiLineText(self, "Specify Custom List",
+			"Write list here (delimiters are all whitespace characters, comma and semicolon):")
+			if not ok or not line:
+				return
+
+			xs = []
+			tmp_xs = re.split(r'; |, |\s', line)
+			for x in tmp_xs:
+				if not x.strip():
+					continue
+				try:
+					xs.append(float(x))
+				except ValueError:
+					notify_warning.emit(f"Could not convert the string '{x}' to a numerical value.")
+
+			self.state["list"].update({
+				"qns":		None,
+				"xs":		xs,
+			})
+			self.spinbox_startat.setValue(0)
+
+		else:
+			fnames = QFileDialog.getOpenFileNames(self, 'Open Positions List(s)',)[0]
+			if len(fnames)==0:
+				return
+			xs = []
+			for fname in fnames:
+				with open(fname, "r", encoding="utf-8") as file:
+					for line in file:
+						line = line.strip()
+						if line == "" or line.startswith("#"):
+							continue
+
+						tmp = re.split(r'; |, |\s', line)
+						for x in tmp:
+							try:
+								xs.append(float(x))
+							except ValueError:
+								notify_warning.emit(f"Could not convert the string '{x}' to a numerical value.")
+
+			self.state["list"].update({
+				"qns":		None,
+				"xs":		xs,
+			})
+			self.spinbox_startat.setValue(0)
+
+
+		table = self.listtable
+		table.setRowCount(0)
+		i=0
+		for i, x in enumerate(xs):
+			currRowCount = table.rowCount()
+			table.insertRow(currRowCount)
+			table.setItem(currRowCount, 0, QTableWidgetItem(f"{i}"))
+			table.setItem(currRowCount, 1, QTableWidgetItem(f"{x:{config['flag_xformatfloat']}}"))
+		self.changed()
+
+	def expression_update(self, type=None):
+		if type == 'index':
+			self.state['expression']['N0'] = self.input_N0.value()
+		else:
+			expression = self.input_expr.toPlainText()
+			expression = expression.replace('\r', '').replace('\n', '')
+			self.state['expression']['expresssion'] = expression
+
+		self.changed()
+
+	def seriesselector_getqns(self, n_qns):
+		state = self.state['transition']
+		tmp = {
+			'qnus': state['qnus'],
+			'qnls': state['qnls'],
+			'diff': state['diff'] if state['use_diff'] else state['incr'],
+		}
+		tmp = {key: np.array(value[:n_qns]) for key, value in tmp.items()}
+		return(tmp)
+
+	def calc_references(self, n_rows, n_qns):
+		method = self.state['method']
+		shape = (n_rows, 2, n_qns)
+		qns = np.zeros(shape, dtype=np.int64)
+		positions = np.zeros(n_rows, dtype=np.float64)
+		self.state['check_blends'] = False
+
+		if method == 'Transition':
+			state = self.state['transition']
+			tmp = self.seriesselector_getqns(n_qns)
+			qnus, qnls, diffs = tmp['qnus'], tmp['qnls'], tmp['diff']
+			cat_df = CatFile.df
+
+			# Prefilter df to all transitins belonging to series
+
+			conditions, conditions_incr = ['(visible)'], []
+			normalizing_value = None
+			for i, qnu, qnl, diff in zip(range(n_qns), qnus, qnls, diffs):
+				diff = int(diff)
+				if diff:
+					if normalizing_value is None:
+						normalizing_value = qnu // diff
+					conditions_incr.append(f"((qnu{i+1} - {qnu-normalizing_value*diff})/{diff})")
+					conditions_incr.append(f"((qnl{i+1} - {qnl-normalizing_value*diff})/{diff})")
+				else:
+					conditions.append(f"(qnu{i+1} == {qnu})")
+					conditions.append(f"(qnl{i+1} == {qnl})")
+
+			if len(conditions_incr):
+				conditions.append(" == ".join(conditions_incr))
+			
+			# Add condition for limiting to specific file
+			file_to_limit_data_to = state.get('file')
+			if file_to_limit_data_to:
+				# @Luis: Test that this is actually working
+				conditions.append('(filename == @file_to_limit_data_to)')
+			
+			conditions = " and ".join(conditions)
+			cat_df = cat_df.query(conditions)
+
+			# Select the desired transitions
+
+			for i_row in range(n_rows):
+				tmp_qnus, tmp_qnls = qnus + i_row * diffs, qnls + i_row * diffs
+				qns[i_row] = (tmp_qnus, tmp_qnls)
+
+				cond_upper = [f"(qnu{i+1} == {qn})" for i, qn in enumerate(tmp_qnus)]
+				cond_lower = [f"(qnl{i+1} == {qn})" for i, qn in enumerate(tmp_qnls)]
+				condition  = " & ".join(cond_upper + cond_lower)
+
+				vals = cat_df.query(condition)["x"].to_numpy()
+				val = vals[0] if len(vals) else 0
+				positions[i_row] = val
+			
+			self.state['check_blends'] = True
+		elif method == "List":
+			state = self.state['list']
+			i0 = state['i0']
+			xs = state['xs']
+			tmp_qns = state['qns']
+
+			if xs is not None and i0 < len(xs):
+				imax = min(len(positions), len(xs)-i0)
+			else:
+				imax = 0
+			
+			positions[:imax] = xs[i0:imax+i0]
+
+			if tmp_qns is not None and len(tmp_qns) and i0 < len(tmp_qns):
+				qns[:imax] = qns[i0:imax+i0]
+		
+		else: # Expression
+			state = self.state['expression']
+			N0 = state['N0']
+			expression = state['expression']
+
+
+			if ';'in expression: # expression gives QNs
+				cat_df = CatFile.df
+				expressions = [expr.strip() for expr in expression.split(';') if expr.strip()]
+				if len(expressions) % 2 != 0:
+					raise CustomError('Error with the provided expression. Number of subexpressions has to be even.')
+				n_qns = len(expressions) // 2
+				shape = (n_rows, 2, n_qns)
+				qns = np.zeros(shape, dtype=np.int64)
+
+				try:
+					expressions = [compile(expr, '', 'eval') for expr in expressions]
+					rows_qns = [ [eval(expr, {"N": i, "N0": N0}) for expr in expressions] for i in range(n_rows)]
+				except Exception as E:
+					notify_error.emit('The provided expression could not be evaluated.')
+					raise
+
+				# Prefilter predictions to used series
+
+				diff_qns = np.diff(np.array(rows_qns), axis=0)
+				diffs = [np.unique(col) for col in diff_qns.T]
+				qnus, qnls = np.split(np.array(rows_qns[0]), 2)
+
+				conditions, conditions_incr = ['(visible)'], []
+				normalizing_value = None
+				for i, qnu, qnl, diff in zip(range(n_qns), qnus, qnls, diffs):
+					if len(diff) != 1:
+						continue
+					diff = int(diff[0])
+					if diff:
+						if normalizing_value is None:
+							normalizing_value = qnu // diff
+						conditions_incr.append(f"((qnu{i+1} - {qnu-normalizing_value*diff})/{diff})")
+						conditions_incr.append(f"((qnl{i+1} - {qnl-normalizing_value*diff})/{diff})")
+					else:
+						conditions.append(f"(qnu{i+1} == {qnu})")
+						conditions.append(f"(qnl{i+1} == {qnl})")
+
+				if len(conditions_incr):
+					conditions.append(" == ".join(conditions_incr))
+
+				conditions = " and ".join(conditions)
+				cat_df = cat_df.query(conditions)
+
+
+				# @Luis:
+				# - write custom cache for cat.query functions -> queries are normalized now
+
+				qn_labels = [f'qn{ul}{i+1}' for ul in ('u', 'l') for i in range(n_qns)]
+
+				for i_row, row_qns in enumerate(rows_qns):
+					query = " and ".join([f'({label} == {qn})' for qn, label in zip(row_qns, qn_labels) ])
+					vals = cat_df.query(query)["x"].to_numpy()
+					val = vals[0] if len(vals) else 0
+					positions[i_row] = val
+					qns[i_row] = np.split(np.array(row_qns), 2)
+
+				self.state['check_blends'] = False
+			else: # expression gives xs
+				if expression:
+					try:
+						expression = compile(expression, '', 'eval')
+						positions = [eval(expression, {"N": i, "N0": N0}) for i in range(n_rows)]
+					except Exception as E:
+						notify_error.emit('The provided expression could not be evaluated.')
+		
+		return(positions, qns)
+
+
+	def changed(self):
+		self.values_changed.emit()
+		mainwindow.lwpwidget.set_data()
+
+class SeriesSelector(QWidget):
+	values_changed = pyqtSignal()
+
+	def __init__(self, parent, initial_values={}, n_qns=6):
+		super().__init__(parent)
+		self.n_qns = n_qns
+		self.parent = parent
+		self.updating = False
+		self.state = {
+			'qnus': (1, 0, 1, 0, 0, 0),
+			'qnls': (0, 0, 0, 0, 0, 0),
+			'incr': (True, False, True, False, False, False),
+			'diff': (1, 0, 1, 0, 0, 0),
+			'use_diff': False,
+		}
+		self.state.update(initial_values)
+
+		layout = QGridLayout()
+
+		create_qn = lambda: QQ(QSpinBox, minWidth=40, maxWidth=40, range=(None, None),
+							singlestep=1, buttons=False, change=lambda x: self.changed())
+
+		self.qnus = [create_qn() for _ in range(self.n_qns)]
+		self.qnls = [create_qn() for _ in range(self.n_qns)]
+
+		create_widget = lambda widget, kwargs: QQ(widget, minWidth=40, maxWidth=40, 
+							change=lambda x: self.changed(), **kwargs)
+
+		self.incr = [create_widget(QCheckBox, {'text':'Inc'}) for _ in range(self.n_qns)]
+		self.diff = [create_widget(QSpinBox, {'range': (None, None), 'singlestep': 1, }) for _ in range(self.n_qns)]
+
+		self.incqns = QQ(QPushButton, text="Inc", change=lambda x: self.incdecqns(+1), width=40)
+		self.decqns = QQ(QPushButton, text="Dec", change=lambda x: self.incdecqns(-1), width=40)
+
+		self.togglediff = QQ(QToolButton, text="⇆", change=lambda x: self.change_incr_mode(), width=40)
+		
+		for i, widget in enumerate(self.qnus + self.qnls):
+			layout.addWidget(widget, i//6, i%6)
+
+		for i, incr, diff in zip(range(6), self.incr, self.diff):
+			tmp = QHBoxLayout()
+			tmp.addWidget(incr)
+			tmp.addWidget(diff)
+
+			layout.addLayout(tmp, 4, i)
+			layout.setColumnStretch(i, 100)
+
+		for i in range(6):
+			layout.setColumnStretch(i, 100)
+		
+		layout.addWidget(self.togglediff, 4, 6, 1, 1)
+
+		layout.addWidget(self.incqns, 0, 6, 1, 2)
+		layout.addWidget(self.decqns, 1, 6, 1, 2)
+
+		layout.setRowStretch(6, 10)
+		layout.setColumnStretch(8, 1)
+
+		self.layout = layout
+		self.setLayout(layout)
+		self.set_state()
+
+		config.register_widget("series_qns", self.togglediff, self.set_state)
+
+	def set_state(self):
+		self.updating = True
+		state = self.state
+
+		n_qns = config["series_qns"]
+		are_visible = [True] * n_qns +[False] * (self.n_qns - n_qns)
+
+		for qnu, value, is_visible in zip(self.qnus, state["qnus"], are_visible):
+			qnu.setValue(value)
+			qnu.setVisible(is_visible)
+		for qnl, value, is_visible in zip(self.qnls, state["qnls"], are_visible):
+			qnl.setValue(value)
+			qnl.setVisible(is_visible)
+		for widget, value, is_visible in zip(self.incr, state["incr"], are_visible):
+			widget.setChecked(value)
+			widget.setVisible(is_visible and not state['use_diff'])
+		for widget, value, is_visible in zip(self.diff, state["diff"], are_visible):
+			widget.setValue(value)
+			widget.setVisible(is_visible and state['use_diff'])
+		self.updating = False
+		self.changed()
+
+	def change_incr_mode(self):
+		self.state['use_diff'] = not self.state['use_diff']
+		self.set_state()
+
+	def incdecqns(self, dir):
+		self.updating = True
+		incr_values = (x.value() for x in self.diff) if self.state['use_diff'] else (x.isChecked() for x in self.incr)
+
+		for qnu, qnl, incr in zip(self.qnus, self.qnls, incr_values):
+			qnu.setValue(qnu.value()+dir*incr)
+			qnl.setValue(qnl.value()+dir*incr)
+		self.updating = False
+		self.changed()
+
+	def changed(self):
+		if self.updating:
+			return
+	
+		self.state["qnus"] = [x.value() for x in self.qnus]
+		self.state["qnls"] = [x.value() for x in self.qnls]
+		self.state["incr"] = [x.isChecked() for x in self.incr]
+		self.state["diff"] = [x.value() for x in self.diff]
+
+		self.values_changed.emit()
+
+	def wheelEvent(self, event):
+		steps = event.angleDelta().y() // 120
+		self.incdecqns(steps)
+
+class ReferenceSeriesWindow(EQDockWidget):
+	default_visible = True
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle("Reference Series")
+
+		widget = QGroupBox()
+		layout = QVBoxLayout()
+		self.setWidget(widget)
+		widget.setLayout(layout)
+
+		self.tab = QTabWidget()
+		self.tab_order = None
+		layout.addWidget(self.tab)
+
+		self.tab.setTabsClosable(True)
+		self.tab.setMovable(True)
+		self.tab.setDocumentMode(True)
+
+		self.tab.setTabBarAutoHide(True)
+		self.tab.setCornerWidget(QQ(QToolButton, text="Dupl.", tooltip="Duplicate current tab", change=self.duplicate_tab), Qt.Corner.TopRightCorner)
+		self.tab.tabCloseRequested.connect(self.close_tab)
+		self.tab.tabBarDoubleClicked.connect(self.renameoradd_tab)
+		self.tab.setCurrentIndex(config["series_currenttab"])
+
+		self.tab_order = [self.tab.widget(i) for i in range(self.tab.count())]
+		self.set_state(config["series_references"])
+		if not self.tab.count():
+			self.add_tab()
+
+		mainwindow.lwpwidget.plotscreated.connect(self.update_number_of_references)
+		self.tab.currentChanged.connect(self.check_order)
+
+	def close_tab(self, index, check_order=True):
+		if self.tab.count() == 1:
+			return
+		tab = self.tab.widget(index)
+		tab.deleteLater()
+		self.tab.removeTab(index)
+		if check_order:
+			self.check_order()
+
+	def renameoradd_tab(self, index):
+		if index == -1:
+			self.add_tab()
+		elif self.tab.widget(index) != 0:
+			text, ok = QInputDialog().getText(self, "Tab Name","Enter the Tabs Name:")
+			if ok and text:
+				self.tab.setTabText(index, text)
+				self.tab.widget(index).state["title"] = text
+
+	def add_tab(self, init_values={}, check_order=True):
+		title = init_values.get("title", "Series")
+		tmp = ReferenceSelector(self, init_values)
+		tmp.values_changed.connect(self.changed)
+		self.tab.addTab(tmp, title)
+		if check_order:
+			self.check_order()
+
+	def duplicate_tab(self, *args, **kwargs):
+		values = self.tab.widget(self.tab.currentIndex()).state.copy()
+		self.add_tab(values, *args, **kwargs)
+
+	def update_number_of_references(self):
+		numberoftabs = self.tab.count()
+		diff = config["plot_cols"] - numberoftabs
+		locked = config["flag_syncreferencestocolumns"]
+
+		if diff > 0:
+			for i in range(diff):
+				self.duplicate_tab(check_order=False)
+		elif diff < 0 and locked:
+			for i in range(-diff):
+				self.close_tab(numberoftabs - i - 1, check_order=False)
+		
+	def set_state(self, values):
+		for i in range(self.tab.count()):
+			tab = self.tab.widget(i)
+			tab.deleteLater()
+		self.tab.clear()
+		
+		for tabdata in values:
+			self.add_tab(tabdata)
+
+	def get_state(self):
+		values = []
+		for i in range(self.tab.count()):
+			tmp = self.tab.widget(i).state
+			values.append(tmp)
+		return(values)
+	
+	@drawplot_decorator.d
+	def check_order(self, x=None):
+		if self.tab_order is None:
+			return
+
+		if x is None:
+			x = self.tab.currentIndex()
+		config['series_currenttab'] = x
+		new_tab_order = [self.tab.widget(i) for i in range(self.tab.count())]
+		
+		if new_tab_order == self.tab_order:
+			return
+
+		self.changed()
+		mainwindow.lwpwidget.set_data()
+
+	
+	def redo_references(self):
+		self.tab_order = []
+		self.check_order()
+
+	def changed(self):
+		tmp = self.get_state()
+		config["series_references"] = tmp
+
+class LogWindow(EQDockWidget):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle("Log")
+
+		mainwidget = QGroupBox()
+		layout = QVBoxLayout()
+		self.setWidget(mainwidget)
+		mainwidget.setLayout(layout)
+
+		self.log_area = QTextEdit()
+		self.log_area.setReadOnly(True)
+		self.log_area.setMinimumHeight(50)
+
+		notify_error.connect(lambda x: self.writelog('x', style='error'))
+		notify_warning.connect(lambda x: self.writelog('x', style='warning'))
+		notify_info.connect(lambda x: self.writelog('x', style='info'))
+
+		layout.addWidget(self.log_area)
+
+	def writelog(self, text, style=None):
+		tmp = self.log_area.toPlainText()
+		tmp = tmp.split("\n")
+		if len(tmp)-1 > config["flag_logmaxrows"]:
+			self.log_area.setText("\n".join(tmp[-config["flag_logmaxrows"]:]))
+
+		time_str = time.strftime("%H:%M", time.localtime())
+		
+
+		style_string = {
+			'error': "<span style='color:#ff0000;'>ERROR</span>: ",
+			'warning': "<span style='color:#eda711;'>WARNING</span>: ",
+		}.get(style, '')
+
+		text = f"{time_str}: {style_string}{text}\n"
+		self.log_area.append(text)
+		sb = self.log_area.verticalScrollBar()
+		sb.setValue(sb.maximum())
+
+class CatTableModel(QAbstractTableModel):
+	def __init__(self, headers, get_df, table):
+		super().__init__()
+		self.columns = list(headers.keys())
+		self.headers = list(headers.values())
+		self.get_df = get_df
+		self.get_df_visible = lambda: get_df().loc[:, self.columns]
+		self.table = table
+
+		full_df = self.get_df()
+		view_df = self.get_df_visible()
+		col_pos_full = {key: i for i, key in enumerate(full_df.columns)}
+		col_pos_view = {key: i for i, key in enumerate(view_df.columns)}
+		self.col_trans_dict = {i_col: col_pos_full[key] for key, i_col in col_pos_view.items()}
+
+		self.resizing_programmatically = False
+		self.columns_skip_autoresize = set()
+		self.table.horizontalHeader().sectionResized.connect(self.exclude_from_autoresize)
+
+		config.register("series_qns", self.update_columns_visibility)
+
+	def data(self, index, role):
+		if role not in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
+			return
+
+		df = self.get_df_visible()
+		value = df.iloc[index.row(), index.column()]
+
+		if isinstance(value, str):
+			return(value)
+		elif isinstance(value, (np.integer, int)):
+			if value == pyckett.SENTINEL:
+				return("")
+			else:
+				if role == Qt.ItemDataRole.EditRole:
+					return(str(value))
+				else:
+					return(f"{{:{config['flag_tableformatint']}}}".format(value))
+		elif np.isnan(value):
+			return("")
+		else: #float
+			if role == Qt.ItemDataRole.EditRole:
+				return(str(value))
+			else:
+				return(f"{{:{config['flag_tableformatfloat']}}}".format(value))
+
+	def rowCount(self, index):
+		return(self.get_df_visible().shape[0])
+
+	def columnCount(self, index):
+		return(self.get_df_visible().shape[1])
+
+	def headerData(self, section, orientation, role):
+		if not role == Qt.ItemDataRole.DisplayRole:
+			return
+		
+		if orientation == Qt.Orientation.Horizontal:
+			return str(self.headers[section])
+
+		if orientation == Qt.Orientation.Vertical:
+			df = self.get_df_visible()
+			if section >= len(df.index):
+				return ""
+			return str(df.index[section])
+
+	def flags(self, index):
+		return(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEditable)
+
+	def update(self):
+		self.layoutChanged.emit()
+
+	def setData(self, index, value, role):
+		if not index.isValid() or role != Qt.ItemDataRole.EditRole:
+			return False
+
+		df = self.get_df_visible()
+
+		i_row = index.row()
+		if not 0 <= i_row < df.shape[0]:
+			return False
+		i_col = index.column()
+		if not 0 <= i_col < df.shape[1]:
+			return False
+
+		dtype = df[df.columns[i_col]].dtypes
+		
+		if np.issubdtype(dtype, np.number):
+			try:
+				if np.issubdtype(dtype, np.integer):
+					value = np.int64(value)
+				else:
+					value = np.float64(value)
+			except ValueError:
+				if np.issubdtype(dtype, np.integer):
+					value = pyckett.SENTINEL
+				else:
+					value = np.nan
+
+		orig_df = self.get_df()
+		orig_i_col = self.col_trans_dict[i_col]
+		orig_df.iloc[i_row, orig_i_col] = value
+		self.dataChanged.emit(index, index)
+		self.resize_columns()
+		return True
+
+	def exclude_from_autoresize(self, index):
+		if not  self.resizing_programmatically:
+			self.columns_skip_autoresize.add(index)
+	
+	def resize_columns(self, reset=False):
+		self.resizing_programmatically = True
+		if reset:
+			self.columns_skip_autoresize = set()
+		for i_col in range(len(self.columns)):
+			if i_col not in self.columns_skip_autoresize:
+				self.table.resizeColumnToContents(i_col)
+		self.resizing_programmatically = False
+
+	def update_columns_visibility(self):
+		qns = config['series_qns']
+		for i in range(6):
+			self.table.setColumnHidden(i,   i>=qns)
+			self.table.setColumnHidden(i+6, i>=qns)
+
+class NewAssignmentsWindow(EQDockWidget):
+	default_visible = True
+	default_position = 2
+
+	def __init__(self):
+		super().__init__()
+		self.setWindowTitle("New Assignments")
+
+		mainwidget = QGroupBox()
+		layout = QVBoxLayout()
+		self.setWidget(mainwidget)
+		mainwidget.setLayout(layout)
+
+		tooltip_append = "Append to file if checked or overwrite content if unchecked"
+		tooltip_uncert = "Positive Values are absolute Values, -1 for obs-calc, -2 for dialog, -3 for StdDev from Fit"
+
+		new_assignments = self.new_assignments= NewAssignments.get_instance()
+
+		widgets = self.widgets = {
+			'save': QQ(QToolButton, text='Save', change=lambda x: new_assignments.save_gui()),
+			'delete': QQ(QToolButton, text='×', change=lambda x: self.delete()),
+			'delete_all': QQ(QToolButton, text='Del All', change=lambda x: self.delete_all()),
+			'add_row': QQ(QToolButton, text='+', change=lambda x: addemptyrow_inplace(new_assignments.get_df(), self.model)),
+			'resize': QQ(QToolButton, text='Resize', change=lambda x: self.model.resize_columns(reset=True)),
+			# 'append': QQ(QCheckBox, 'flag_appendonsave', text='Append', tooltip=tooltip_append),
+			'error_label': QQ(QLabel, text='Default Uncertainty: ', tooltip=tooltip_uncert),
+			'error': QQ(QDoubleSpinBox, 'fit_uncertainty', range=(-3, None), minWidth=120, singlestep=config["fit_uncertaintystep"], tooltip=tooltip_uncert),
+		}
+
+		tmp = { f'qn{UL.lower()}{i+1}': f'{UL}{i+1}' for UL in 'UL' for i in range(6) }
+		headers = { **tmp, 'x': 'Freq', 'error': 'Unc', 'weight': 'Weight', 'comment': 'Comment'}
+
+		self.table = QTableView()
+		self.model = CatTableModel(headers, new_assignments.get_df, self.table)
+		self.table.setModel(self.model)
+		self.model.update_columns_visibility()
+		self.model.resize_columns()
+
+		buttonsBox = QHBoxLayout()
+		for key in ('delete', 'delete_all', 'add_row', None, 'save', 'resize'):
+			buttonsBox.addWidget(widgets[key]) if key is not None else buttonsBox.addStretch(1)
+
+		layout.addLayout(buttonsBox)
+		layout.addWidget(self.table)
+		buttonsBox = QHBoxLayout()
+		
+		for key in ('error_label', None, 'error'):
+			buttonsBox.addWidget(widgets[key]) if key is not None else buttonsBox.addStretch(2)
+		layout.addLayout(buttonsBox)
+
+	def scroll_bottom(self):
+		self.table.selectRow(len(self.model.get_df())-1)
+		self.table.scrollToBottom()
+
+	def delete_all(self):
+		self.delete(delete_all=True)
+
+	def delete(self, delete_all=False):
+		df = self.new_assignments.get_df()
+		df.reset_index(drop=True, inplace=True)
+
+		if delete_all:
+			df.drop(df.index, inplace=True)
+		else:
+			selected = [index.row() for index in self.table.selectionModel().selectedRows()]
+			df.drop(selected, inplace=True)
+
+		df.reset_index(inplace=True, drop=True)
+		self.model.update()
+		mainwindow.lwpwidget.set_data()
+
+class ConvolutionWindow(EQDockWidget):
+	default_visible = False
+	default_position = None
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle('Lineshape Window')
+
+		mainwidget = QWidget()
+		self.setWidget(mainwidget)
+
+		self.general_layout = QGridLayout(margin=True)
+		mainwidget.setLayout(self.general_layout)
+		row_i = 0
+
+		options = ('Off', 'Gauss', 'Lorentz', 'Voigt', 'Custom')
+		self.selection_box = QQ(QComboBox, 'convolution_function', options=options)
+		self.selection_box_label = QQ(QLabel, text='Function: ')
+		self.general_layout.addWidget(self.selection_box_label, row_i, 0)
+		self.general_layout.addWidget(self.selection_box, row_i, 1)
+
+		row_i += 1
+
+		self.stepwidth_input = QQ(QDoubleSpinBox, 'convolution_stepwidth', range=(0, None))
+		self.stepwidth_label = QQ(QLabel, text='Stepwidth: ')
+		self.general_layout.addWidget(self.stepwidth_label, row_i, 0)
+		self.general_layout.addWidget(self.stepwidth_input, row_i, 1)
+
+		row_i += 1
+
+		self.kernelwidth_input = QQ(QDoubleSpinBox, 'convolution_kernelwidth', range=(0, None))
+		self.kernelwidth_label = QQ(QLabel, text='Kernel Width: ')
+		self.general_layout.addWidget(self.kernelwidth_label, row_i, 0)
+		self.general_layout.addWidget(self.kernelwidth_input, row_i, 1)
+
+		row_i += 1
+
+		self.derivative_input = QQ(QSpinBox, 'convolution_derivative', range=(0, 2))
+		self.derivative_label = QQ(QLabel, text='Derivative: ')
+		self.general_layout.addWidget(self.derivative_label, row_i, 0)
+		self.general_layout.addWidget(self.derivative_input, row_i, 1)
+
+		row_i += 1
+
+		self.amplitude_input = QQ(QDoubleSpinBox, 'convolution_amplitude', range=(None, None))
+		self.amplitude_label = QQ(QLabel, text='Amplitude: ')
+		self.general_layout.addWidget(self.amplitude_label, row_i, 0)
+		self.general_layout.addWidget(self.amplitude_input, row_i, 1)
+
+		row_i += 1
+
+		self.width_gauss_input = QQ(QDoubleSpinBox, 'convolution_widthgauss', range=(None, None))
+		self.width_gauss_label = QQ(QLabel, text='Width Gauss: ')
+		self.general_layout.addWidget(self.width_gauss_label, row_i, 0)
+		self.general_layout.addWidget(self.width_gauss_input, row_i, 1)
+
+		row_i += 1
+
+		self.width_lorentz_input = QQ(QDoubleSpinBox, 'convolution_widthlorentz', range=(None, None))
+		self.width_lorentz_label = QQ(QLabel, text='Width Lorentz: ')
+		self.general_layout.addWidget(self.width_lorentz_label, row_i, 0)
+		self.general_layout.addWidget(self.width_lorentz_input, row_i, 1)
+
+		row_i += 1
+
+		self.custom_kernel_input = QQ(QPlainTextEdit)
+		self.custom_kernel_label = QQ(QLabel, text='Custom Kernel: ')
+		self.general_layout.addWidget(self.custom_kernel_label, row_i, 0)
+		self.general_layout.addWidget(self.custom_kernel_input, row_i, 1)
+
+		row_i += 1
+
+		self.update_button = QQ(QPushButton, text='Update', change=lambda _: self.on_change())
+		self.general_layout.addWidget(self.update_button, row_i, 0, 1, 2)
+
+		row_i += 1
+
+		self.general_layout.setRowStretch(row_i, 1)
+
+		keys = ('convolution_function', 'convolution_stepwidth', 'convolution_kernelwidth', 
+		  'convolution_derivative', 'convolution_amplitude', 'convolution_widthgauss', 
+		  'convolution_widthlorentz')
+		config.register(keys, self.on_change)
+		config.register('convolution_function', self.update_gui)
+
+		self.update_gui()
+
+	def update_gui(self):
+		function = config['convolution_function'] 
+
+		self.stepwidth_input.setVisible(function != 'Off')
+		self.stepwidth_label.setVisible(function != 'Off')
+
+		self.kernelwidth_input.setVisible(function not in ('Off', 'Custom'))
+		self.kernelwidth_label.setVisible(function not in ('Off', 'Custom'))
+
+		self.derivative_input.setVisible(function != 'Off')
+		self.derivative_label.setVisible(function != 'Off')
+
+		self.amplitude_input.setVisible(function != 'Off')
+		self.amplitude_label.setVisible(function != 'Off')
+
+		self.width_gauss_input.setVisible(function in ('Gauss', 'Voigt'))
+		self.width_gauss_label.setVisible(function in ('Gauss', 'Voigt'))
+
+		self.width_lorentz_input.setVisible(function in ('Lorentz', 'Voigt'))
+		self.width_lorentz_label.setVisible(function in ('Lorentz', 'Voigt'))
+
+		self.custom_kernel_input.setVisible(function == 'Custom')
+		self.custom_kernel_label.setVisible(function == 'Custom')
+
+		self.update_button.setVisible(function == 'Custom')
+
+	def on_change(self):
+		function = config['convolution_function']
+
+		if function == 'Off':
+			kernel = []
+		elif function in ('Gauss', 'Lorentz', 'Voigt'):
+			stepwidth = config['convolution_stepwidth']
+			kernelwidth = config['convolution_kernelwidth']
+			derivative = config['convolution_derivative']
+			amplitude = config['convolution_amplitude']
+
+			number_of_points = kernelwidth // (2 * stepwidth)
+			kernel_xs = np.arange(-number_of_points, +number_of_points+1) * stepwidth
+
+			if function == 'Gauss':
+				width = config['convolution_widthgauss']
+				kernel = lineshape('Gauss', derivative, kernel_xs, 0, amplitude, width)
+			elif function == 'Lorentz':
+				width = config['convolution_widthlorentz']
+				kernel = lineshape('Lorentz', derivative, kernel_xs, 0, amplitude, width)
+			else: # Voigt
+				widths = config['convolution_widthgauss'], config['convolution_widthlorentz']
+				kernel = lineshape('Voigt', derivative, kernel_xs, 0, amplitude, *widths)
+		else: # Custom Kernel
+			tmp = self.custom_kernel_input.toPlainText().strip()
+			if not tmp:
+				kernel = []
+			else:
+				tmp = tmp.split(',')
+				kernel = [float(x) for x in tmp]
+
+		config['convolution_kernel'] = list(kernel)
+		mainwindow.lwpwidget.set_data()
+
+class CloseByLinesWindow(EQDockWidget):
+	cursor_changed = pyqtSignal(float, float)
+	default_visible = False
+	default_position = None
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle('Close-By Lines')
+
+		mainwidget = QWidget()
+		self.setWidget(mainwidget)
+
+		self.layout = QVBoxLayout(margin=True)
+		mainwidget.setLayout(self.layout)
+
+		self.text_is_frozen_label = QQ(QLabel)
+
+		toplayout = QHBoxLayout()
+		toplayout.addWidget(QQ(QLabel, text='Cutoff Width: '))
+		toplayout.addWidget(QQ(QDoubleSpinBox, 'plot_hovercutoff', range=(0, None)))
+		toplayout.addStretch(1)
+		toplayout.addWidget(self.text_is_frozen_label)
+
+		self.layout.addLayout(toplayout)
+
+		self.text_area = QTextEdit()
+		self.text_area.setReadOnly(True)
+		self.text_area.setMinimumHeight(50)
+
+		self.layout.addWidget(self.text_area)
+		self.cursor_changed.connect(self.on_cursor_change)
+		
+		self._text_is_frozen = False
+	
+	def toggle_text_is_frozen(self):
+		self.text_is_frozen = not self.text_is_frozen
+	
+	def on_cursor_change(self, x, y):
+		if self.text_is_frozen:
+			return
+		self.update_closeby_lines(x)
+
+	def update_closeby_lines(self, xcenter):
+		cutoff = config['plot_hovercutoff']
+		xrange = xcenter - cutoff, xcenter + cutoff
+
+		cat_df = CatFile.get_data(xrange=xrange)
+		lin_df = LinFile.get_data(xrange=xrange)
+
+		dataframes = {'cat': cat_df, 'lin': lin_df}
+		textrows = []
+		noq = config['series_qns']
+
+		for type, df in dataframes.items():
+			if not len(df):
+				continue
+
+			for row in df.to_dict(orient="records"):
+				qnus = [row[f'qnu{i+1}'] for i in range(noq)]
+				qnls = [row[f'qnl{i+1}'] for i in range(noq)]
+
+				qnus_string = ''.join([f'{qn:3d}' for qn in qnus if qn != pyckett.SENTINEL])
+				qnls_string = ''.join([f'{qn:3d}' for qn in qnls if qn != pyckett.SENTINEL])
+
+				qnstring = f'{qnus_string} ← {qnls_string}'
+
+				if type == 'cat':
+					ylog = np.log10(row['y'])
+					text = config['closebylines_cattemplate'].format(qns=qnstring, ylog=ylog, **row)
+				else: # lin
+					text = config['closebylines_lintemplate'].format(qns=qnstring, **row)
+
+				textrows.append((row['x'], text))
+
+		fmt = config['flag_tableformatfloat']
+		textrows.append((xcenter, f'<span id="anchor">CURSOR POSITION: {xcenter:{fmt}}</span>'))
+
+		textrows = sorted(textrows, key=lambda x: x[0])
+		total_text = '<br>'.join([x[1] for x in textrows])
+		total_text = f'<pre>{total_text}</pre>'
+		self.text_area.setHtml(total_text)
+		self.text_area.scrollToAnchor(f'anchor')
+
+	@property
+	def text_is_frozen(self):
+		return(self._text_is_frozen)
+	
+	@text_is_frozen.setter
+	def text_is_frozen(self, value):
+		self._text_is_frozen = value
+		text = 'Text is frozen' if self._text_is_frozen else 'Text is unfrozen'
+		self.text_is_frozen_label.setText(text)
+
+
+	# @Luis: The idea would be to show what data is close to the cursor
+	# make format similar to cat and lin format and show ordered by frequency
+	# allow to freeze the content, for easy copying
+
+	# Allow to quickly set range and allow to quickly change if 
+	# reference position should be cursor, or any of the plots
+
+class ConfigWindow(EQDockWidget):
+	default_visible = False
+	default_position = None
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle('Config')
+
+		vbox = QVBoxLayout(margin=True)
+		scrollarea = QScrollArea()
+		widget = QWidget()
+		layout = QGridLayout(margin=True)
+
+		self.updating = True
+
+		scrollarea.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+		scrollarea.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+		scrollarea.setWidgetResizable(True)
+
+		tmp_layout = QHBoxLayout()
+		tmp_layout.addWidget(QQ(QPushButton, text='Save as default', change=lambda: config.save()))
+		completer = QCompleter(config.keys())
+		completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+		tmp_layout.addWidget(QQ(QLineEdit, placeholder="Search", completer=completer, change=lambda x: self.search(x)))
+		tmp_layout.addStretch(1)
+
+		vbox.addLayout(tmp_layout)
+		self.widgets = {}
+
+		i = 1
+		for key, value in config.items():
+			text = json.dumps(value) if isinstance(value, (dict, list, tuple)) else str(value)
+			tmp_input = QQ(QLineEdit, value=text, change=lambda text, key=key: self.set_value(key, text))
+			tmp_oklab = QQ(QLabel, text="Good")
+			tmp_label = QQ(QLabel, text=key)
+
+			self.widgets[key] = (tmp_input, tmp_oklab, tmp_label)
+			layout.addWidget(tmp_label, i+1, 0)
+			layout.addWidget(tmp_input, i+1, 1)
+			layout.addWidget(tmp_oklab, i+1, 2)
+			i += 1
+
+		layout.setRowStretch(i+1, 1)
+
+		widget.setLayout(layout)
+		scrollarea.setWidget(widget)
+		vbox.addWidget(scrollarea)
+
+		mainwidget = QWidget()
+		self.setWidget(mainwidget)
+		mainwidget.setLayout(vbox)
+
+		self.updating = False
+
+	def show(self, *args, **kwargs):
+		self.timer = QTimer(self)
+		self.timer.timeout.connect(self.get_values)
+		self.timer.start(200)
+		return(super().show(*args, **kwargs))
+
+	def search(self, text):
+		for key, value in self.widgets.items():
+			if text.lower() in key or text.lower() in value[0].text():
+				hidden = False
+			else:
+				hidden = True
+			value[0].setHidden(hidden)
+			value[1].setHidden(hidden)
+			value[2].setHidden(hidden)
+
+	def get_values(self):
+		self.updating = True
+		for key, (input, oklabel, label) in self.widgets.items():
+			value = config[key]
+			if input.hasFocus() or self.widgets[key][1].text() == "Bad":
+				continue
+			if isinstance(value, (dict, list, tuple)):
+				input.setText(json.dumps(value))
+			else:
+				input.setText(str(value))
+		self.updating = False
+
+	def set_value(self, key, value):
+		if self.updating:
+			return
+		converter = Config.initial_values.get(key)
+		if converter:
+			converter = converter[1]
+		input, oklab, label = self.widgets[key]
+
+		try:
+			if converter is None:
+				pass
+			elif converter in (dict, list, tuple):
+				value = json.loads(value)
+			elif converter == bool:
+				value = True if value in ["True", "1"] else False
+			else:
+				value = converter(value)
+			config[key] = value
+			oklab.setText("Good")
+		except Exception as E:
+			oklab.setText("Bad")
+
+
+	def closeEvent(self, *args, **kwargs):
+		self.timer.stop()
+		return super().closeEvent(*args, **kwargs)
+
+class CreditsWindow(EQDockWidget):
+	default_visible = False
+	default_position = None
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle("Credits")
+
+		global CREDITSSTRING
+		self.setWidget(QQ(QLabel, text=CREDITSSTRING, align=Qt.AlignmentFlag.AlignCenter, wordwrap=True, minHeight=400, minWidth=500))
+
+
+class ResidualsWindow(EQDockWidget):
+	default_visible = False
+	default_position = None
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle('Residuals')
+
+		self.fig = matplotlib.figure.Figure(dpi=config['plot_dpi'])
+		self.plot_canvas = FigureCanvas(self.fig)
+
+		self.ax = self.fig.subplots()
+
+		self.points = self.ax.scatter([], [], color=[], marker=".")
+		self.annot = self.ax.annotate("", xy=(0,0), xytext=(5,5), textcoords="offset points", color="black", ha="center", va="bottom", bbox=dict(boxstyle="round", fc="w"))
+		self.annot.set_visible(False)
+		self.fig.canvas.mpl_connect("motion_notify_event", self.on_hover)
+		self.fig.canvas.mpl_connect("button_press_event", lambda x: self.on_hover(x, True))
+
+		self.mpl_toolbar = NavigationToolbar2QT(self.plot_canvas, self)
+		self.df = None
+
+		layout = QVBoxLayout(margin=True)
+		mainwidget = QWidget()
+		self.setWidget(mainwidget)
+		mainwidget.setLayout(layout)
+		layout.addWidget(self.plot_canvas, 6)
+		hlayout = QHBoxLayout()
+		hlayout.addWidget(QLabel("x-axis: "))
+		hlayout.addWidget(QQ(QLineEdit, "residuals_xvariable", placeholder="Choose the x-variable, e.g. x_lin"))
+		hlayout.addWidget(QLabel("y-axis: "))
+		hlayout.addWidget(QQ(QLineEdit, "residuals_yvariable", placeholder="Choose the y-variable, e.g. x_lin-x_cat"))
+		hlayout.addWidget(QQ(QCheckBox, "residuals_blends", text="Blends"))
+		hlayout.addWidget(QQ(QCheckBox, "residuals_autoscale", text="Autoscale on Update"))
+		layout.addLayout(hlayout)
+		layout.addWidget(self.mpl_toolbar)
+		layout.addWidget(QQ(QPlainTextEdit, "residuals_query", maxHeight=60, placeholder="Query text to filter shown lines. Use qnu1, ..., qnu6 and qnl1, ..., qnl6 for the quantum numbers. Other possible values are x_lin, x_cat, error_lin, error_cat, filename_lin, filename_cat, y, degfreed, elower, usd, tag, qnfmt, weight, and comment."))
+		layout.addWidget(QQ(QPlainTextEdit, "residuals_colorinput", maxHeight=60, placeholder="Enter custom color and query to color specific lines differently. E.g. enter '#ff0000; qnu1 < 20' to color all transitions with the first upper quantum number below 20 red."))
+
+		buttonslayout = QHBoxLayout()
+		layout.addLayout(buttonslayout)
+		buttonslayout.addStretch(1)
+		self.update_button = QQ(QPushButton, text="Update", change=self.plot_residuals)
+		buttonslayout.addWidget(self.update_button)
+		buttonslayout.addWidget(QQ(QPushButton, text="Save", change=self.save_residuals))
+		buttonslayout.addStretch(1)
+
+	def get_residuals(self):
+		lin_df = LinFile.get_data()
+		cat_df = CatFile.get_data()
+
+		noq = config["series_qns"]
+		self.noq = noq
+		qns_visible = [f"qn{ul}{n+1}" for ul in ("u", "l") for n in range(noq)]
+		df = pd.merge(lin_df, cat_df, how="inner", on=qns_visible)
+		df.rename(columns={"x_x": "x_lin", "x_y": "x_cat", "error_x": "error_lin", "error_y": "error_cat", "filename_x": "filename_lin", "filename_y": "filename_cat"}, inplace=True)
+
+		query = config["residuals_query"].strip()
+		if query:
+			df.query(query, inplace=True)
+		df.reset_index(drop=True, inplace=True)
+
+		if config["residuals_blends"]:
+			mask = df["weight"] != 0
+			df_view = df[mask]
+			tmp_dict = df_view.groupby(df_view.x_lin).apply(lambda x: np.average(x.x_cat, weights=x.weight)).to_dict()
+			df["x_cat"] = df["x_lin"].map(lambda x: tmp_dict.get(x, x))
+
+		df["obs_calc"] = df["x_lin"] - df["x_cat"]
+		return(df)
+
+	def plot_residuals(self):
+		self.update_button.setDisabled(True)
+
+		try:
+			thread = self.plot_residuals_core()
+			thread.wait()
+		except Exception as E:
+			notify_warning.emit("<span style='color:#eda711;'>WARNING</span>: There was an error in your Residuals window input")
+		finally:
+			self.fig.canvas.draw()
+			self.update_button.setDisabled(False)
+
+	@QThread.threaded_d
+	def plot_residuals_core(self, thread=None):
+		message = []
+
+		df = self.get_residuals()
+		df["color"] = config["residuals_defaultcolor"]
+		message.append(f"Found {len(df)} entries matching your query.")
+
+		colorquerytext = config["residuals_colorinput"].split("\n")
+		for row in colorquerytext:
+			if row.strip():
+				color, query = row.split(";")
+				indices = df.query(query).index
+				df.loc[indices, "color"] = color
+				message.append(f"{len(indices)} lines are colored in <span style='color:{color};'>{color}</span>.")
+
+		self.df = df
+
+		yvariable = config["residuals_yvariable"].strip() or "obs_calc"
+		xvariable = config["residuals_xvariable"].strip() or "x_lin"
+		ys = df.eval(yvariable).to_numpy()
+		xs = df.eval(xvariable).to_numpy()
+		colors = df["color"].to_numpy()
+		tuples = list(zip(xs,ys))
+		tuples = tuples if len(tuples)!=0 else [[None,None]]
+		self.points.set_offsets(tuples)
+		self.points.set_color(colors)
+		if len(xs) and config["residuals_autoscale"]:
+			xmin, xmax = np.min(xs), np.max(xs)
+			if xmin == xmax:
+				xmin -= 1
+				xmax += 1
+			self.ax.set_xlim([xmin, xmax])
+			ymin, ymax = np.min(ys), np.max(ys)
+			if ymin == ymax:
+				ymin -= 1
+				ymax += 1
+			y_range = [ymin, ymax]
+			self.ax.set_ylim(y_range[0]-config["plot_ymargin"]*(y_range[1]-y_range[0]), y_range[1]+config["plot_ymargin"]*(y_range[1]-y_range[0]))
+		notify_info.emit("<br/>".join(message))
+
+	def save_residuals(self):
+		df = self.get_residuals()
+		fname = QFileDialog.getSaveFileName(None, 'Choose file to save residuals to',"","CSV Files (*.csv);;All Files (*)")[0]
+		if fname:
+			df.to_csv(fname, index=None, sep='\t')
+
+	def on_hover(self, event, click=False):
+		if event.inaxes == self.ax and isinstance(self.df, pd.DataFrame):
+			cont, ind = self.points.contains(event)
+			noq = None
+			if cont:
+				self.annot.xy = self.points.get_offsets()[ind["ind"][0]]
+				tmp_transitions = self.df.iloc[ind["ind"]]
+				text = []
+				if len(tmp_transitions):
+					noq = self.noq
+				for i, row in tmp_transitions.iterrows():
+					qnus = [row[f"qnu{n+1}"] for n in range(noq)]
+					qnls = [row[f"qnl{n+1}"] for n in range(noq)]
+					text.append(f"{', '.join(map(str, qnus))} ← {', '.join(map(str, qnls))}")
+				text = "\n".join(text)
+				self.annot.set_text(text)
+				self.annot.set_visible(True)
+			else:
+				self.annot.set_visible(False)
+			self.fig.canvas.draw()
+
+			if click and noq:
+				tab_widget = ReferenceSeriesWindow._instance.tab
+				refwidget = tab_widget.widget(config['series_currenttab'])
+				refwidget.setCurrentIndex(0)
+				seriesselector = refwidget.series_selector
+				
+				current_state = seriesselector.state
+				current_state['qnus'][:noq] = qnus
+				current_state['qnls'][:noq] = qnls
+				config['series_qns'] = noq
+
+				seriesselector.set_state()
+
+				mainwindow.lwpwidget.set_data()
+				mainwindow.show()
+				mainwindow.raise_()
+				mainwindow.activateWindow()
+
+# @Luis: continue here
+class BlendedLinesWindow(EQDockWidget):
+	default_visible = False
+	default_position = None
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle('Blended Lines')
+
+		self.peaks = []
+		self.fit_values = None
+		self.cid = None
+
+		class CustomPlotWidget(ProtPlot):
+
+			def gui(self):
+				super().gui()
+				self.fit_line = self.ax.plot([], [], color = main.config["blendedlineswindow_color_total"])[0]
+				self.cat_line = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), color=main.config["color_cat"])
+				self.ax.add_collection(self.cat_line)
+
+				self.plot_parts = []
+
+			@synchronized_d(locks["fitting"])
+			def fit_peaks(self):
+				with locks["currThread"]:
+					ownid = threading.current_thread().ident
+
+				try:
+					main.signalclass.fitindicator.emit("<span style='color:#eda711;'>Working ...</span>")
+					peaks = self.parent.peaks.copy()
+					profile = main.config["blendedlineswindow_lineshape"]
+					derivative = main.config["blendedlineswindow_derivative"]
+					polynomrank = main.config["blendedlineswindow_polynom"]+1
+					fixedwidth = main.config["blendedlineswindow_fixedwidth"]
+					amplitude_direction = main.config["fit_amplitudedirection"]
+					now = 2 if profile == "Voigt" else 1
+					noa = 2 + now * (not fixedwidth)
+
+					fitfunction = lambda x, *args, fixedwidth=fixedwidth: self.parent.fitfunction(x, profile, derivative, polynomrank, *args, fixedwidth=fixedwidth)
+					fitfunction_withoutbaseline = lambda x, *args, fixedwidth=fixedwidth: self.parent.fitfunction(x, profile, derivative, 0, *args, fixedwidth=fixedwidth)
+
+					for part in self.plot_parts:
+						part.remove()
+					self.plot_parts = []
+
+					xrange = [self.center-self.width/2, self.center+self.width/2]
+
+					earlyreturn(ownid, self.fit_thread_id)
+
+					df_exp = main.get_visible_data("exp", xrange=xrange)
+					exp_xs = df_exp["x"].to_numpy()
+					exp_ys = df_exp["y"].to_numpy()
+
+					earlyreturn(ownid, self.fit_thread_id)
+
+					df_cat = main.get_visible_data("cat", xrange=xrange)
+					if len(df_cat) != 0:
+						cat_xs = df_cat["x"].to_numpy()
+						cat_ys = df_cat["y"].to_numpy()
+						if len(exp_ys):
+							cat_ys = cat_ys*np.max(exp_ys)/np.max(cat_ys)
+
+						segs = np.array(((cat_xs, cat_xs), (cat_ys*0, cat_ys))).T
+						# segs = (((cat_xs[i],0),(cat_xs[i],cat_ys[i])) for i in range(len(cat_xs)))
+						colors = create_colors(df_cat, main.config["files_cat"])
+						self.cat_line.set(segments=segs, colors=colors)
+
+					earlyreturn(ownid, self.fit_thread_id)
+
+					xs = []
+					ys = []
+					ws = []
+					exp_mean = 0
+					if len(exp_ys) and (polynomrank + len(peaks)):
+						if main.config["blendedlineswindow_autopositionpeaks"]:
+							exp_mean = exp_ys.mean()
+
+						yptp = 4*(np.amax(exp_ys)-np.amin(exp_ys))
+						w0 = xrange[1] - xrange[0]
+						wmax = main.config["blendedlineswindow_maxfwhm"] or w0
+						amp_min, amp_max = -3*yptp, 3*yptp
+						if amplitude_direction < 0:
+							amp_max = 0
+						if amplitude_direction > 0:
+							amp_min = 0
+						
+						for peak in peaks:
+							x, y, x_rel = peak
+
+							if not xrange[0] < x < xrange[1]:
+								x = self.center + x_rel
+								if not xrange[0] < x < xrange[1]:
+									x = sum(xrange)/2
+								y = yptp * np.sign(amplitude_direction)
+							elif not amp_min < y < amp_max:
+								y = yptp * np.sign(amplitude_direction)
+
+							xs.append((x, *xrange))
+							ys.append((y, amp_min, amp_max))
+							ws.append((wmax/4, 0, wmax))
+
+						p0 = []
+						bounds = [[], []]
+						for x, y, w in zip(xs, ys, ws):
+							tmp_p0 = [z[0] for z in (x, y, w, w)]
+							tmp_b0 = [z[1] for z in (x, y, w, w)]
+							tmp_b1 = [z[2] for z in (x, y, w, w)]
+
+							if fixedwidth:
+								slice_ = slice(2)
+							elif profile == "Voigt":
+								slice_ = slice(4)
+							else:
+								slice_ = slice(3)
+
+							p0.extend(tmp_p0[slice_])
+							bounds[0].extend(tmp_b0[slice_])
+							bounds[1].extend(tmp_b1[slice_])
+
+						if fixedwidth and len(peaks):
+							ws = np.array(ws)
+							w0, wl, wu = ws[:, 0].mean(), ws[:, 1].min(), ws[: 2].max()
+							p0.extend([w0]*now)
+							bounds[0].extend([wl]*now)
+							bounds[1].extend([wu]*now)
+
+						p0.extend([0]*polynomrank)
+						bounds[0].extend([-np.inf]*polynomrank)
+						bounds[1].extend([+np.inf]*polynomrank)
+
+						# @Luis: Work on the bounds and p0s here
+						try:
+							popt, pcov = optimize.curve_fit(fitfunction, exp_xs, exp_ys, p0=p0, bounds=bounds)
+						except Exception as E:
+							popt, pcov = optimize.curve_fit(fitfunction, exp_xs, exp_ys, p0=p0, bounds=bounds)
+						perr = np.sqrt(np.diag(pcov))
+						res_xs = np.linspace(xrange[0], xrange[1], main.config["blendedlineswindow_xpoints"])
+						res_ys = fitfunction(res_xs, *popt)
+						res_exp_ys = fitfunction(exp_xs, *popt)
+					else:
+						popt = [0]*(noa*len(peaks)+polynomrank+2*fixedwidth)
+						perr = [0]*(noa*len(peaks)+polynomrank+2*fixedwidth)
+						res_xs = np.linspace(xrange[0], xrange[1], main.config["blendedlineswindow_xpoints"])
+						res_ys = res_xs*0
+						res_exp_ys = exp_xs*0
+
+					earlyreturn(ownid, self.fit_thread_id)
+
+
+					self.fit_line.set_data(res_xs, res_ys)
+					self.fit_line.set_color(main.config["blendedlineswindow_color_total"])
+
+					opt_param = []
+					err_param = []
+
+					for i in range(len(peaks)):
+						tmp_params = list(popt[i*noa: (i+1)*noa])
+						tmp_errors = list(perr[i*noa: (i+1)*noa])
+
+						if fixedwidth:
+							tmp_params.extend(popt[-(polynomrank+now):len(popt)-polynomrank])
+							tmp_errors.extend(perr[-(polynomrank+now):len(popt)-polynomrank])
+
+						tmp_ys = fitfunction_withoutbaseline(res_xs, *tmp_params)
+						tmp_ys += exp_mean
+						self.plot_parts.append(self.ax.plot(res_xs, tmp_ys, color=main.config["blendedlineswindow_color_total"], alpha=main.config["blendedlineswindow_transparency"])[0])
+
+						opt_param.append( tmp_params )
+						err_param.append( tmp_errors )
+
+
+					self.plot_parts.append(self.ax.scatter([x[0] for x in opt_param], [x[1] + exp_mean for x in opt_param], color=main.config["blendedlineswindow_color_points"]))
+
+					if polynomrank > 0 and main.config["blendedlineswindow_showbaseline"]:
+						baseline_args = popt[-polynomrank:]
+						self.plot_parts.append(self.ax.plot(res_xs, np.polyval(baseline_args, res_xs-self.center), color=main.config["blendedlineswindow_color_baseline"])[0])
+					else:
+						baseline_args = []
+
+					rms_ys = np.sqrt(np.sum((exp_ys - res_exp_ys)**2) / len(exp_ys)) if len(exp_ys) else 0
+					self.parent.params = opt_param, err_param, profile, derivative, noa, now, self.center, baseline_args, rms_ys
+
+					earlyreturn(ownid, self.fit_thread_id)
+
+					main.signalclass.blwfit.emit()
+					main.signalclass.fitindicator.emit("Ready")
+					super().update_plot()
+				except CustomError as E:
+					pass
+				except Exception as E:
+					main.signalclass.fitindicator.emit("<span style='color:#ff0000;'>Fit failed</span>")
+					raise
+
+			def update_plot(self):
+				thread = threading.Thread(target=self.fit_peaks)
+				with locks["currThread"]:
+					thread.start()
+					self.fit_thread_id = thread.ident
+				return(thread)
+
+		layout = QVBoxLayout()
+		self.setLayout(layout)
+		self.plotWidget = CustomPlotWidget(parent=self)
+		layout.addWidget(self.plotWidget)
+
+		tmplayout = QGridLayout()
+		row_id = 0
+		tmplayout.addWidget(QQ(QLabel, text="Function: "), row_id, 0)
+		tmplayout.addWidget(QQ(QComboBox, "blendedlineswindow_lineshape", items=("Gauss", "Lorentz", "Voigt"), minWidth=120), row_id, 1)
+
+		tmplayout.addWidget(QQ(QLabel, text="Transparency: "), row_id, 2)
+		tmplayout.addWidget(QQ(QDoubleSpinBox, "blendedlineswindow_transparency", range=(0, 1), minWidth=120, singlestep=0.1), row_id, 3)
+
+		row_id += 1
+		tmplayout.addWidget(QQ(QLabel, text="Derivative: "), row_id, 0)
+		tmplayout.addWidget(QQ(QSpinBox, "blendedlineswindow_derivative", range=(0, 2), minWidth=120), row_id, 1)
+
+		row_id += 1
+		tmplayout.addWidget(QQ(QLabel, text="Max FWHM: "), row_id, 0)
+		tmplayout.addWidget(QQ(QDoubleSpinBox, "blendedlineswindow_maxfwhm", range=(0, None), minWidth=120), row_id, 1)
+
+		tmplayout.addWidget(QQ(QCheckBox, "blendedlineswindow_fixedwidth", text="All Same Width"), row_id, 2, 1, 2)
+
+		row_id += 1
+		tmplayout.addWidget(QQ(QLabel, text="Baseline Rank: "), row_id, 0)
+		tmplayout.addWidget(QQ(QSpinBox, "blendedlineswindow_polynom", range=(-1, None), minWidth=120), row_id, 1)
+
+		tmplayout.addWidget(QQ(QCheckBox, "blendedlineswindow_showbaseline", text="Show Baseline"), row_id, 2, 1, 2)
+		tmplayout.setColumnStretch(4, 1)
+
+		layout.addLayout(tmplayout)
+
+		self.label = QQ(QLabel, text="Ready", textFormat=Qt.TextFormat.RichText)
+		main.signalclass.fitindicator.connect(self.label.setText)
+		tmp_layout = QHBoxLayout()
+		layout.addLayout(tmp_layout)
+		row = (
+		  QQ(QPushButton, text="Del All", change=lambda x: self.del_peak(-1)),
+		  QQ(QPushButton, text="Update", change=lambda x: self.plotWidget.update_plot()),
+		  QQ(QPushButton, text="Save", change=lambda x: self.save_values()),
+		  self.label,
+		)
+
+		for widget in row:
+			tmp_layout.addWidget(widget)
+		tmp_layout.addStretch()
+
+		self.table = QTableWidget()
+		self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+		self.table.setMinimumHeight(50)
+		layout.addWidget(self.table)
+
+		self.cid = self.plotWidget.plot_canvas.mpl_connect("button_press_event", lambda event: self.add_peak(event.xdata, event.ydata))
+		main.signalclass.blwfit.connect(self.fill_table)
+
+	def add_peak(self, x, y):
+		if not (x and y):
+			return
+		x = np.float64(x)
+		y = np.float64(y)
+		x_rel = x - self.plotWidget.center
+
+		self.peaks.append((x, y, x_rel))
+		self.peaks.sort(key=lambda x: x[0])
+		self.plotWidget.update_plot()
+
+	def del_peak(self, i=None):
+		if i == -1:
+			self.peaks = []
+		elif i is not None and isinstance(i, (int, float, np.integer, np.float64)):
+			if i in range(len(self.peaks)):
+				del self.peaks[int(i)]
+		else:
+			if len(self.peaks) != 0:
+				self.peaks.pop()
+		self.plotWidget.update_plot()
+
+	def fitfunction(self, x, fun, der, bpr, *ps, fixedwidth=False):
+		noa = 2 + (1+(fun == "Voigt")) * (not fixedwidth)
+		now = 2 if fun == "Voigt" else 1
+		res_ys = []
+		param_peaks = ps
+
+		# Baseline Polynom
+		if bpr > 0:
+			param_baseline = ps[-bpr:]
+			param_peaks    = ps[:-bpr]
+
+			res_ys.append(np.polyval(param_baseline, x-self.plotWidget.center))
+
+		# Fixed Width
+		if fixedwidth:
+			widths         = param_peaks[-now:]
+			param_peaks    = param_peaks[:-now]
+
+		# Peaks
+		for i in range(len(param_peaks)//noa):
+			tmp_params = list(param_peaks[i*noa: (i+1)*noa])
+			if fixedwidth:
+				tmp_params.extend(widths)
+			res_ys.append(lineshape(fun, der, x, *tmp_params))
+
+		return(np.sum(res_ys, axis=0))
+
+	def fill_table(self):
+		opt_param, err_param, function, derivative, noa, now, self.center, baseline_args, rms_ys = self.params
+		fit_values = {
+			"function": function,
+			"derivative": derivative,
+			"center": self.center,
+			"baseline": list(baseline_args),
+			"peaks": [],
+			"RMS": rms_ys,
+			"datetime": time.strftime("%d.%m.%Y %H:%M:%S", time.localtime()),
+		}
+		
+		opt_param.sort(key=lambda x: x[0])
+		table = self.table
+		table.setRowCount(0)
+		table.setColumnCount(7)
+		table.setHorizontalHeaderLabels(["Action", "Frequency", "Amplitude", "FWHM Gauss", "FWHM Lorentz", "Other QNs", "Delete"])
+		for params, params_error in zip(opt_param, err_param):
+			x, y, wg, wl = params[0], params[1], params[2] if function != "Lorentz" else  0, params[1+now] if function != "Gauss" else  0
+			x_error, y_error, wg_error, wl_error = params_error[0], params_error[1], params_error[2] if function != "Lorentz" else  0, params_error[1+now] if function != "Gauss" else  0
+			
+			currRowCount = table.rowCount()
+			table.insertRow(currRowCount)
+			table.setCellWidget(currRowCount, 0, QQ(QPushButton, text="Assign", change=lambda x, xpos=x, error=x_error: self.pre_assign(xpos, error)))
+			table.setItem(currRowCount, 1, QTableWidgetItem(f'{x:{main.config["flag_xformatfloat"]}}'))
+			table.setItem(currRowCount, 2, QTableWidgetItem(f'{y:{main.config["flag_xformatfloat"]}}'))
+			table.setItem(currRowCount, 3, QTableWidgetItem(f'{wg:{main.config["flag_xformatfloat"]}}'))
+			table.setItem(currRowCount, 4, QTableWidgetItem(f'{wl:{main.config["flag_xformatfloat"]}}'))
+			table.setCellWidget(currRowCount, 5, QQ(QPushButton, text="Assign other QNs", change=lambda x, xpos=x, error=x_error: self.pre_assign(xpos, error, oqns=True)))
+			table.setCellWidget(currRowCount, 6, QQ(QPushButton, text="Delete", change=lambda x, ind=currRowCount: self.del_peak(i=ind)))
+			fit_values["peaks"].append({"values": (x, y, wg, wl), "errors": (x_error, y_error, wg_error, wl_error)})
+		self.fit_values = fit_values
+		table.resizeColumnsToContents()
+
+	def save_values(self):
+		if self.fit_values:
+			filename = llwpfile(".fit")
+			
+			with open(filename, "a+") as file:
+				file.seek(0)
+				previous_fits = file.read()
+				if previous_fits.strip():
+					all_fits = json.loads(previous_fits)
+					all_fits.append(self.fit_values)
+				else:
+					all_fits = [self.fit_values]
+			
+				file.truncate(0)
+				json.dump(all_fits, file, indent=2)
+			main.notification(f"Saved the fit to the file {filename}.")
+		else:
+			main.notification(f"No fit values to be saved.")
+
+	def pre_assign(self, x, error, oqns=False):
+		index = self.plotWidget.i
+
+		dict_ = {
+			"x": x,
+			"error": error,
+			"xpre": 0,
+		}
+
+		for i in range(6):
+			dict_[f"qnu{i+1}"] = pyckett.SENTINEL
+			dict_[f"qnl{i+1}"] = pyckett.SENTINEL
+
+		if oqns:
+			visible_cat_data = main.get_visible_data("cat")
+			dialog = QNsDialog(x, visible_cat_data)
+			dialog.exec()
+
+			if dialog.result() == 1:
+				dict_.update(dialog.save())
+			else:
+				return
+		else:
+			reference = main.plotwidget.get_series_reference(index[1])
+			if reference["method"] == "Transition":
+				qns = main.plotwidget.get_qns(reference["transition"])[index[0]]
+				for i, qnu, qnl in zip(range(6), qns[0], qns[1]):
+					dict_[f"qnu{i+1}"] = qnu
+					dict_[f"qnl{i+1}"] = qnl
+				dict_["xpre"] = main.plotwidget.cache_positions[index]
+
+		if main.plotwidget.check_blends(index, dict_):
+			return
+		else:
+			main.plotwidget.assign(index, dict_)
+
+	def activateWindow(self):
+		self.plotWidget.fig.canvas.mpl_disconnect(self.cid)
+		self.cid = self.plotWidget.plot_canvas.mpl_connect("button_press_event", lambda event: self.add_peak(event.xdata, event.ydata))
+
+		self.plotWidget.from_current_plot()
+		super().activateWindow()
+
+	@synchronized_d(locks["windows"])
+	def closeEvent(self, *args, **kwargs):
+		self.plotWidget.fig.canvas.mpl_disconnect(self.cid)
+		return super().closeEvent(*args, **kwargs)
+
+
+##
+## Global Functions
+##
+def lineshape(shape, derivative, *args):
+	if shape == "Gauss":
+		x, x_0, amp, width = args
+		width = width/(2*np.sqrt(2*np.log(2)))
+		if width == 0:
+			return [0 if i!=x_0 else np.inf for i in x]
+		ys = np.exp(-(x-x_0)**2/(2*width**2))/(width*(2*np.pi)**0.5)
+	elif shape == "Lorentz":
+		x, x_0, amp, width = args
+		width = width/2
+		if width == 0:
+			return [0 if i!=x_0 else np.inf for i in x]
+		ys = 1/(np.pi*width*(1+((x-x_0)/width)**2))
+	else: #Voigt
+		x, x_0, amp, gauss, lorentz = args
+		gauss = gauss/(2*np.sqrt(2*np.log(2)))
+		lorentz = lorentz/2
+		if gauss == 0 and lorentz == 0:
+			return [0 if i!=x_0 else np.inf for i in x]
+		ys = special.voigt_profile(x-x_0, gauss, lorentz)
+
+	for _ in range(0, int(derivative)):
+		ys = np.gradient(ys, edge_order=2)
+	if derivative%2 == 0 and derivative != 0 and derivative%4 != 0:
+		ys = -ys
+	ymax = np.max(ys) if np.isfinite(ys).any() else 1
+	if not np.isfinite(ymax) or ymax == 0:
+		ymax = 1
+	ys = amp*ys/ymax
+	return(ys)
+
+def fit_pgopher(xs, ys, peakdirection, fit_xs):
+	ymin, ymax = np.min(ys), np.max(ys)
+
+	if peakdirection < 0:
+		cutoff = ymin + (ymax-ymin)/2
+		mask = (ys <= cutoff)
+	else:
+		cutoff = ymax - (ymax-ymin)/2
+		mask = (ys >= cutoff)
+
+	fit_xs = xs[mask]
+	fit_ys = ys[mask]
+
+	# @Luis: Check for the correct sign of exp_ys here
+	# @Luis: Check if average here should use relative fit_ys
+	# to correct for offsets in intensity
+	xmiddle = np.sum(fit_xs*fit_ys)/np.sum(fit_ys)
+	xuncert = 0
+
+	return(xmiddle, xuncert, fit_xs, fit_ys)
+
+def fit_polynom(xs, ys, peakdirection, fit_xs, rank):
+	try:
+		popt = np.polyfit(xs, ys, rank)
+	except Exception as E:
+		popt = np.polyfit(xs, ys, rank)
+	polynom = np.poly1d(popt)
+	fit_ys = polynom(fit_xs)
+
+	if peakdirection < 0:
+		xmiddle = fit_xs[np.argmin(fit_ys)]
+	else:
+		xmiddle = fit_xs[np.argmax(fit_ys)]
+
+	xuncert = 0
+	return(xmiddle, xuncert, fit_xs, fit_ys)
+
+def fit_polynom_multirank(xs, ys, peakdirection, fit_xs, maxrank):
+	best_rms = np.inf
+	best_rank = 0
+
+	maxrank = min(len(xs), maxrank)
+	for rank in range(maxrank):
+		try:
+			try:
+				popt = np.polyfit(xs, ys, rank)
+			except Exception as E:
+				popt = np.polyfit(xs, ys, rank)
+			polynom = np.poly1d(popt)
+			fit_ys = polynom(exp_xs)
+
+			rms = np.mean((fit_ys - ys)**2)
+			if rms < best_rms:
+				best_rms = rms
+				best_rank = rank
+		except Exception as E:
+			continue
+
+	popt = np.polyfit(xs, ys, best_rank)
+	polynom = np.poly1d(popt)
+	fit_ys = polynom(fit_xs)
+
+	if peakdirection < 0:
+		xmiddle = fit_xs[np.argmin(fit_ys)]
+	else:
+		xmiddle = fit_xs[np.argmax(fit_ys)]
+
+	xuncert = 0
+	return(xmiddle, xuncert, fit_xs, fit_ys)
+
+def fit_lineshape(xs, ys, peakdirection, fit_xs, profilname, derivative, offset):
+	xmin, xmax = xs.min(), xs.max()
+	x0, w0 = (xmin + xmax) / 2, (xmax - xmin)
+	ymin, ymax, ymean, yptp = ys.min(), ys.max(), ys.mean(), ys.ptp()
+	y0 = 0
+
+	amp_min, amp_max = -3*yptp, 3*yptp
+	if peakdirection < 0:
+		amp_max = 0
+		y0 = -yptp
+	if peakdirection > 0:
+		amp_min = 0
+		y0 = yptp
+
+	p0 = [x0, y0, w0] if profilname != 'Voigt' else [x0, y0, w0, w0]
+	bounds = [[xmin, amp_min, 0], [xmax, amp_max, 10*w0]] if profilname != 'Voigt' else [[xmin, amp_min, 0, 0], [xmax, amp_max, 10*w0, 10*w0]]
+	function = lambda *x: lineshape(profilname, derivative, *x)
+
+	if offset:
+		function = lambda *x: lineshape(profilname, derivative, *x[:-1]) + x[-1]
+		p0.append(ymean)
+		bounds[0].append(ymin)
+		bounds[1].append(ymax)
+
+	try:
+		popt, pcov = optimize.curve_fit(function, xs, ys, p0=p0, bounds=bounds)
+	except Exception as E:
+		popt, pcov = optimize.curve_fit(function, xs, ys, p0=p0, bounds=bounds)
+	perr = np.sqrt(np.diag(pcov))
+	fit_ys = function(fit_xs, *popt)
+
+	xmiddle = popt[0]
+	xuncert = perr[0]
+
+	return(xmiddle, xuncert, fit_xs, fit_ys)
+
+
+def addemptyrow_inplace(df, model=None):
+	df.reset_index(drop=True, inplace=True)
+	dtypes = df.dtypes
+	newvalues = []
+	for dtype in dtypes:
+		if dtype == np.float64:
+			newvalues.append(np.nan)
+		elif dtype == np.int64:
+			newvalues.append(pyckett.SENTINEL)
+		else:
+			newvalues.append("")
+	df.loc[len(df.index)] = newvalues
+	if model:
+		model.update()
+
+def csv_copypaste(self, event):
+	if event.key() == Qt.Key.Key_C and (event.modifiers() == Qt.KeyboardModifier.ControlModifier):
+		cells = sorted(self.selectedIndexes())
+		output = []
+		i = 0
+
+		while i < len(cells):
+			tmp = []
+			row = cells[i].row()
+			while i < len(cells) and cells[i].row() == row:
+				tmp.append(cells[i].data())
+				i += 1
+			output.append("\t".join(map(str, tmp)))
+		output = "\n".join(output)
+		QApplication.clipboard().setText(output)
+
+	elif event.key() == Qt.Key.Key_V and (event.modifiers() == Qt.KeyboardModifier.ControlModifier):
+		if QAbstractItemView.EditTrigger.NoEditTriggers == self.editTriggers():
+			return
+		cells = sorted(self.selectedIndexes())
+		if not cells:
+			return
+		text = QApplication.clipboard().text()
+		data = [row.split("\t") for row in text.split("\n")]
+		i_0, j_0 = cells[0].row(), cells[0].column()
+
+		for i, row in enumerate(data):
+			j_hidden = 0
+			for j, value in enumerate(row):
+				while self.isColumnHidden(j_0+j+j_hidden):
+					j_hidden += 1
+				self.model().setData(self.model().index(i_0+i, j_0+j+j_hidden), value, Qt.ItemDataRole.EditRole)
+	else:
+		return False
+	return True
+
+def symmetric_ticklabels(ticks):
+	float_format = config['flag_xformatfloat']
+	tick_labels = []
+	for a, o in zip(ticks, ticks[::-1]):
+		if not (np.isfinite(a) and np.isfinite(o)):
+			continue
+		dec_a = len(f"{a:{float_format}}".rstrip("0").split(".")[1])
+		dec_o = len(f"{o:{float_format}}".rstrip("0").split(".")[1])
+		if dec_a == dec_o:
+			tick_labels.append(f"{a:{float_format}}".rstrip("0").rstrip("."))
+		else:
+			trailing_zeros = 4 - max(dec_a, dec_o)
+			tick = f"{a:{float_format}}"[:-trailing_zeros] if trailing_zeros else f"{a:{float_format}}"
+			tick_labels.append(tick)
+	return(tick_labels)
+
+def is_dark_theme():
+	return(QApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark)
+
+def QQ(widgetclass, config_key=None, **kwargs):
+	widget = widgetclass()
+
+	if "range" in kwargs:
+		widget.setRange(*kwargs["range"])
+	if "maxWidth" in kwargs:
+		widget.setMaximumWidth(kwargs["maxWidth"])
+	if "maxHeight" in kwargs:
+		widget.setMaximumHeight(kwargs["maxHeight"])
+	if "minWidth" in kwargs:
+		widget.setMinimumWidth(kwargs["minWidth"])
+	if "minHeight" in kwargs:
+		widget.setMinimumHeight(kwargs["minHeight"])
+	if "color" in kwargs:
+		widget.setColor(kwargs["color"])
+	if "text" in kwargs:
+		widget.setText(kwargs["text"])
+	if "options" in kwargs:
+		options = kwargs["options"]
+		if isinstance(options, dict):
+			for key, value in options.items():
+				widget.addItem(key, value)
+		else:
+			for option in kwargs["options"]:
+				widget.addItem(option)
+	if "width" in kwargs:
+		widget.setFixedWidth(kwargs["width"])
+	if "height" in kwargs:
+		widget.setFixedHeight(kwargs["height"])
+	if "tooltip" in kwargs:
+		widget.setToolTip(kwargs["tooltip"])
+	if "placeholder" in kwargs:
+		widget.setPlaceholderText(kwargs["placeholder"])
+	if "singlestep" in kwargs:
+		widget.setSingleStep(kwargs["singlestep"])
+	if "wordwrap" in kwargs:
+		widget.setWordWrap(kwargs["wordwrap"])
+	if "align" in kwargs:
+		widget.setAlignment(kwargs["align"])
+	if "rowCount" in kwargs:
+		widget.setRowCount(kwargs["rowCount"])
+	if "columnCount" in kwargs:
+		widget.setColumnCount(kwargs["columnCount"])
+	if "move" in kwargs:
+		widget.move(*kwargs["move"])
+	if "default" in kwargs:
+		widget.setDefault(kwargs["default"])
+	if "textFormat" in kwargs:
+		widget.setTextFormat(kwargs["textFormat"])
+	if "checkable" in kwargs:
+		widget.setCheckable(kwargs["checkable"])
+	if "shortcut" in kwargs:
+		widget.setShortcut(kwargs["shortcut"])
+	if "parent" in kwargs:
+		widget.setParent(kwargs["parent"])
+	if "completer" in kwargs:
+		widget.setCompleter(kwargs["completer"])
+	if "hidden" in kwargs:
+		widget.setHidden(kwargs["hidden"])
+	if "visible" in kwargs:
+		widget.setVisible(kwargs["visible"])
+	if "stylesheet" in kwargs:
+		widget.setStyleSheet(kwargs["stylesheet"])
+	if "enabled" in kwargs:
+		widget.setEnabled(kwargs["enabled"])
+	if "items" in kwargs:
+		for item in kwargs["items"]:
+			widget.addItem(item)
+	if "readonly" in kwargs:
+		widget.setReadOnly(kwargs["readonly"])
+	if "prefix" in kwargs:
+		widget.setPrefix(kwargs["prefix"])
+	if kwargs.get("buttons", True) is False:
+		widget.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+
+	if widgetclass in [QSpinBox, QDoubleSpinBox]:
+		setter = widget.setValue
+		changer = widget.valueChanged.connect
+		getter = widget.value
+	elif widgetclass == QCheckBox:
+		setter = widget.setChecked
+		changer = widget.stateChanged.connect
+		getter = widget.isChecked
+	elif widgetclass == QPlainTextEdit:
+		setter = widget.setPlainText
+		changer = widget.textChanged.connect
+		getter = widget.toPlainText
+	elif widgetclass == QLineEdit:
+		setter = widget.setText
+		changer = widget.textChanged.connect
+		getter = widget.text
+	elif widgetclass == QAction:
+		setter = widget.setChecked
+		changer = widget.triggered.connect
+		getter = widget.isChecked
+	elif widgetclass == QPushButton:
+		setter = widget.setDefault
+		changer = widget.clicked.connect
+		getter = widget.isDefault
+	elif widgetclass == QToolButton:
+		setter = widget.setChecked
+		changer = widget.clicked.connect
+		getter = widget.isChecked
+	elif widgetclass == QComboBox:
+		setter = widget.setCurrentText
+		changer = widget.currentTextChanged.connect
+		getter = widget.currentText
+	else:
+		return widget
+
+	if "value" in kwargs:
+		setter(kwargs["value"])
+	if config_key:
+		setter(config[config_key])
+		changer(lambda x=None, key=config_key: config.__setitem__(key, getter(), widget))
+		config.register_widget(config_key, widget, lambda: setter(config[config_key]))
+	if "change" in kwargs:
+		changer(kwargs["change"])
+	if "changes" in kwargs:
+		for change in kwargs["changes"]:
+			changer(change)
+
+	return widget
+
+def bin_data(dataframe, binwidth, range):
+	length = len(dataframe)
+	
+	dataframe.loc[:,"bin"] = (dataframe.loc[:,"x"]-range[0]) // binwidth
+
+	# For assignments (lin_df) as they do not have an intensity
+	if "y" not in dataframe:
+		dataframe = dataframe.loc[dataframe.drop_duplicates(("bin", "filename"), keep="last").sort_values(["x"]).index]
+	else:
+		dataframe = dataframe.loc[dataframe.sort_values("y").drop_duplicates(("bin", "filename"), keep="last").sort_values(["x"]).index]
+	return(dataframe)
+
+def llwpfile(extension=""):
+	home = os.path.expanduser("~")
+	llwpfolder = os.path.join(home, ".llwp")
+	
+	if not os.path.isdir(llwpfolder):
+		os.mkdir(llwpfolder)
+
+	return(os.path.join(llwpfolder, extension))
+
+def exp_to_df(fname, **kwargs):
+	kwargs = {
+		'dtype': np.float64,
+		'sep': '\t',
+		'names': ['x', 'y'],
+		'usecols': [0, 1],
+		'comment': '#',
+		'header': None,
+		'engine': 'c',
+		** kwargs,
+	}
+
+	data = pd.read_csv(fname, **kwargs)
+	data = data.dropna()
+	data['filename'] = pd.Series(fname, index=data.index, dtype='category')
+
+	return(data)
+
+def restart():
+	project_filename = llwpfile('.files')
+	File.save_files(project_filename)
+	mainwindow.closeEvent()
+	NewAssignments.get_instance().save_backup()
+	os.execl(sys.executable, sys.executable, __file__, project_filename)
+
+##
+## Startup
+##
+
+def start():
+	LLWP()
+
+if __name__ == '__main__':
+	start()
+	
+
+##
+## To Do
+##
+
+# - Add back the most important modules
+# 	- Blended Lines Window
+#   - ...
+# - Think about mechanism to group setting_data calls in beginning/ or just skip drawing and draw once everything is set up
+
+# Causes for redrawing
+# - reference series changed
+# - file reloaded
+# - colors changed
+# - visibility changed
+# - x/y-transform changed
+# - file added
+# - file deleted
+# - 
