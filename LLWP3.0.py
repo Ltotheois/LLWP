@@ -189,6 +189,8 @@ class Config(dict):
 		'plot_bins': (4000, int),
 		'plot_skipbinning': (1000, int),
 		'plot_hovercutoff': (20, float),
+		'plot_annotationkwargs': ({"x": 1, "y": 1, "horizontalalignment": "right", "verticalalignment": "top"}, dict),
+		'plot_annotationfstring': ('{x}', str),
 
 		'convolution_kernel': ([], list),
 		'convolution_stepwidth': (0.2, float),
@@ -247,8 +249,8 @@ class Config(dict):
 		'commandlinedialog_commands': ([], list),
 		'commandlinedialog_current': (0, int),
 
-		'closebylines_cattemplate': ('{x:12.4f} {qns} {ylog}', str),
-		'closebylines_lintemplate': ('{x:12.4f} {qns}', str),
+		'closebylines_catfstring': ('{x:12.4f} {qns} {ylog}', str),
+		'closebylines_linfstring': ('{x:12.4f} {qns}', str),
 
 		'residuals_defaultcolor': ("#000000", Color),
 		'residuals_query': ("", str),
@@ -1795,6 +1797,7 @@ class LWPWidget(QGroupBox):
 			self.listener_onclick = self.fig.canvas.mpl_connect('button_press_event', self.on_click)
 			self.listener_onhover = self.fig.canvas.mpl_connect("motion_notify_event", self.on_hover)
 			self.plotcanvas = FigureCanvas(self.fig)
+			self.plotcanvas.contextMenuEvent = self.contextMenuCanvas
 	
 		config.register("plot_dpi", lambda: self.fig.set_dpi(config["plot_dpi"]))
 		
@@ -1964,9 +1967,6 @@ class LWPWidget(QGroupBox):
 			if i_col > n_cols:
 				continue
 
-			# refwidget = tab_widget.widget(i_col)
-			# positions[:, i_col], qns[:, i_col] = refwidget.calc_references(n_rows, n_qns)
-
 			refwidget = tab_widget.widget(i_col)
 			positions[:, i_col], qns[:, i_col] = refwidget.calc_references(n_rows, n_qns)
 		
@@ -2055,6 +2055,37 @@ class LWPWidget(QGroupBox):
 		else:
 			return(self.lwpaxes[0,0])
 
+	def contextMenuCanvas(self, event):
+		x, y = event.x(), event.y()
+		geometry = self.plotcanvas.geometry()
+		width, height = geometry.width(), geometry.height()
+		x_rel, y_rel = x/width, 1 - y/height
+
+		for lwpax in self.lwpaxes.flatten():
+			xmin, ymin, width, height = lwpax.ax.get_position().bounds
+			if xmin <= x_rel <= xmin + width and ymin <= y_rel <= ymin+height:
+				break
+		else: # Clicked outside of ax
+			return
+
+		menu = QMenu(self)
+		get_position_action = menu.addAction('Copy Reference Position')
+		get_qns_action = menu.addAction('Copy QNs')
+		set_active_action = menu.addAction('Make active Ax')
+
+		action = menu.exec(self.mapToGlobal(event.pos()))
+		if action == get_position_action:
+			QApplication.clipboard().setText(str(lwpax.ref_position))
+		elif action == get_qns_action:
+			output_string = []
+			qnus, qnls = lwpax.qns
+			tmp_string = ','.join([f'{qn:3d}' for qn in qnus]) + ' ← ' + ','.join([f'{qn:3d}' for qn in qnls])
+			output_string.append(tmp_string)
+
+			output_string = '\n'.join(output_string)
+			QApplication.clipboard().setText(output_string)
+		elif action == set_active_action:
+			mainwindow.lwpwidget._active_ax_index = (lwpax.row_i, lwpax.col_i)
 
 class LWPAx():
 	fit_vline = None
@@ -2076,7 +2107,7 @@ class LWPAx():
 		
 		# @Luis: Maybe register different span selectors for different mouse buttons, via the button=x keyword
 		with matplotlib_lock:
-			self.span =  matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax: self.on_range(xmin, xmax), 'horizontal', useblit=True)
+			self.span =  matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax: self.on_range(xmin, xmax), 'horizontal', useblit=True, button=1)
 		
 		self.exp_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_exp"])
 		self.cat_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_cat"])
@@ -2218,8 +2249,52 @@ class LWPAx():
 		self.update_annotation()
 
 	def update_annotation(self):
-		# @Luis: Update annotation here
-		pass
+		fstring = config['plot_annotationfstring']
+
+		if not fstring:
+			if self.annotation:
+				self.annotation.remove()
+				self.annotation.set_visible(False)
+				self.annotation = None
+			return
+
+		color = matplotlib.rcParams['text.color']
+
+		if self.qns is not None:
+			qns_dict = self.create_qns_dict()
+			query = ' and '.join([f'({key} == {value})' for key, value in qns_dict.items()])
+			# @Luis: check if we can cache this
+			if query and len(LinFile.get_data().query(query)):
+				color = config["color_lin"]
+		
+			noq = config['series_qns']
+			qnus = [f'qnu{i+1}' for i in range(noq)]
+			qnls = [f'qnl{i+1}' for i in range(noq)]
+
+			qnus_string = ','.join([f'{qns_dict[qn]}' for qn in qnus if qn in qnus])
+			qnls_string = ','.join([f'{qns_dict[qn]}' for qn in qnls if qn in qnls])
+
+			qnstring = f'{qnus_string} ← {qnls_string}'
+		else:
+			qnstring = ''
+
+		width = self.xrange[1] - self.xrange[0]
+
+		vars = {
+			'x': self.ref_position,
+			'qns': qnstring,
+			'width': width,
+		}
+		text = fstring.format(**vars)
+
+		if self.annotation is None:
+			kwargs = config['plot_annotationkwargs']
+			ax = self.ax
+			self.annotation = ax.text(**kwargs, s=text, color=color, transform=ax.transAxes)
+		else:
+			self.annotation.set_text(text)
+			self.annotation.set_color(color)
+
 
 	def set_xticklabels(self):
 		if self.row_i:
@@ -3764,10 +3839,33 @@ class ReferenceSelector(QTabWidget):
 		
 		return(positions, qns)
 
-
 	def changed(self):
 		self.values_changed.emit()
 		mainwindow.lwpwidget.set_data()
+
+	def contextMenuEvent(self, event):
+		menu = QMenu(self)
+		get_positions_action = menu.addAction('Copy Reference Positions')
+		get_qns_action = menu.addAction('Copy Reference QNs')
+
+		action = menu.exec(self.mapToGlobal(event.pos()))
+		if action == get_positions_action:
+			n_rows = config['plot_rows']
+			n_qns = config['series_qns']
+			positions, _ = self.calc_references(n_rows, n_qns)
+			QApplication.clipboard().setText('\n'.join(map(str, positions)))
+		elif action == get_qns_action:
+			n_rows = config['plot_rows']
+			n_qns = config['series_qns']
+			_, qns = self.calc_references(n_rows, n_qns)
+
+			output_string = []
+			for qnus, qnls in qns:
+				tmp_string = ','.join([f'{qn:3d}' for qn in qnus]) + ' ← ' + ','.join([f'{qn:3d}' for qn in qnls])
+				output_string.append(tmp_string)
+
+			output_string = '\n'.join(output_string)
+			QApplication.clipboard().setText(output_string)
 
 class SeriesSelector(QWidget):
 	values_changed = pyqtSignal()
@@ -4450,9 +4548,9 @@ class CloseByLinesWindow(EQDockWidget):
 
 				if type == 'cat':
 					ylog = np.log10(row['y'])
-					text = config['closebylines_cattemplate'].format(qns=qnstring, ylog=ylog, **row)
+					text = config['closebylines_catfstring'].format(qns=qnstring, ylog=ylog, **row)
 				else: # lin
-					text = config['closebylines_lintemplate'].format(qns=qnstring, **row)
+					text = config['closebylines_linfstring'].format(qns=qnstring, **row)
 
 				textrows.append((row['x'], text))
 
@@ -5558,8 +5656,18 @@ if __name__ == '__main__':
 ##
 
 # - Add back the most important modules
+	# - Seriesfinder
+	# - Peakfinder
+	# - Energy Levels
+	# - Create Report
 # - Think about mechanism to group setting_data calls in beginning/ or just skip drawing and draw once everything is set up
-# - Add annotations to plots
+
+# - Files: allow to open files by glob string -> no annoying stuff with subfolders
+# - Files: maybe also custom transformations -> change some quantum numbers if needed
+
+# - maybe build something like a command palette
+
+
 
 # Causes for redrawing
 # - reference series changed
