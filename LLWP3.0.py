@@ -202,7 +202,7 @@ class Config(dict):
 		'series_currenttab': (0, int),
 		'series_references': ([], list),
 		'series_blendwidth': (0, float),
-		'series_qns': (4, float),
+		'series_qns': (4, int),
 		'series_blendminrelratio': (0, float),
 
 		'fit_fitmethod': ('Pgopher', str),
@@ -257,6 +257,19 @@ class Config(dict):
 		'residuals_yvariable': ("", str),
 		'residuals_autoscale': (True, bool),
 		'residuals_blends': (False, bool),
+
+		'blendedlines_lineshape': ("Gauss", str),
+		'blendedlines_derivative': (0, int),
+		'blendedlines_transparency': (0.2, float),
+		'blendedlines_maxfwhm': (10, float),
+		'blendedlines_polynom': (0, int),
+		'blendedlines_fixedwidth': (False, bool),
+		'blendedlines_showbaseline': (True, bool),
+		'blendedlines_xpoints': (1000, int),
+		'blendedlines_color_total': ("#3d5dff", Color),
+		'blendedlines_color_points': ("#ff3352", Color),
+		'blendedlines_color_baseline': ("#f6fa14", Color),
+		'blendedlines_autopositionpeaks': (True, bool),
 
 	}
 
@@ -425,20 +438,17 @@ class Geometry():
 		if geometry:
 			widget.setGeometry(geometry)
 
-class ProtPlot(QWidget):
+class PlotWidget(QWidget):
 	request_redraw = pyqtSignal()
 
 	def __init__(self, parent=None):
 		super().__init__(parent)
 
 		self.parent = parent
-		self.shortcuts()
-		self.from_current_plot()
-
-		self.from_current_plot(update=False)
 		self.gui()
-
+		self.from_current_plot()
 		self.span_selector = matplotlib.widgets.SpanSelector(self.ax, self.on_range, 'horizontal', useblit=True)
+		self.shortcuts()
 
 	def gui(self):
 		layout = QVBoxLayout()
@@ -453,7 +463,7 @@ class ProtPlot(QWidget):
 		tmp_layout.addStretch()
 		tmp_layout.addWidget(QQ(QPushButton, text="From Current Plot", change=lambda x: self.from_current_plot()))
 
-		self.fig = figure.Figure(dpi=config["plot_dpi"])
+		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
 		self.plot_canvas = FigureCanvas(self.fig)
 		layout.addWidget(self.plot_canvas, 6)
 		layout.addStretch()
@@ -462,7 +472,7 @@ class ProtPlot(QWidget):
 
 		self.exp_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_exp"])
 		self.cat_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_cat"])
-		self.lin_coll = ax.scatter([], [], color=config['color_ref'], marker="*", zorder=100)
+		self.lin_coll = self.ax.scatter([], [], color=config['color_ref'], marker="*", zorder=100)
 		self.ax.add_collection(self.exp_coll)
 		self.ax.add_collection(self.cat_coll)
 
@@ -476,6 +486,8 @@ class ProtPlot(QWidget):
 		self.update_plot()
 
 	def update_plot(self):
+		scaling = config['plot_yscale']
+	
 		# Exp Data
 		exp_df = ExpFile.get_data(xrange=self.xrange, binning=True)
 		self.exp_xs = xs = exp_df["x"].to_numpy()
@@ -490,7 +502,7 @@ class ProtPlot(QWidget):
 			tmp_xs, tmp_ys = xs[mask], ys[mask]
 
 			colors.append( exp_df.loc[mask, 'color'].values )
-			if cls.ids[unique_filename].is_stickspectrum:
+			if ExpFile.ids[unique_filename].is_stickspectrum:
 				segs.append( np.array(((tmp_xs, tmp_xs), (np.zeros(tmp_ys.shape), tmp_ys))).T )
 			else:
 				segs.append( np.array(((tmp_xs[:-1], tmp_xs[1:]), (tmp_ys[:-1], tmp_ys[1:]))).T )
@@ -545,15 +557,12 @@ class ProtPlot(QWidget):
 			segs = np.array(((xs, xs), (ys*0, ys))).T
 			colors = cat_df['color'].to_numpy()
 
-			mask = (xs == self.ref_position)
-			colors[mask] = config['color_ref']
-
 		self.cat_coll.set(segments=segs, colors=colors)
 
 		# Lin Data
 		lin_df = LinFile.get_data(xrange=self.xrange, binning=True)
 		self.lin_xs = xs = lin_df["x"].to_numpy()
-		tuples = map(lambda x: (x, 0), xs)
+		tuples = [(x, 0) for x in xs]
 		tuples = tuples if len(tuples)!=0 else [[None,None]]
 		colors = lin_df['color'].to_numpy()
 
@@ -573,7 +582,7 @@ class ProtPlot(QWidget):
 		yrange = [yrange[0]-margin*(yrange[1]-yrange[0]), yrange[1]+margin*(yrange[1]-yrange[0])]
 		if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
 			yrange = [-1,+1]
-		ax.set_ylim(yrange)
+		self.ax.set_ylim(yrange)
 
 		self.request_redraw.emit()
 
@@ -620,7 +629,7 @@ class ProtPlot(QWidget):
 			xmin, xmax = tmp_ax.xrange
 			new_center = (xmax + xmin)/2
 
-			self.range = (new_center - curr_width/2, new_center + curr_width/2)
+			self.xrange = (new_center - curr_width/2, new_center + curr_width/2)
 			self.update_plot()
 
 	def wheelEvent(self,event):
@@ -641,15 +650,16 @@ class ProtPlot(QWidget):
 			"Shift+d": lambda: self.move_plot("sright"),
 			
 			# We cannot use shortcuts that are also used in the menu bar here, as these are global shortcuts on MacOS, as the MenuBar is always active
-			"Alt+w": lambda: self.change_index(0, -1),
-			"Alt+s": lambda: self.change_index(0, +1),
+			"Alt+w": lambda: self.change_index(0, +1),
+			"Alt+s": lambda: self.change_index(0, -1),
 			"Alt+a": lambda: self.change_index(1, -1),
 			"Alt+d": lambda: self.change_index(1, +1),
 		}
 
-
-		for keys, function in shortcuts_dict.items():
-			QShortcut(keys, self.parent).activated.connect(function)
+		for key, function in shortcuts_dict.items():
+			tmp = QShortcut(key, self.parent)
+			tmp.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+			tmp.activated.connect(function)
 
 	def on_range(self, xmin, xmax):
 		self.xrange = (xmin, xmax)
@@ -853,7 +863,11 @@ class EQDockWidget(QDockWidget, metaclass=EQDockWidgetMeta):
 		else:
 			mainwindow.addDockWidget(Qt.DockWidgetArea(self.default_position), self)
 		self.setVisible(self.default_visible)
-		QShortcut("Esc", self).activated.connect(self.close)
+		
+		tmp = QShortcut("Esc", self)
+		tmp.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+		tmp.activated.connect(self.close)
+		
 
 	def moveEvent(self, *args, **kwargs):
 		Geometry.save_widget_geometry(self)
@@ -873,6 +887,7 @@ class EQDockWidget(QDockWidget, metaclass=EQDockWidgetMeta):
 			self.move(primary_screen.geometry().center()- self.rect().center())
 		
 		return(super().show(*args, **kwargs))
+
 
 class QDialog(QDialog):
 	def __init__(self, *args, **kwargs):
@@ -938,6 +953,7 @@ class File():
 		self.ids[self.filename_abs] = self
 
 		self.gui_widgets = {}
+		self.more_settings_dialog = None
 		self._color = None
 		self._is_visible = None
 		self.set_default_values(default_values)
@@ -949,7 +965,6 @@ class File():
 			FileWindow._instance.fileaddition_requested.emit(self.__class__, self.filename_abs)
 		self.is_initialized = True
 
-	# @Luis: Think where the x-column is changed -> Resort
 	def set_default_values(self, default_values={}):
 		self.color = default_values.get('color', config[self.default_color_key])
 		self.color_query = default_values.get('color_query')
@@ -957,6 +972,9 @@ class File():
 		self.is_visible = default_values.get('visible', True)
 		self.xtransformation = default_values.get('xtransformation')
 		self.ytransformation = default_values.get('ytransformation')
+		
+		if hasattr(self, 'is_stickspectrum'):
+			self.is_stickspectrum = default_values.get('is_stickspectrum', False)
 
 	def apply_all(self):
 		self.apply_color()
@@ -994,7 +1012,7 @@ class File():
 		mask = (df['filename'] == self.filename_abs)
 		xs = df.loc[mask, 'x']
 		self.xmin, self.xmax = xs.min(), xs.max()
-		notify_info.emit(f"Succesfully loaded '{self.basename}'")
+		notify_info.emit(f"Successfully loaded '{self.filename_abs}'")
 	
 	def to_dict(self):
 		dict_ = {
@@ -1006,6 +1024,8 @@ class File():
 			'xtransformation': self.xtransformation,
 			'ytransformation': self.ytransformation,
 		}
+		if hasattr(self, 'is_stickspectrum'):
+			dict_['is_stickspectrum'] = self.is_stickspectrum
 		return(dict_)
 
 	@classmethod
@@ -1015,7 +1035,7 @@ class File():
 			return
 
 		cls.save_files(savepath)
-		notify_info(f'Saved the current files as project \'{savepath}\'.')
+		notify_info.emit(f'Saved the current files as project \'{savepath}\'.')
 
 	@classmethod
 	def save_files(cls, filename):
@@ -1035,9 +1055,8 @@ class File():
 		
 		thread = cls.load_files(filename)
 		thread.wait()
-		notify_info(f'Loaded the project \'{filename}\'.')
+		notify_info.emit(f'Loaded the project \'{filename}\'.')
 
-	
 	@classmethod
 	@QThread.threaded_d
 	def load_files(cls, filename, thread=None):
@@ -1055,6 +1074,7 @@ class File():
 		
 		for thread_ in threads:
 			thread_.wait()
+		
 		
 	@classmethod
 	def get_data(cls, xrange=None, binning=False):
@@ -1143,11 +1163,11 @@ class File():
 		for thread_ in threads:
 			thread_.wait()
 
-		threads = (File.load_files(project) for project in files_by_type['project'])
+		threads = (File.load_files(project) for project in files_by_type.get('project', []))
 		for thread_ in threads:
 			thread_.wait()
-
-		# @Luis: Call update function after files are loaded
+		
+		CatFile.check_series_qns()
 
 	@classmethod
 	def gui_settings_general(cls):
@@ -1200,7 +1220,7 @@ class File():
 			'toggle_visibility': QQ(QToolButton, text=toggle_text, change=self.gui_toggle_visbility),
 			'settings_dialog': QQ(QToolButton, text='⚙', change=self.gui_more_settings_dialog),
 			'reread': QQ(QToolButton, text='⟲', change=lambda x: self.load_file()),
-			'delete': QQ(QToolButton, text='×', change=lambda x: self.delete()),
+			'delete': QQ(QToolButton, text='×', change=lambda x: self.gui_delete()),
 		}
 
 		for widget in self.gui_widgets.values():
@@ -1210,7 +1230,7 @@ class File():
 		return(widgets.values())
 		
 	def gui_more_settings_dialog(self):
-		FileAdditionalSettingsDialog.show_dialoag(self)
+		self.more_settings_dialog = FileAdditionalSettingsDialog.show_dialoag(self)
 			
 	@classmethod
 	def gui_change_color_all(cls, argument):
@@ -1264,7 +1284,6 @@ class File():
 	def reread_all(cls):
 		if cls == File:
 			for subcls in cls.__subclasses__():
-				print(subcls.__name__)
 				subcls.reread_all()
 		else:
 			for file in cls.ids.values():
@@ -1277,8 +1296,9 @@ class File():
 	
 	@classmethod
 	def delete_all(cls):
-		for file in reversed(cls.ids.values()):
-			file.load_file()
+		for file in list(cls.ids.values()):
+			file.delete()
+		mainwindow.lwpwidget.set_data()
 	
 	@classmethod
 	def toggle_all(cls):
@@ -1369,12 +1389,22 @@ class File():
 	def apply_ytransformation(self):
 		self.apply_transformation('y', self.ytransformation, 'y0')
 
+	def gui_delete(self):
+		self.delete()
+		mainwindow.lwpwidget.set_data()
 
 	def delete(self):
+		# Delete row from files window
 		for widget in self.gui_widgets.values():
 			widget.setParent(None)
 		self.gui_widgets = None
+		
+		# Close/delete file
+		dialog = self.more_settings_dialog
+		if dialog and dialog.isVisible():
+			dialog.done(0)
 
+		# Delete data from class dataframe
 		with self.lock:
 			df = self.__class__.df
 			mask = df[df['filename'] == self.filename_abs].index
@@ -1425,6 +1455,24 @@ class CatFile(File):
 	@decorator.d
 	def apply_xtransformation(self, *args, **kwargs):
 		return(super().apply_xtransformation(*args, **kwargs))
+
+	@classmethod
+	def check_series_qns(cls):
+		df = cls.df
+		
+		if not len(df):
+			return
+		
+		qnu_labels = [f'qnu{i+1}' for i in range(6)]
+		noq = len(qnu_labels)
+		for i, qnu_label in enumerate(qnu_labels):
+			unique_values = df[qnu_label].unique()
+			if len(unique_values) == 1 and unique_values[0] == pyckett.SENTINEL:
+				noq = i
+				break
+		
+		config['series_qns'] = noq
+		notify_info.emit(f'After analysing your cat files the number of QNs was set to {noq}.')
 
 class LinFile(File):
 	ids = {}
@@ -1477,7 +1525,6 @@ class ExpFile(File):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.is_stickspectrum = False
-		# @Luis: Add a function for this to more settings dialog
 	
 	@QThread.threaded_d
 	@status_d
@@ -1624,7 +1671,6 @@ class NewAssignments(LinFile):
 			else:
 				file.write(pyckett.df_to_lin(df))
 
-# @Luis: Update dialog entries when changed in file
 class FileAdditionalSettingsDialog(QDialog):
 	open_dialogs = {}
 
@@ -1633,11 +1679,12 @@ class FileAdditionalSettingsDialog(QDialog):
 		if file in cls.open_dialogs:
 			dialog = cls.open_dialogs[file]
 			dialog.done(0)
-		
+			return
 		else:
 			dialog = cls(file)
 			cls.open_dialogs[file] = dialog
 			dialog.show()
+			return(dialog)
 	
 	def __init__(self, file):
 		super().__init__()
@@ -1685,6 +1732,11 @@ class FileAdditionalSettingsDialog(QDialog):
 
 			self.layout.addLayout(tmp_layout)
 			self.layout.addWidget(tmp['widget'])
+		
+		if hasattr(self.file, 'is_stickspectrum'):
+			tmp_widget = QQ(QCheckBox, text='Is Stick Spectrum: ', change=self.update_stickspectrum)
+			self.widgets['is_stickspectrum'] = tmp_widget
+			self.layout.addWidget(tmp_widget)
 
 		self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
 		self.button_box.rejected.connect(lambda: self.done(0))
@@ -1714,6 +1766,12 @@ class FileAdditionalSettingsDialog(QDialog):
 		color_query = self.widgets['color_query']['widget'].toPlainText()
 		file.color_query = color_query
 		file.apply_color()
+	
+	def update_stickspectrum(self, _):
+		file = self.file
+		is_stickspectrum = self.widgets['is_stickspectrum'].isChecked()
+		file.is_stickspectrum = is_stickspectrum
+		mainwindow.lwpwidget.set_data()
 
 	def on_exit(self, _):
 		del self.__class__.open_dialogs[self.file]
@@ -1744,7 +1802,6 @@ class LWPWidget(QGroupBox):
 		self.plotcanvas.setMinimumWidth(200)
 		
 		self.drawplot.connect(self.draw_canvas)
-		# @Luis: Add here list of additional stuff
 		config.register(('plot_width', 'plot_widthexpression', 'plot_offset', 'plot_offsetexpression', 'plot_offsetisrelative', "series_annotate_xs", "plot_annotate", "plot_bins", "flag_automatic_draw"), lambda: self.set_data())
 
 		self.mpltoolbar = NavigationToolbar2QT(self.plotcanvas, self)
@@ -1815,8 +1872,9 @@ class LWPWidget(QGroupBox):
 	def on_click(self, event):
 		ax = event.inaxes
 		index = np.asarray(np.where(self.axes  == ax)).T
+		
 		if len(index):
-			self._active_ax_index = tuple(index[0])
+			self.__class__._active_ax_index = tuple(index[0])
 
 	def on_hover(self, event):
 		x = event.xdata
@@ -1832,6 +1890,11 @@ class LWPWidget(QGroupBox):
 
 			CloseByLinesWindow._instance.cursor_changed.emit(x, y)
 		mainwindow.statusbar.position_label.setText(text_cursor)
+
+	def wheelEvent(self,event):
+		steps = event.angleDelta().y() // 120
+		factor = 2**(-steps)
+		WidthDialog.gui_set_width(factor)
 
 	@QThread.threaded_d
 	@lock_d(matplotlib_lock)
@@ -1860,33 +1923,6 @@ class LWPWidget(QGroupBox):
 
 		self.set_data()
 		self.plotscreated.emit()
-
-		# if not hasattr(ReferenceSeriesWindow, '_instance'):
-		# 	return
-
-		# tab_widget = ReferenceSeriesWindow._instance.tab
-		# n_widgets = tab_widget.count()
-		# for i_col in range(n_widgets):
-		# 	if i_col > n_cols:
-		# 		continue
-
-		# 	thread.earlyreturn()
-		# 	refwidget = tab_widget.widget(i_col)
-		# 	refs, qns = refwidget.calc_references()
-		# 	thread.earlyreturn()
-		# 	mainwindow.lwpwidget.set_column_references(i_col, refs, qns)
-
-		# thread.earlyreturn()
-
-		# for i_col in range(n_widgets, n_cols):
-		# 	mainwindow.lwpwidget.set_column_references(i_col, refs, qns)
-
-		# thread.earlyreturn()
-		# # @Luis: Manage the repushing of references from here
-		# # - Get references for all available ReferenceSelectors
-		# # - Use from the last also for all others
-		# # - Call set_column_references in a loop for the columns
-		# self.plotscreated.emit()
 	
 	def calculate_widths(self):
 		expression = config['plot_widthexpression']
@@ -1992,7 +2028,10 @@ class LWPWidget(QGroupBox):
 		thread.earlyreturn()
 
 		# Set the correct values to the LWPAxes
-		# @Luis: Check here, that we are in sync with create plots
+		if self.lwpaxes.shape != (n_rows, n_cols):
+			notify_error.emit('Shape of LWPAxes is out of sync with requested values.')
+			return
+		
 		threads = []
 		for i_row in range(n_rows):
 			for i_col in range(n_cols):
@@ -2017,33 +2056,6 @@ class LWPWidget(QGroupBox):
 			return(self.lwpaxes[0,0])
 
 
-	# @drawplot_decorator.d
-	# def set_column_references(self, i_col, refs, qns):
-	# 	if not (0 <= i_col < config['plot_cols']):
-	# 		return
-	
-	# 	# @Luis: Better way to get widths here -> also allow for dynamic widths
-	# 	widths = config['plot_width']
-	# 	offsets = config['plot_offset']
-
-	# 	if qns is None:
-	# 		qns = [None] * len(refs)
-		
-	# 	xmins, xmaxs = refs + offsets - widths/2, refs + offsets + widths/2
-	# 	min_indices, max_indices = {}, {}
-	# 	for label, cls in {'exp': ExpFile, 'cat': CatFile, 'lin': LinFile}.items():
-	# 		min_indices[label], max_indices[label] = cls.xs_to_indices(xmins, xmaxs)
-
-	# 	threads = []
-	# 	column_axes = self.lwpaxes[:, i_col]
-	# 	for i_row, (ref_pos, lwpax, xmin, xmax) in enumerate(zip(refs, column_axes, xmins, xmaxs)):
-	# 		lwpax.ref_position = ref_pos
-	# 		lwpax.xrange = (xmin, xmax)
-	# 		lwpax.qns = None if qns is None else qns[i_row]
-	# 		lwpax.indices = {label: (min_indices[label][i_row], max_indices[label][i_row]) for label in ('exp', 'cat', 'lin')}
-	# 		threads.append(lwpax.update())
-	# 	[thread.wait() for thread in threads ]
-
 class LWPAx():
 	fit_vline = None
 	fit_curve = None
@@ -2057,7 +2069,7 @@ class LWPAx():
 		self.col_i = col_i
 		
 		self.ref_position = None
-		self.xrange = None
+		self.xrange = (-1, 1)
 		self.indices = None
 		self.annotation = None
 		self.qns = None
@@ -2203,6 +2215,11 @@ class LWPAx():
 		if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
 			yrange = [-1,+1]
 		ax.set_ylim(yrange)
+		self.update_annotation()
+
+	def update_annotation(self):
+		# @Luis: Update annotation here
+		pass
 
 	def set_xticklabels(self):
 		if self.row_i:
@@ -2226,8 +2243,7 @@ class LWPAx():
 		ax.set_xticklabels(ticklabels)
 
 	def on_range(self, xmin, xmax):
-		# @Luis: Come back here; Problem when self.xrange is None
-		xmin_ax, xmax_ax = self.xrange if self.xrange is not None else (-np.inf, +np.inf)
+		xmin_ax, xmax_ax = self.xrange
 		if xmax == xmin or xmax > xmax_ax or xmin < xmin_ax:
 			return
 
@@ -2296,14 +2312,12 @@ class LWPAx():
 		new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
 		
 		self.check_blends(new_assignment)
-
-		# @Luis: change annotation color, add color and offset for lin_coll 
 		NewAssignments.get_instance().add_row(new_assignment)
 
 	def fit_peak(self, xmin, xmax):
 		indices_exp = self.indices.get('exp')
 		if not indices_exp:
-			raise GUIAbortedError
+			raise GUIAbortedError('No Experimental Indices available.')
 		
 		df = ExpFile.df.iloc[indices_exp[0]:indices_exp[1]]
 		df = df.query(f'(visible) and x < @xmax and x > @xmin').copy()
@@ -2314,10 +2328,9 @@ class LWPAx():
 		peakdirection = config['fit_peakdirection']
 		fitmethod = config['fit_fitmethod']
 
-		# @Luis: Check if pgopher works with a single point
-		if (len(exp_xs) < 2) and fitmethod != 'Pgopher':
+		if (len(exp_xs) == 0) or ((len(exp_xs) < 2) and fitmethod != 'Pgopher'):
 			notify_error.emit('The data could not be fit as there were too few points selected.')
-			return CustomError('The data could not be fit as there were too few points selected.')
+			raise GUIAbortedError('The data could not be fit as there were too few points selected.')
 
 		try:
 			function_to_call = {
@@ -2381,14 +2394,6 @@ class LWPAx():
 		AssignBlendsDialog.show_dialog(new_assignment, entries)
 		raise GUIAbortedError
 
-	# @Luis:
-	# - If ref_position, width, or offset change, we have to recalculate the xrange and set the limits accordingly
-	# - If annotation changes we have to set the annotation properly
-	# - we should think about caching some of this stuff here
-	# - think about providing indices from some higher instance function -> possible to have speed gains with numpy
-	# search sorted
-	# - think about keeping twice the width in memory -> simpe zoom in is almost instantaneous
-
 class MainWindow(QMainWindow):
 	notify_info = pyqtSignal(str)
 	notify_warning = pyqtSignal(str)
@@ -2404,7 +2409,6 @@ class MainWindow(QMainWindow):
 		self.setWindowTitle(APP_TAG)
 		self.setAcceptDrops(True)
 		Geometry.load_widget_geometry(self)
-		# @Luis: Shortctuts
 		
 		try:
 			# Set LLWP logo as icon
@@ -2460,7 +2464,6 @@ class MainWindow(QMainWindow):
 			"Shift+a": lambda: OffsetDialog.gui_set_offset("-"),
 			"Shift+d": lambda: OffsetDialog.gui_set_offset("+"),
 
-			"Ctrl+k": lambda: ConsoleDialog.show_dialog(),
 			"Ctrl+Shift+k": lambda: ConsoleDialog.run_current_command(),
 
 			"Ctrl+Alt+f": lambda: CloseByLinesWindow._instance.toggle_text_is_frozen(),
@@ -2470,7 +2473,9 @@ class MainWindow(QMainWindow):
 
 
 		for keys, function in shortcuts_dict.items():
-			QShortcut(keys, self).activated.connect(function)
+			tmp = QShortcut(keys, self)
+			tmp.activated.connect(function)
+			tmp.setContext(Qt.ShortcutContext.WidgetShortcut)
 
 	def togglefullscreen(self):
 		if self.isFullScreen():
@@ -2576,6 +2581,7 @@ class Menu():
 			),
 			'Modules': (
 				ResidualsWindow._instance.toggleViewAction(),
+				BlendedLinesWindow._instance.toggleViewAction(),
 			),
 			'Info': (
 				QQ(QAction, parent=parent, text="&Send Mail to Author", tooltip="Send a mail to the developer", change=lambda x: self.send_mail_to_author()),
@@ -2626,7 +2632,7 @@ class Menu():
 				config["plot_rows"] = int(resp[0])
 				config["plot_cols"] = int(resp[1])
 		except ValueError:
-			notify_warning("The entered value was not understood.")
+			notify_warning.emit("The entered value was not understood.")
 			return
 		
 	def send_mail_to_author(self):
@@ -2996,7 +3002,7 @@ class ConsoleDialog(QDialog):
 		self.tabs.tabBarDoubleClicked.connect(self.renameoradd_tab)
 		self.tabs.setCurrentIndex(config['commandlinedialog_current'])
 
-		layout = QVBoxLayout()
+		layout = QVBoxLayout(margin=True)
 		self.setLayout(layout)
 
 		layout.addWidget(self.tabs)
@@ -3210,6 +3216,99 @@ class OffsetDialog(QDialog):
 			offset += value
 
 		config['plot_offset'] = offset
+
+class QNsDialog(QDialog):
+	_instance = None
+	
+	def __init__(self, frequency):
+		super().__init__()
+
+		if self._instance:
+			self._instance.done(0)
+		self.__class__._instance = self
+
+		noq = config["series_qns"]
+		visible_qn_labels = [f'qn{ul}{n+1}' for ul in ('u', 'l') for n in range(noq)]
+		self.result_ = {key: pyckett.SENTINEL for key in visible_qn_labels}
+
+
+		self.setWindowTitle(f"Choose QNs for transition at {frequency}")
+		self.frequency = frequency
+
+		layout = QVBoxLayout()
+		self.setLayout(layout)
+		layout.addWidget(QQ(QLabel, wordwrap=True, text="Enter the quantum numbers in the input fields or choose one of the transitions from the table."))
+		layout.addSpacing(10)
+
+		self.sbs = {}
+		qnslayout = QGridLayout()
+		for i in range(noq):
+			widget = QQ(QSpinBox, value=0, range=(0, None))
+			qnslayout.addWidget(widget, 1, i)
+			self.sbs[f"qnu{i+1}"] = widget
+
+		for i in range(noq):
+			widget = QQ(QSpinBox, value=0, range=(0, None))
+			qnslayout.addWidget(widget, 2, i)
+			self.sbs[f"qnl{i+1}"] = widget
+
+		for i in range(noq):
+			lab = QLabel(f"QN {i+1}")
+			qnslayout.addWidget(QQ(QLabel, text=f"QN{i+1}"), 0, i)
+
+		qnslayout.setColumnStretch(7, 1)
+		layout.addLayout(qnslayout)
+
+		tmp = ["dist", "x", "log y"]
+		cols = tmp + visible_qn_labels
+		table = QTableWidget()
+		table.setColumnCount(len(cols)+1)
+		table.setHorizontalHeaderLabels(["Assign"] + cols)
+		table.setRowCount(0)
+		table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+		tmp_df = CatFile.get_data().copy()
+		tmp_df["dist"] = tmp_df["x"] - frequency
+		tmp_df["log y"] = np.log10(tmp_df["y"])
+		tmp_df["absdist"] = abs(tmp_df["dist"])
+		tmp_df.sort_values(by=["absdist"], inplace=True)
+		tmp_df.reset_index(drop=True, inplace=True)
+
+		for i, row in tmp_df.head(100).iterrows():
+			currRowCount = table.rowCount()
+			table.insertRow(currRowCount)
+			for j, col in enumerate(cols):
+				val = f'{row[col]:{config["flag_xformatfloat"]}}'.rstrip("0").rstrip(".")
+				table.setItem(currRowCount, j+1, QTableWidgetItem(val))
+			tmp_dict = {key: row[key] for key in visible_qn_labels}
+			tmp_dict["xpre"] = row["x"]
+			table.setCellWidget(currRowCount, 0, QQ(QPushButton, text="Assign", change=lambda x, tmp_dict=tmp_dict: self.table_save(tmp_dict)))
+
+		table.resizeColumnsToContents()
+		layout.addWidget(table)
+
+		buttons = QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+		buttonBox = QDialogButtonBox(buttons)
+		buttonBox.accepted.connect(lambda: self.selector_save(1))
+		buttonBox.rejected.connect(lambda: self.done(0))
+		layout.addWidget(buttonBox)
+
+	def table_save(self, tmpd):
+		self.result_.update(tmpd)
+		self.done(1)
+
+	def selector_save(self, val):
+		tmp_dict = {key: sb.value() for key, sb in self.sbs.items()}
+		tmp_dict["xpre"] = self.frequency
+		self.result_.update(tmp_dict)
+		self.done(val)
+
+	def on_exit(self):
+		self.__class__._instance = None
+	
+	def save(self):
+		return(self.result_)
+
 
 ##
 ## Additional Winodws
@@ -3558,7 +3657,6 @@ class ReferenceSelector(QTabWidget):
 			# Add condition for limiting to specific file
 			file_to_limit_data_to = state.get('file')
 			if file_to_limit_data_to:
-				# @Luis: Test that this is actually working
 				conditions.append('(filename == @file_to_limit_data_to)')
 			
 			conditions = " and ".join(conditions)
@@ -3602,7 +3700,6 @@ class ReferenceSelector(QTabWidget):
 
 
 			if ';'in expression: # expression gives QNs
-				cat_df = CatFile.df
 				expressions = [expr.strip() for expr in expression.split(';') if expr.strip()]
 				if len(expressions) % 2 != 0:
 					raise CustomError('Error with the provided expression. Number of subexpressions has to be even.')
@@ -3618,7 +3715,6 @@ class ReferenceSelector(QTabWidget):
 					raise
 
 				# Prefilter predictions to used series
-
 				diff_qns = np.diff(np.array(rows_qns), axis=0)
 				diffs = [np.unique(col) for col in diff_qns.T]
 				qnus, qnls = np.split(np.array(rows_qns[0]), 2)
@@ -3642,14 +3738,14 @@ class ReferenceSelector(QTabWidget):
 					conditions.append(" == ".join(conditions_incr))
 
 				conditions = " and ".join(conditions)
-				cat_df = cat_df.query(conditions)
-
-
+				
 				# @Luis:
 				# - write custom cache for cat.query functions -> queries are normalized now
+				cat_df = CatFile.df
+				cat_df = cat_df.query(conditions)
 
+				# Get the exact predictions from prefiltered dataframe
 				qn_labels = [f'qn{ul}{i+1}' for ul in ('u', 'l') for i in range(n_qns)]
-
 				for i_row, row_qns in enumerate(rows_qns):
 					query = " and ".join([f'({label} == {qn})' for qn, label in zip(row_qns, qn_labels) ])
 					vals = cat_df.query(query)["x"].to_numpy()
@@ -3919,9 +4015,9 @@ class LogWindow(EQDockWidget):
 		self.log_area.setReadOnly(True)
 		self.log_area.setMinimumHeight(50)
 
-		notify_error.connect(lambda x: self.writelog('x', style='error'))
-		notify_warning.connect(lambda x: self.writelog('x', style='warning'))
-		notify_info.connect(lambda x: self.writelog('x', style='info'))
+		notify_error.connect(lambda x: self.writelog(x, style='error'))
+		notify_warning.connect(lambda x: self.writelog(x, style='warning'))
+		notify_info.connect(lambda x: self.writelog(x, style='info'))
 
 		layout.addWidget(self.log_area)
 
@@ -4379,14 +4475,6 @@ class CloseByLinesWindow(EQDockWidget):
 		text = 'Text is frozen' if self._text_is_frozen else 'Text is unfrozen'
 		self.text_is_frozen_label.setText(text)
 
-
-	# @Luis: The idea would be to show what data is close to the cursor
-	# make format similar to cat and lin format and show ordered by frequency
-	# allow to freeze the content, for easy copying
-
-	# Allow to quickly set range and allow to quickly change if 
-	# reference position should be cursor, or any of the plots
-
 class ConfigWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
@@ -4677,10 +4765,12 @@ class ResidualsWindow(EQDockWidget):
 				mainwindow.raise_()
 				mainwindow.activateWindow()
 
-# @Luis: continue here
 class BlendedLinesWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
+
+	set_indicator_text = pyqtSignal(str)
+	fill_table_requested = pyqtSignal()
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -4690,233 +4780,62 @@ class BlendedLinesWindow(EQDockWidget):
 		self.fit_values = None
 		self.cid = None
 
-		class CustomPlotWidget(ProtPlot):
-
+		mainwidget = QWidget()
+		self.setWidget(mainwidget)
+		layout = QVBoxLayout(margin=True)
+		mainwidget.setLayout(layout)
+		
+		class CustomPlotWidget(PlotWidget):
+			update_plot_requested = pyqtSignal()
+			
 			def gui(self):
 				super().gui()
-				self.fit_line = self.ax.plot([], [], color = main.config["blendedlineswindow_color_total"])[0]
-				self.cat_line = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), color=main.config["color_cat"])
-				self.ax.add_collection(self.cat_line)
-
+				self.fit_line = self.ax.plot([], [], color = config['blendedlines_color_total'])[0]
 				self.plot_parts = []
-
-			@synchronized_d(locks["fitting"])
-			def fit_peaks(self):
-				with locks["currThread"]:
-					ownid = threading.current_thread().ident
-
-				try:
-					main.signalclass.fitindicator.emit("<span style='color:#eda711;'>Working ...</span>")
-					peaks = self.parent.peaks.copy()
-					profile = main.config["blendedlineswindow_lineshape"]
-					derivative = main.config["blendedlineswindow_derivative"]
-					polynomrank = main.config["blendedlineswindow_polynom"]+1
-					fixedwidth = main.config["blendedlineswindow_fixedwidth"]
-					amplitude_direction = main.config["fit_amplitudedirection"]
-					now = 2 if profile == "Voigt" else 1
-					noa = 2 + now * (not fixedwidth)
-
-					fitfunction = lambda x, *args, fixedwidth=fixedwidth: self.parent.fitfunction(x, profile, derivative, polynomrank, *args, fixedwidth=fixedwidth)
-					fitfunction_withoutbaseline = lambda x, *args, fixedwidth=fixedwidth: self.parent.fitfunction(x, profile, derivative, 0, *args, fixedwidth=fixedwidth)
-
-					for part in self.plot_parts:
-						part.remove()
-					self.plot_parts = []
-
-					xrange = [self.center-self.width/2, self.center+self.width/2]
-
-					earlyreturn(ownid, self.fit_thread_id)
-
-					df_exp = main.get_visible_data("exp", xrange=xrange)
-					exp_xs = df_exp["x"].to_numpy()
-					exp_ys = df_exp["y"].to_numpy()
-
-					earlyreturn(ownid, self.fit_thread_id)
-
-					df_cat = main.get_visible_data("cat", xrange=xrange)
-					if len(df_cat) != 0:
-						cat_xs = df_cat["x"].to_numpy()
-						cat_ys = df_cat["y"].to_numpy()
-						if len(exp_ys):
-							cat_ys = cat_ys*np.max(exp_ys)/np.max(cat_ys)
-
-						segs = np.array(((cat_xs, cat_xs), (cat_ys*0, cat_ys))).T
-						# segs = (((cat_xs[i],0),(cat_xs[i],cat_ys[i])) for i in range(len(cat_xs)))
-						colors = create_colors(df_cat, main.config["files_cat"])
-						self.cat_line.set(segments=segs, colors=colors)
-
-					earlyreturn(ownid, self.fit_thread_id)
-
-					xs = []
-					ys = []
-					ws = []
-					exp_mean = 0
-					if len(exp_ys) and (polynomrank + len(peaks)):
-						if main.config["blendedlineswindow_autopositionpeaks"]:
-							exp_mean = exp_ys.mean()
-
-						yptp = 4*(np.amax(exp_ys)-np.amin(exp_ys))
-						w0 = xrange[1] - xrange[0]
-						wmax = main.config["blendedlineswindow_maxfwhm"] or w0
-						amp_min, amp_max = -3*yptp, 3*yptp
-						if amplitude_direction < 0:
-							amp_max = 0
-						if amplitude_direction > 0:
-							amp_min = 0
-						
-						for peak in peaks:
-							x, y, x_rel = peak
-
-							if not xrange[0] < x < xrange[1]:
-								x = self.center + x_rel
-								if not xrange[0] < x < xrange[1]:
-									x = sum(xrange)/2
-								y = yptp * np.sign(amplitude_direction)
-							elif not amp_min < y < amp_max:
-								y = yptp * np.sign(amplitude_direction)
-
-							xs.append((x, *xrange))
-							ys.append((y, amp_min, amp_max))
-							ws.append((wmax/4, 0, wmax))
-
-						p0 = []
-						bounds = [[], []]
-						for x, y, w in zip(xs, ys, ws):
-							tmp_p0 = [z[0] for z in (x, y, w, w)]
-							tmp_b0 = [z[1] for z in (x, y, w, w)]
-							tmp_b1 = [z[2] for z in (x, y, w, w)]
-
-							if fixedwidth:
-								slice_ = slice(2)
-							elif profile == "Voigt":
-								slice_ = slice(4)
-							else:
-								slice_ = slice(3)
-
-							p0.extend(tmp_p0[slice_])
-							bounds[0].extend(tmp_b0[slice_])
-							bounds[1].extend(tmp_b1[slice_])
-
-						if fixedwidth and len(peaks):
-							ws = np.array(ws)
-							w0, wl, wu = ws[:, 0].mean(), ws[:, 1].min(), ws[: 2].max()
-							p0.extend([w0]*now)
-							bounds[0].extend([wl]*now)
-							bounds[1].extend([wu]*now)
-
-						p0.extend([0]*polynomrank)
-						bounds[0].extend([-np.inf]*polynomrank)
-						bounds[1].extend([+np.inf]*polynomrank)
-
-						# @Luis: Work on the bounds and p0s here
-						try:
-							popt, pcov = optimize.curve_fit(fitfunction, exp_xs, exp_ys, p0=p0, bounds=bounds)
-						except Exception as E:
-							popt, pcov = optimize.curve_fit(fitfunction, exp_xs, exp_ys, p0=p0, bounds=bounds)
-						perr = np.sqrt(np.diag(pcov))
-						res_xs = np.linspace(xrange[0], xrange[1], main.config["blendedlineswindow_xpoints"])
-						res_ys = fitfunction(res_xs, *popt)
-						res_exp_ys = fitfunction(exp_xs, *popt)
-					else:
-						popt = [0]*(noa*len(peaks)+polynomrank+2*fixedwidth)
-						perr = [0]*(noa*len(peaks)+polynomrank+2*fixedwidth)
-						res_xs = np.linspace(xrange[0], xrange[1], main.config["blendedlineswindow_xpoints"])
-						res_ys = res_xs*0
-						res_exp_ys = exp_xs*0
-
-					earlyreturn(ownid, self.fit_thread_id)
-
-
-					self.fit_line.set_data(res_xs, res_ys)
-					self.fit_line.set_color(main.config["blendedlineswindow_color_total"])
-
-					opt_param = []
-					err_param = []
-
-					for i in range(len(peaks)):
-						tmp_params = list(popt[i*noa: (i+1)*noa])
-						tmp_errors = list(perr[i*noa: (i+1)*noa])
-
-						if fixedwidth:
-							tmp_params.extend(popt[-(polynomrank+now):len(popt)-polynomrank])
-							tmp_errors.extend(perr[-(polynomrank+now):len(popt)-polynomrank])
-
-						tmp_ys = fitfunction_withoutbaseline(res_xs, *tmp_params)
-						tmp_ys += exp_mean
-						self.plot_parts.append(self.ax.plot(res_xs, tmp_ys, color=main.config["blendedlineswindow_color_total"], alpha=main.config["blendedlineswindow_transparency"])[0])
-
-						opt_param.append( tmp_params )
-						err_param.append( tmp_errors )
-
-
-					self.plot_parts.append(self.ax.scatter([x[0] for x in opt_param], [x[1] + exp_mean for x in opt_param], color=main.config["blendedlineswindow_color_points"]))
-
-					if polynomrank > 0 and main.config["blendedlineswindow_showbaseline"]:
-						baseline_args = popt[-polynomrank:]
-						self.plot_parts.append(self.ax.plot(res_xs, np.polyval(baseline_args, res_xs-self.center), color=main.config["blendedlineswindow_color_baseline"])[0])
-					else:
-						baseline_args = []
-
-					rms_ys = np.sqrt(np.sum((exp_ys - res_exp_ys)**2) / len(exp_ys)) if len(exp_ys) else 0
-					self.parent.params = opt_param, err_param, profile, derivative, noa, now, self.center, baseline_args, rms_ys
-
-					earlyreturn(ownid, self.fit_thread_id)
-
-					main.signalclass.blwfit.emit()
-					main.signalclass.fitindicator.emit("Ready")
-					super().update_plot()
-				except CustomError as E:
-					pass
-				except Exception as E:
-					main.signalclass.fitindicator.emit("<span style='color:#ff0000;'>Fit failed</span>")
-					raise
-
+				self.plot_parts_lock = threading.Lock()
+				self.update_plot_requested.connect(super().update_plot)
+					
 			def update_plot(self):
-				thread = threading.Thread(target=self.fit_peaks)
-				with locks["currThread"]:
-					thread.start()
-					self.fit_thread_id = thread.ident
-				return(thread)
+				self.parent.fit_peaks(self)
+		
+		self.plot_widget = CustomPlotWidget(parent=self)
 
-		layout = QVBoxLayout()
-		self.setLayout(layout)
-		self.plotWidget = CustomPlotWidget(parent=self)
-		layout.addWidget(self.plotWidget)
+		layout.addWidget(self.plot_widget, 2)
 
 		tmplayout = QGridLayout()
 		row_id = 0
 		tmplayout.addWidget(QQ(QLabel, text="Function: "), row_id, 0)
-		tmplayout.addWidget(QQ(QComboBox, "blendedlineswindow_lineshape", items=("Gauss", "Lorentz", "Voigt"), minWidth=120), row_id, 1)
+		tmplayout.addWidget(QQ(QComboBox, "blendedlines_lineshape", items=("Gauss", "Lorentz", "Voigt"), minWidth=120), row_id, 1)
 
 		tmplayout.addWidget(QQ(QLabel, text="Transparency: "), row_id, 2)
-		tmplayout.addWidget(QQ(QDoubleSpinBox, "blendedlineswindow_transparency", range=(0, 1), minWidth=120, singlestep=0.1), row_id, 3)
+		tmplayout.addWidget(QQ(QDoubleSpinBox, "blendedlines_transparency", range=(0, 1), minWidth=120, singlestep=0.1), row_id, 3)
 
 		row_id += 1
 		tmplayout.addWidget(QQ(QLabel, text="Derivative: "), row_id, 0)
-		tmplayout.addWidget(QQ(QSpinBox, "blendedlineswindow_derivative", range=(0, 2), minWidth=120), row_id, 1)
+		tmplayout.addWidget(QQ(QSpinBox, "blendedlines_derivative", range=(0, 2), minWidth=120), row_id, 1)
 
 		row_id += 1
 		tmplayout.addWidget(QQ(QLabel, text="Max FWHM: "), row_id, 0)
-		tmplayout.addWidget(QQ(QDoubleSpinBox, "blendedlineswindow_maxfwhm", range=(0, None), minWidth=120), row_id, 1)
+		tmplayout.addWidget(QQ(QDoubleSpinBox, "blendedlines_maxfwhm", range=(0, None), minWidth=120), row_id, 1)
 
-		tmplayout.addWidget(QQ(QCheckBox, "blendedlineswindow_fixedwidth", text="All Same Width"), row_id, 2, 1, 2)
+		tmplayout.addWidget(QQ(QCheckBox, "blendedlines_fixedwidth", text="All Same Width"), row_id, 2, 1, 2)
 
 		row_id += 1
 		tmplayout.addWidget(QQ(QLabel, text="Baseline Rank: "), row_id, 0)
-		tmplayout.addWidget(QQ(QSpinBox, "blendedlineswindow_polynom", range=(-1, None), minWidth=120), row_id, 1)
+		tmplayout.addWidget(QQ(QSpinBox, "blendedlines_polynom", range=(-1, None), minWidth=120), row_id, 1)
 
-		tmplayout.addWidget(QQ(QCheckBox, "blendedlineswindow_showbaseline", text="Show Baseline"), row_id, 2, 1, 2)
+		tmplayout.addWidget(QQ(QCheckBox, "blendedlines_showbaseline", text="Show Baseline"), row_id, 2, 1, 2)
 		tmplayout.setColumnStretch(4, 1)
 
 		layout.addLayout(tmplayout)
 
 		self.label = QQ(QLabel, text="Ready", textFormat=Qt.TextFormat.RichText)
-		main.signalclass.fitindicator.connect(self.label.setText)
+		self.set_indicator_text.connect(self.label.setText)
 		tmp_layout = QHBoxLayout()
 		layout.addLayout(tmp_layout)
 		row = (
 		  QQ(QPushButton, text="Del All", change=lambda x: self.del_peak(-1)),
-		  QQ(QPushButton, text="Update", change=lambda x: self.plotWidget.update_plot()),
+		  QQ(QPushButton, text="Update", change=lambda x: self.plot_widget.update_plot()),
 		  QQ(QPushButton, text="Save", change=lambda x: self.save_values()),
 		  self.label,
 		)
@@ -4928,21 +4847,180 @@ class BlendedLinesWindow(EQDockWidget):
 		self.table = QTableWidget()
 		self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 		self.table.setMinimumHeight(50)
-		layout.addWidget(self.table)
+		layout.addWidget(self.table, 1)
 
-		self.cid = self.plotWidget.plot_canvas.mpl_connect("button_press_event", lambda event: self.add_peak(event.xdata, event.ydata))
-		main.signalclass.blwfit.connect(self.fill_table)
+		self.cid = self.plot_widget.plot_canvas.mpl_connect("button_press_event", lambda event: self.add_peak(event.xdata, event.ydata))
+		self.fill_table_requested.connect(self.fill_table)
+		self.plot_widget.from_current_plot()
 
+	@QThread.threaded_d
+	def fit_peaks(self, plot_widget, thread=None):
+		self.set_indicator_text.emit("<span style='color:#eda711;'>Working ...</span>")
+		
+		peaks = self.peaks.copy()
+		profile = config["blendedlines_lineshape"]
+		derivative = config["blendedlines_derivative"]
+		polynomrank = config["blendedlines_polynom"]+1
+		fixedwidth = config["blendedlines_fixedwidth"]
+		amplitude_direction = config["fit_peakdirection"]
+		now = 2 if profile == "Voigt" else 1
+		noa = 2 + now * (not fixedwidth)
+
+		fitfunction = lambda x, *args, fixedwidth=fixedwidth: self.fitfunction(x, profile, derivative, polynomrank, *args, fixedwidth=fixedwidth)
+		fitfunction_no_baseline = lambda x, *args, fixedwidth=fixedwidth: self.fitfunction(x, profile, derivative, 0, *args, fixedwidth=fixedwidth)
+
+		with plot_widget.plot_parts_lock:
+			for part in plot_widget.plot_parts:
+				part.remove()
+			plot_widget.plot_parts = []
+
+		thread.earlyreturn()
+
+		xrange = xmin, xmax = plot_widget.xrange
+		xwidth = xmax - xmin
+		xcenter = (xmin + xmax) / 2
+
+		df_exp = ExpFile.get_data(xrange=xrange)
+		exp_xs = df_exp["x"].to_numpy()
+		exp_ys = df_exp["y"].to_numpy()
+
+		thread.earlyreturn()
+
+		xs = []
+		ys = []
+		ws = []
+		exp_mean = 0
+		if len(exp_ys) and (polynomrank + len(peaks)):
+			if config["blendedlines_autopositionpeaks"]:
+				exp_mean = exp_ys.mean()
+
+			yptp = 4*(np.amax(exp_ys)-np.amin(exp_ys))
+			w0 = xwidth
+			wmax = config["blendedlines_maxfwhm"] or w0
+			amp_min, amp_max = -3*yptp, 3*yptp
+			if amplitude_direction < 0:
+				amp_max = 0
+			if amplitude_direction > 0:
+				amp_min = 0
+			
+			for peak in peaks:
+				x, y, x_rel = peak
+
+				if not xmin < x < xmax:
+					x = xcenter + x_rel
+					if not xmin < x < xmax:
+						x = xcenter
+					y = yptp * np.sign(amplitude_direction)
+				elif not amp_min < y < amp_max:
+					y = yptp * np.sign(amplitude_direction)
+
+				xs.append((x, *xrange))
+				ys.append((y, amp_min, amp_max))
+				ws.append((wmax/4, 0, wmax))
+
+			p0 = []
+			bounds = [[], []]
+			for x, y, w in zip(xs, ys, ws):
+				tmp_p0 = [z[0] for z in (x, y, w, w)]
+				tmp_b0 = [z[1] for z in (x, y, w, w)]
+				tmp_b1 = [z[2] for z in (x, y, w, w)]
+
+				if fixedwidth:
+					slice_ = slice(2)
+				elif profile == "Voigt":
+					slice_ = slice(4)
+				else:
+					slice_ = slice(3)
+
+				p0.extend(tmp_p0[slice_])
+				bounds[0].extend(tmp_b0[slice_])
+				bounds[1].extend(tmp_b1[slice_])
+
+			if fixedwidth and len(peaks):
+				ws = np.array(ws)
+				w0, wl, wu = ws[:, 0].mean(), ws[:, 1].min(), ws[: 2].max()
+				p0.extend([w0]*now)
+				bounds[0].extend([wl]*now)
+				bounds[1].extend([wu]*now)
+
+			p0.extend([0]*polynomrank)
+			bounds[0].extend([-np.inf]*polynomrank)
+			bounds[1].extend([+np.inf]*polynomrank)
+
+			try:
+				popt, pcov = optimize.curve_fit(fitfunction, exp_xs, exp_ys, p0=p0, bounds=bounds)
+			except Exception as E:
+				popt, pcov = optimize.curve_fit(fitfunction, exp_xs, exp_ys, p0=p0, bounds=bounds)
+			perr = np.sqrt(np.diag(pcov))
+			res_xs = np.linspace(xmin, xmax, config["blendedlines_xpoints"])
+			res_ys = fitfunction(res_xs, *popt)
+			res_exp_ys = fitfunction(exp_xs, *popt)
+		else:
+			popt = [0]*(noa*len(peaks)+polynomrank+2*fixedwidth)
+			perr = [0]*(noa*len(peaks)+polynomrank+2*fixedwidth)
+			res_xs = np.linspace(xmin, xmax, config["blendedlines_xpoints"])
+			res_ys = res_xs*0
+			res_exp_ys = exp_xs*0
+
+		thread.earlyreturn()
+
+
+		ax = plot_widget.ax
+
+		plot_widget.fit_line.set_data(res_xs, res_ys)
+		plot_widget.fit_line.set_color(config["blendedlines_color_total"])
+
+		opt_param = []
+		err_param = []
+
+		for i in range(len(peaks)):
+			tmp_params = list(popt[i*noa: (i+1)*noa])
+			tmp_errors = list(perr[i*noa: (i+1)*noa])
+
+			if fixedwidth:
+				tmp_params.extend(popt[-(polynomrank+now):len(popt)-polynomrank])
+				tmp_errors.extend(perr[-(polynomrank+now):len(popt)-polynomrank])
+
+			tmp_ys = fitfunction_no_baseline(res_xs, *tmp_params)
+			tmp_ys += exp_mean
+			
+			with plot_widget.plot_parts_lock:
+				plot_widget.plot_parts.append(ax.plot(res_xs, tmp_ys, color=config["blendedlines_color_total"], alpha=config["blendedlines_transparency"])[0])
+
+			opt_param.append( tmp_params )
+			err_param.append( tmp_errors )
+
+		with plot_widget.plot_parts_lock:
+			plot_widget.plot_parts.append(ax.scatter([x[0] for x in opt_param], [x[1] + exp_mean for x in opt_param], color=config["blendedlines_color_points"]))
+
+		if polynomrank > 0 and config["blendedlines_showbaseline"]:
+			baseline_args = popt[-polynomrank:]
+			with plot_widget.plot_parts_lock:
+				plot_widget.plot_parts.append(ax.plot(res_xs, np.polyval(baseline_args, res_xs-xcenter), color=config["blendedlines_color_baseline"])[0])
+		else:
+			baseline_args = []
+
+		rms_ys = np.sqrt(np.sum((exp_ys - res_exp_ys)**2) / len(exp_ys)) if len(exp_ys) else 0
+		self.params = opt_param, err_param, profile, derivative, noa, now, xcenter, baseline_args, rms_ys
+
+		thread.earlyreturn()
+
+		self.fill_table_requested.emit()
+		self.set_indicator_text.emit("Ready")
+		plot_widget.update_plot_requested.emit()
+	
 	def add_peak(self, x, y):
 		if not (x and y):
 			return
 		x = np.float64(x)
 		y = np.float64(y)
-		x_rel = x - self.plotWidget.center
+		xmin, xmax = self.plot_widget.xrange
+		xcenter = (xmax + xmin) / 2
+		x_rel = x - xcenter
 
 		self.peaks.append((x, y, x_rel))
 		self.peaks.sort(key=lambda x: x[0])
-		self.plotWidget.update_plot()
+		self.plot_widget.update_plot()
 
 	def del_peak(self, i=None):
 		if i == -1:
@@ -4953,7 +5031,7 @@ class BlendedLinesWindow(EQDockWidget):
 		else:
 			if len(self.peaks) != 0:
 				self.peaks.pop()
-		self.plotWidget.update_plot()
+		self.plot_widget.update_plot()
 
 	def fitfunction(self, x, fun, der, bpr, *ps, fixedwidth=False):
 		noa = 2 + (1+(fun == "Voigt")) * (not fixedwidth)
@@ -4965,8 +5043,9 @@ class BlendedLinesWindow(EQDockWidget):
 		if bpr > 0:
 			param_baseline = ps[-bpr:]
 			param_peaks    = ps[:-bpr]
+			xcenter = sum(self.plot_widget.xrange)/2
 
-			res_ys.append(np.polyval(param_baseline, x-self.plotWidget.center))
+			res_ys.append(np.polyval(param_baseline, x-xcenter))
 
 		# Fixed Width
 		if fixedwidth:
@@ -5005,12 +5084,12 @@ class BlendedLinesWindow(EQDockWidget):
 			
 			currRowCount = table.rowCount()
 			table.insertRow(currRowCount)
-			table.setCellWidget(currRowCount, 0, QQ(QPushButton, text="Assign", change=lambda x, xpos=x, error=x_error: self.pre_assign(xpos, error)))
-			table.setItem(currRowCount, 1, QTableWidgetItem(f'{x:{main.config["flag_xformatfloat"]}}'))
-			table.setItem(currRowCount, 2, QTableWidgetItem(f'{y:{main.config["flag_xformatfloat"]}}'))
-			table.setItem(currRowCount, 3, QTableWidgetItem(f'{wg:{main.config["flag_xformatfloat"]}}'))
-			table.setItem(currRowCount, 4, QTableWidgetItem(f'{wl:{main.config["flag_xformatfloat"]}}'))
-			table.setCellWidget(currRowCount, 5, QQ(QPushButton, text="Assign other QNs", change=lambda x, xpos=x, error=x_error: self.pre_assign(xpos, error, oqns=True)))
+			table.setCellWidget(currRowCount, 0, QQ(QPushButton, text="Assign", change=lambda x, xpos=x, error=x_error: self.assign(xpos, error)))
+			table.setItem(currRowCount, 1, QTableWidgetItem(f'{x:{config["flag_xformatfloat"]}}'))
+			table.setItem(currRowCount, 2, QTableWidgetItem(f'{y:{config["flag_xformatfloat"]}}'))
+			table.setItem(currRowCount, 3, QTableWidgetItem(f'{wg:{config["flag_xformatfloat"]}}'))
+			table.setItem(currRowCount, 4, QTableWidgetItem(f'{wl:{config["flag_xformatfloat"]}}'))
+			table.setCellWidget(currRowCount, 5, QQ(QPushButton, text="Assign other QNs", change=lambda x, xpos=x, error=x_error: self.assign_other_qns(xpos, error)))
 			table.setCellWidget(currRowCount, 6, QQ(QPushButton, text="Delete", change=lambda x, ind=currRowCount: self.del_peak(i=ind)))
 			fit_values["peaks"].append({"values": (x, y, wg, wl), "errors": (x_error, y_error, wg_error, wl_error)})
 		self.fit_values = fit_values
@@ -5031,56 +5110,57 @@ class BlendedLinesWindow(EQDockWidget):
 			
 				file.truncate(0)
 				json.dump(all_fits, file, indent=2)
-			main.notification(f"Saved the fit to the file {filename}.")
+			notify_info.emit(f"Saved the fit to the file {filename}.")
 		else:
-			main.notification(f"No fit values to be saved.")
+			notify_info.emit(f"No fit values to be saved.")
 
-	def pre_assign(self, x, error, oqns=False):
-		index = self.plotWidget.i
+	
+	def assign(self, x, error):
+		index = self.plot_widget.index
+		try:
+			lwpax = mainwindow.lwpwidget.lwpaxes[index]
+		except IndexError as E:
+			message = 'The reference ax is not existing anymore. Assigning is therefore not possible.'
+			notify_error.emit(message)
+			raise GUIAbortedError(message)
+		
+		new_assignment = {'x': x, 'error': lwpax.fit_determine_uncert(x, error), 'xpre': lwpax.ref_position}
+		new_assignment.update(lwpax.create_qns_dict(complete=True))
+		new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
+		
+		lwpax.check_blends(new_assignment)
+		NewAssignments.get_instance().add_row(new_assignment)
+	
+	def assign_other_qns(self, x, error):
+		index = self.plot_widget.index
+		try:
+			lwpax = mainwindow.lwpwidget.lwpaxes[index]
+		except IndexError as E:
+			message = 'The reference ax is not existing anymore. Assigning is therefore not possible.'
+			notify_error.emit(message)
+			raise GUIAbortedError(message)
+		
+		new_assignment = {'x': x, 'error': lwpax.fit_determine_uncert(x, error), 'xpre': lwpax.ref_position}
+		new_assignment.update(lwpax.create_qns_dict(complete=True))
+		new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
+		
+		dialog = QNsDialog(x)
+		dialog.exec()
 
-		dict_ = {
-			"x": x,
-			"error": error,
-			"xpre": 0,
-		}
-
-		for i in range(6):
-			dict_[f"qnu{i+1}"] = pyckett.SENTINEL
-			dict_[f"qnl{i+1}"] = pyckett.SENTINEL
-
-		if oqns:
-			visible_cat_data = main.get_visible_data("cat")
-			dialog = QNsDialog(x, visible_cat_data)
-			dialog.exec()
-
-			if dialog.result() == 1:
-				dict_.update(dialog.save())
-			else:
-				return
-		else:
-			reference = main.plotwidget.get_series_reference(index[1])
-			if reference["method"] == "Transition":
-				qns = main.plotwidget.get_qns(reference["transition"])[index[0]]
-				for i, qnu, qnl in zip(range(6), qns[0], qns[1]):
-					dict_[f"qnu{i+1}"] = qnu
-					dict_[f"qnl{i+1}"] = qnl
-				dict_["xpre"] = main.plotwidget.cache_positions[index]
-
-		if main.plotwidget.check_blends(index, dict_):
+		if dialog.result() != 1:
 			return
-		else:
-			main.plotwidget.assign(index, dict_)
+		
+		new_assignment.update(dialog.save())
+		lwpax.check_blends(new_assignment)
+		NewAssignments.get_instance().add_row(new_assignment)
+	
 
 	def activateWindow(self):
-		self.plotWidget.fig.canvas.mpl_disconnect(self.cid)
-		self.cid = self.plotWidget.plot_canvas.mpl_connect("button_press_event", lambda event: self.add_peak(event.xdata, event.ydata))
-
-		self.plotWidget.from_current_plot()
+		if hasattr(self, 'plot_widget'):
+			self.plot_widget.from_current_plot()
 		super().activateWindow()
 
-	@synchronized_d(locks["windows"])
 	def closeEvent(self, *args, **kwargs):
-		self.plotWidget.fig.canvas.mpl_disconnect(self.cid)
 		return super().closeEvent(*args, **kwargs)
 
 
@@ -5129,11 +5209,8 @@ def fit_pgopher(xs, ys, peakdirection, fit_xs):
 		mask = (ys >= cutoff)
 
 	fit_xs = xs[mask]
-	fit_ys = ys[mask]
+	fit_ys = ys[mask] - ymin
 
-	# @Luis: Check for the correct sign of exp_ys here
-	# @Luis: Check if average here should use relative fit_ys
-	# to correct for offsets in intensity
 	xmiddle = np.sum(fit_xs*fit_ys)/np.sum(fit_ys)
 	xuncert = 0
 
@@ -5481,9 +5558,8 @@ if __name__ == '__main__':
 ##
 
 # - Add back the most important modules
-# 	- Blended Lines Window
-#   - ...
 # - Think about mechanism to group setting_data calls in beginning/ or just skip drawing and draw once everything is set up
+# - Add annotations to plots
 
 # Causes for redrawing
 # - reference series changed
