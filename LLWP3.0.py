@@ -23,7 +23,7 @@ Copyright (C) 2024
 	GNU General Public License for more details.
 
 	You should have received a copy of the GNU General Public License
-	along with this program.  If not, see <https://www.gnu.org/licenses/>.
+	along with this program. If not, see <https://www.gnu.org/licenses/>.
 """
 
 ##
@@ -273,6 +273,33 @@ class Config(dict):
 		'blendedlines_color_baseline': ("#f6fa14", Color),
 		'blendedlines_autopositionpeaks': (True, bool),
 
+		'report_blends': (True, bool),
+		'report_query': ('', str),
+		
+		'seriesfinder_start': ("", str),
+		'seriesfinder_stop': ("", str),
+		'seriesfinder_results': (10, int),
+		'seriesfinder_condition': ("", str),
+		'seriesfinder_atype': (True, bool),
+		'seriesfinder_btype': (True, bool),
+		'seriesfinder_ctype': (True, bool),
+		'seriesfinder_onlyunassigned': (True, bool),
+		
+		'peakfinder_peakcolor': ("#4287f5", Color),
+		'peakfinder_kwargs': ({}, dict),
+		'peakfinder_onlyunassigned': (True, bool),
+		'peakfinder_width': (1, float),
+		'peakfinder_maxentries': (1000, int),
+		
+		'energylevels_defaultcolor': ("#000000", Color),
+		'energylevels_query': ("", str),
+		'energylevels_colorinput': ("", str),
+		'energylevels_xvariable': ("", str),
+		'energylevels_yvariable': ("", str),
+		'energylevels_autoscale': (True, bool),
+		
+		'cmd_current': (0, int),
+		'cmd_commands': ([], list),
 	}
 
 	def __init__(self, signal, *args, **kwargs):
@@ -982,7 +1009,8 @@ class File():
 		self.apply_color()
 		self.apply_visibility()
 		self.apply_xtransformation()
-		self.apply_ytransformation()
+		if self.has_y_data:
+			self.apply_ytransformation()
 
 	def check_file(self):
 		fname = self.filename_abs
@@ -1486,7 +1514,7 @@ class LinFile(File):
 	dtypes = {**pyckett.lin_dtypes, **File.additional_dtypes}
 	df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
 	has_y_data = False
-
+	
 	@QThread.threaded_d
 	@status_d
 	@decorator.d
@@ -2522,7 +2550,9 @@ class MainWindow(QMainWindow):
 			subclass()
 		dockstate = Geometry.get('__dockstate__')
 		if dockstate:
-			self.restoreState(dockstate)		
+			self.restoreState(dockstate)
+		
+		
 		
 		self.menu = Menu(self)
 		self.shortcuts()
@@ -2657,6 +2687,12 @@ class Menu():
 			'Modules': (
 				ResidualsWindow._instance.toggleViewAction(),
 				BlendedLinesWindow._instance.toggleViewAction(),
+				ReportWindow._instance.toggleViewAction(),
+				SeriesfinderWindow._instance.toggleViewAction(),
+				PeakfinderWindow._instance.toggleViewAction(),
+				EnergyLevelsWindow._instance.toggleViewAction(),
+				CmdWindow._instance.toggleViewAction(),
+				
 			),
 			'Info': (
 				QQ(QAction, parent=parent, text="&Send Mail to Author", tooltip="Send a mail to the developer", change=lambda x: self.send_mail_to_author()),
@@ -5261,6 +5297,762 @@ class BlendedLinesWindow(EQDockWidget):
 	def closeEvent(self, *args, **kwargs):
 		return super().closeEvent(*args, **kwargs)
 
+class ReportWindow(EQDockWidget):
+	default_visible = False
+	default_position = None
+	
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle("Report Window")
+
+		layout = QVBoxLayout(margin=True)
+		mainwidget = QWidget()
+		mainwidget.setLayout(layout)
+		self.setWidget(mainwidget)
+
+		layout.addWidget(QQ(QPlainTextEdit, "report_query", maxHeight=40, placeholder="Query text to filter assignments. Use qnu1, ..., qnu6 and qnl1, ..., qnl6 for the quantum numbers. Other possible values are x, error, weight, comment, and filename."))
+		layout.addWidget(QQ(QCheckBox, "report_blends", text="Blends"))
+		layout.addWidget(QQ(QPushButton, text="Create Report", change=self.create_report))
+		self.reportfield = QQ(QTextEdit, readonly=True)
+		self.reportfield.setFontFamily("Courier")
+		layout.addWidget(self.reportfield)
+
+	def create_report(self):
+		results = {}
+		report = []
+
+		lin_df = LinFile.get_data()
+		cat_df = CatFile.get_data()
+		noq = config["series_qns"]
+		qns_visible = [f"qn{ul}{n+1}" for ul in ("u", "l") for n in range(noq)]
+		blends = config["report_blends"]
+
+		query = config["report_query"].strip()
+		if query:
+			lin_df.query(query, inplace=True)
+
+		results["not"] = len(lin_df)
+		results["nol"] = lin_df["x"].nunique()
+		results["non"] = len(lin_df[lin_df["weight"] == 0])
+		results["nod"] = sum(lin_df.duplicated(subset=qns_visible))
+
+		report.append((f"Transitions:", results["not"]))
+		report.append((f"Lines:", results["nol"]))
+		report.append((f"Unweighted Transitions:", results["non"]))
+		report.append((f"Duplicates:", results["nod"]))
+		report.append(("", ""))
+
+		results[f"x_min"] = lin_df["x"].min()
+		results[f"x_max"] = lin_df["x"].max()
+		report.append((f"Frequency min:", results['x_min']))
+		report.append((f"Frequency max:", results['x_max']))
+
+		for i in range(noq):
+			for ul in ("u", "l"):
+				tag = f"qn{ul}{i+1}"
+				results[f"{tag}_min"] = lin_df[tag].min()
+				results[f"{tag}_max"] = lin_df[tag].max()
+				report.append((f"{tag} min:", results[f'{tag}_min']))
+				report.append((f"{tag} max:", results[f'{tag}_max']))
+
+
+		results["nocd"]= sum(cat_df.duplicated(subset=qns_visible))
+		if results["nocd"]:
+			cat_df = cat_df.drop_duplicates(qns_visible, keep="first")
+
+		df = pd.merge(lin_df, cat_df, how="inner", on=qns_visible)
+		df.rename(columns={"x_x": "x_lin", "x_y": "x_cat", "error_x": "error_lin", "error_y": "error_cat", "filename_x": "filename_lin", "filename_y": "filename_cat"}, inplace=True)
+		df.reset_index(drop=True, inplace=True)
+
+		if blends:
+			mask = df["weight"] != 0
+			df_view = df[mask]
+			tmp_dict = df_view.groupby(df_view.x_lin).apply(lambda x: np.average(x.x_cat, weights=x.weight)).to_dict()
+			df["x_cat"] = df["x_lin"].map(lambda x: tmp_dict.get(x, x))
+
+		df["diff"] = abs(df["x_cat"] - df["x_lin"])
+		df["wdiff"] = abs(df["x_cat"] - df["x_lin"])/abs(df["error_lin"])
+
+		results["nom"] = len(df)
+		results["max_deviation"] = df["diff"].max()
+		results["max_wdeviation"] = df["wdiff"].max()
+
+		report.append(("", ""))
+		report.append(("Assignments with matching predict.:", results['nom']))
+		report.append(("Assignments w/o  matching predict.:", results['not']-results['nom']))
+		report.append(("Highest absolute deviation:", results['max_deviation']))
+		report.append(("Highest relative deviation:", results['max_wdeviation']))
+
+		results["rms"] = np.sqrt( (df["diff"]**2).mean() )
+		results["wrms"] = np.sqrt( (df["wdiff"]**2).mean() )
+
+		report.append(("", ""))
+		report.append(("RMS:", results['rms']))
+		report.append(("WRMS:", results['wrms']))
+
+		report = [f"{title: <36}{value:16.4f}" if title else "" for title, value in report]
+
+		if results["nocd"]:
+			report.append(f"\nWARNING: {results['nocd']} duplicates were found in your predictions. Each first occurence was kept.")
+		if results["not"] != results["nom"]:
+			report.append(f"\nWARNING: {results['not']-results['nom']} assignments have no matching prediction. This affects i.a. the RMS and WRMS.")
+		if any(df["error_lin"] == 0):
+			report.append(f"\nWARNING: Some errors (uncertainties) of your assignments are zero. This leads to infinity values for the relative deviation and the WRMS. Consider using 'error != 0' in the query field.")
+
+		report = "\n".join(report)
+
+		tmp = (self.reportfield.verticalScrollBar().value(), self.reportfield.horizontalScrollBar().value())
+		self.reportfield.setText(report)
+		self.reportfield.verticalScrollBar().setValue(tmp[0])
+		self.reportfield.horizontalScrollBar().setValue(tmp[1])
+
+class SeriesfinderWindow(EQDockWidget):
+	default_visible = False
+	default_position = None
+	
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle("Series Finder")
+
+		layout = QVBoxLayout(margin=True)
+		mainwidget = QWidget()
+		mainwidget.setLayout(layout)
+		self.setWidget(mainwidget)
+		
+		self.messageLabel = QQ(QLabel, wordwrap=True, hidden=True)
+
+		self.outputTable = QTableWidget()
+		self.outputTable.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+		vertLayout = QHBoxLayout()
+		leftLayout = QGridLayout()
+		rightLayout = QVBoxLayout()
+		layout.addWidget(QQ(QLabel, wordwrap=True, text="Series Finder allows to find the strongest (unassigned) predicted transitions."))
+
+		rightLayout.addWidget(QQ(QLabel, text="Allowed Transitions"))
+		rightLayout.addWidget(QQ(QCheckBox, "seriesfinder_atype", text="a-type"))
+		rightLayout.addWidget(QQ(QCheckBox, "seriesfinder_btype", text="b-type"))
+		rightLayout.addWidget(QQ(QCheckBox, "seriesfinder_ctype", text="c-type"))
+		rightLayout.addStretch(1)
+
+		leftLayout.addWidget(QQ(QLabel, text="Start Frequency: "), 1, 0)
+		leftLayout.addWidget(QQ(QLineEdit, "seriesfinder_start"), 1, 1)
+		leftLayout.addWidget(QQ(QLabel, text="Stop Frequency: "), 2, 0, 1, 1)
+		leftLayout.addWidget(QQ(QLineEdit, "seriesfinder_stop"), 2, 1, 1, 1)
+		leftLayout.addWidget(QQ(QLabel, text="Number of Results: "), 3, 0, 1, 1)
+		leftLayout.addWidget(QQ(QSpinBox, "seriesfinder_results", range=(0, None)), 3, 1, 1, 1)
+		leftLayout.addWidget(QQ(QLabel, text="Additional Condition: "), 4, 0, 1, 1)
+		leftLayout.addWidget(QQ(QLineEdit, "seriesfinder_condition", placeholder="Hover for tooltip", tooltip="Use qnu1, ..., qnu6, qnl1, ..., qnl6 for the quantum numbers. Additionally, x, error, y, degfreed, elower, usd, tag, qnfmt, and filename are allowed."), 4, 1, 1, 1)
+		leftLayout.addWidget(QQ(QCheckBox, "seriesfinder_onlyunassigned", text = "Only unassigned Lines"), 5, 1, 1, 1)
+		leftLayout.addWidget(QQ(QPushButton, text="Run", change=lambda x: self.run()), 6, 1, 1, 1)
+
+		leftLayout.setColumnStretch(1, 1)
+
+		vertLayout.addLayout(leftLayout)
+		vertLayout.addLayout(rightLayout)
+		layout.addLayout(vertLayout)
+		layout.addWidget(self.messageLabel)
+		layout.addWidget(self.outputTable, 1)
+
+	def run(self):
+		nor = config["seriesfinder_results"]
+
+		condition = []
+		tmp_min = config["seriesfinder_start"]
+		tmp_max = config["seriesfinder_stop"]
+		addCondition = config["seriesfinder_condition"]
+
+		if addCondition.strip():
+			condition.append(addCondition)
+		if tmp_min:
+			condition.append(f"{tmp_min} <= x")
+		if tmp_max:
+			condition.append(f"x <= {tmp_max}")
+
+		tmp_condition = []
+		if config["seriesfinder_atype"]:
+			tmp_condition.append(f"(abs(qnu2-qnl2) % 2 == 0 and abs(qnu3-qnl3) % 2 == 1)")
+		if config["seriesfinder_btype"]:
+			tmp_condition.append(f"(abs(qnu2-qnl2) % 2 == 1 and abs(qnu3-qnl3) % 2 == 1)")
+		if config["seriesfinder_ctype"]:
+			tmp_condition.append(f"(abs(qnu2-qnl2) % 2 == 1 and abs(qnu3-qnl3) % 2 == 0)")
+		if tmp_condition:
+			condition.append(" or ".join(tmp_condition))
+		condition = " and ".join([f"({x})" for x  in condition])
+
+		tmp_cat_df = CatFile.get_data()
+
+		if condition:
+			try:
+				tmp_cat_df.query(condition, inplace=True)
+			except Exception as E:
+				notify_warning.emit(f"There is a syntax error in your condition: {str(E)}")
+				return
+
+		self.noq = noq = config["series_qns"]
+
+		qns_visible = [f"qn{ul}{n+1}" for ul in ("u", "l") for n in range(noq)]
+		qns_invisible = [f"qn{ul}{n+1}" for ul in ("u", "l") for n in range(noq, 6)]
+
+		if config["seriesfinder_onlyunassigned"]:
+			tmp_lin_df = LinFile.get_data()
+			tmp_lin_df["DROP"] = True
+			tmp_lin_df.drop(columns=["x"]+qns_invisible, inplace=True)
+
+			tmp_cat_df = pd.merge(tmp_cat_df, tmp_lin_df, how="outer", on=qns_visible)
+			tmp_cat_df = tmp_cat_df[tmp_cat_df.DROP != True]
+			unassigned = "without already assigned lines"
+		else:
+			unassigned = "with already assigned lines"
+
+		tmp_cat_df["y"] = np.log10(tmp_cat_df["y"])
+		tmp_cat_df = tmp_cat_df.nlargest(nor, "y")
+
+		if tmp_min and tmp_max:
+			xrange = f"in the range from {tmp_min} to {tmp_max}"
+		else:
+			xrange = "in the total range"
+		message = f"The {nor} most intense predicted transitions {unassigned} {xrange} are shown below."
+		self.messageLabel.setText(message)
+		self.messageLabel.setHidden(False)
+
+		table = self.outputTable
+		headers = ["Start", "Log. Intensity", "Frequency"] + qns_visible
+
+		table.setRowCount(0)
+		table.setColumnCount(len(headers))
+		table.setHorizontalHeaderLabels(headers)
+
+		for index, row in tmp_cat_df.iterrows():
+			currRowCount = table.rowCount()
+			table.insertRow(currRowCount)
+			table.setCellWidget(currRowCount,0, QQ(QPushButton, text="Start", change=lambda x, crow=row: self.startHere(crow)))
+			table.setItem(currRowCount, 1, QTableWidgetItem(f'{row["y"]:{config["flag_xformatfloat"]}}'))
+			table.setItem(currRowCount, 2, QTableWidgetItem(f'{row["x"]:{config["flag_xformatfloat"]}}'))
+
+			for i, column in enumerate(qns_visible):
+				tmp = row[column]
+				if tmp == pyckett.SENTINEL:
+					tmp = ""
+				else:
+					tmp = f'{tmp:g}'
+				table.setItem(currRowCount, i+3, QTableWidgetItem(tmp))
+
+		self.outputTable.resizeColumnsToContents()
+
+	def startHere(self, row):
+		qnus = [int(row[f"qnu{i+1}"]) for i in range(self.noq)]
+		qnls = [int(row[f"qnl{i+1}"]) for i in range(self.noq)]
+		
+		tab_widget = ReferenceSeriesWindow._instance.tab
+		refwidget = tab_widget.widget(config['series_currenttab'])
+		refwidget.setCurrentIndex(0)
+		seriesselector = refwidget.series_selector
+		
+		current_state = seriesselector.state
+		current_state['qnus'][:self.noq] = qnus
+		current_state['qnls'][:self.noq] = qnls
+		config['series_qns'] = self.noq
+
+		seriesselector.set_state()
+
+		mainwindow.lwpwidget.set_data()
+		mainwindow.show()
+		mainwindow.raise_()
+		mainwindow.activateWindow()
+
+class EnergyLevelsWindow(EQDockWidget):
+	default_visible = False
+	default_position = None
+
+	plotting_started = pyqtSignal()
+	plotting_finished = pyqtSignal()
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle("Energy Levels")
+		self.setAcceptDrops(True)
+
+		layout = QVBoxLayout(margin=True)
+		mainwidget = QWidget()
+		mainwidget.setLayout(layout)
+		self.setWidget(mainwidget)
+
+		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
+		self.plot_canvas = FigureCanvas(self.fig)
+
+		self.fname = None
+		self.dataframe = None
+		self.dataframe_filtered = None
+
+		self.ax = self.fig.subplots()
+		self.ax.ticklabel_format(useOffset=False)
+
+		self.points = self.ax.scatter([], [], color=[], marker=".")
+		self.annot = self.ax.annotate("", xy=(0,0), xytext=(5,5), textcoords="offset points", color="black", ha="center", va="bottom", bbox=dict(boxstyle="round", fc="w"))
+		self.annot.set_visible(False)
+		self.fig.canvas.mpl_connect("motion_notify_event", self.on_hover)
+
+		self.mpl_toolbar = NavigationToolbar2QT(self.plot_canvas, self)
+
+		layout.addWidget(self.plot_canvas, 6)
+		layout.addWidget(self.mpl_toolbar)
+		hlayout = QHBoxLayout()
+		hlayout.addWidget(QQ(QPushButton, text="Open", change=lambda x: self.load_file()))
+		self.file_label = QQ(QLabel, text="No File loaded")
+		hlayout.addWidget(self.file_label)
+		hlayout.addWidget(QLabel("x-axis: "))
+		hlayout.addWidget(QQ(QLineEdit, "energylevels_xvariable", placeholder="Choose the x-variable, e.g. qn1"))
+		hlayout.addWidget(QLabel("y-axis: "))
+		hlayout.addWidget(QQ(QLineEdit, "energylevels_yvariable", placeholder="Choose the x-variable, e.g. egy"))
+		hlayout.addWidget(QQ(QCheckBox, "energylevels_autoscale", text="Autoscale on Update"))
+		layout.addLayout(hlayout)
+		layout.addWidget(QQ(QPlainTextEdit, "energylevels_query", maxHeight=40, placeholder="Query text to filter shown levels. Use qn1, ..., qn6 for the quantum numbers. Other possible values are iblk, indx, egy, err, pmix, and we."))
+		layout.addWidget(QQ(QPlainTextEdit, "energylevels_colorinput", maxHeight=40, placeholder="Enter custom color and query to color specific lines differently. E.g. enter '#ff0000; qn1 < 20' to color all levels with the first quantum number below 20 red."))
+
+		buttonslayout = QHBoxLayout()
+		layout.addLayout(buttonslayout)
+		buttonslayout.addStretch(1)
+		self.update_button = QQ(QPushButton, text="Update", change=lambda: self.plot_energylevels())
+		buttonslayout.addWidget(self.update_button)
+		buttonslayout.addStretch(1)
+		
+		self.plotting_started.connect(lambda: self.update_button.setDisabled(True))
+		self.plotting_finished.connect(lambda: self.update_button.setDisabled(False))
+		self.plotting_finished.connect(lambda: self.fig.canvas.draw())
+
+	def load_file(self, fname=None):
+		if fname is None:
+			fname = QFileDialog.getOpenFileName(None, 'Choose Egy File to load',"")[0]
+		if fname:
+			self.dataframe = pyckett.egy_to_df(fname)
+			self.dataframe_filtered = self.dataframe
+			self.fname = fname
+			self.file_label.setText(os.path.split(fname)[1])
+			self.plot_energylevels()
+
+	@QThread.threaded_d
+	def plot_energylevels(self, thread=None):
+		self.plotting_started.emit()
+
+		self.noq = config["series_qns"]
+		try:
+			if self.dataframe is None:
+				return
+			df = self.dataframe
+			query = config["energylevels_query"]
+			if query:
+				df = df.query(query).copy()
+
+			df.loc[:, "color"] = config["energylevels_defaultcolor"]
+			colorquerytext = config["energylevels_colorinput"].split("\n")
+			for row in colorquerytext:
+				if row.strip():
+					color, query = row.split(";")
+					df.loc[df.query(query).index, "color"] = color
+
+			self.dataframe_filtered = df
+
+			xvariable = config["energylevels_xvariable"].strip() or "qn1"
+			yvariable = config["energylevels_yvariable"].strip() or "egy"
+			xs = df.eval(xvariable).to_numpy()
+			ys = df.eval(yvariable).to_numpy()
+			colors = df["color"].to_numpy()
+			tuples = list(zip(xs,ys))
+			tuples = tuples if len(tuples)!=0 else [[None,None]]
+			self.points.set_offsets(tuples)
+			self.points.set_color(colors)
+			if len(xs) and config["energylevels_autoscale"]:
+				xmin, xmax = np.min(xs), np.max(xs)
+				if xmin == xmax:
+					xmin -= 1
+					xmax += 1
+				self.ax.set_xlim([xmin, xmax])
+				ymin, ymax = np.min(ys), np.max(ys)
+				if ymin == ymax:
+					ymin -= 1
+					ymax += 1
+				y_range = [ymin, ymax]
+				self.ax.set_ylim(y_range[0]-config["plot_ymargin"]*(y_range[1]-y_range[0]), y_range[1]+config["plot_ymargin"]*(y_range[1]-y_range[0]))
+		except:
+			notify_error.emit("There was an error in your Energy Levels window inputs")
+			raise
+		finally:
+			self.plotting_finished.emit()
+		
+
+	def on_hover(self, event):
+		if event.inaxes == self.ax and isinstance(self.dataframe_filtered, pd.DataFrame):
+			cont, ind = self.points.contains(event)
+			if cont:
+				self.annot.xy = self.points.get_offsets()[ind["ind"][0]]
+				tmp_levels = self.dataframe_filtered.iloc[ind["ind"]]
+				text = []
+				for i, row in tmp_levels.iterrows():
+					text.append(",".join(str(int(row[f"qn{i+1}"])) for i in range(self.noq)))
+				text = "\n".join(text)
+				self.annot.set_text(text)
+				self.annot.set_visible(True)
+			else:
+				self.annot.set_visible(False)
+			self.fig.canvas.draw()
+
+	def dragEnterEvent(self, event):
+		mimeData = event.mimeData()
+		if mimeData.hasUrls() and len(mimeData.urls()) == 1:
+			event.accept()
+		else:
+			event.ignore()
+
+	def dropEvent(self, event):
+		url = event.mimeData().urls()[0]
+		fname = url.toLocalFile()
+		self.load_file(fname)
+
+
+peak_lock = threading.RLock()
+def peak_locked(func):
+	def _wrapper(*args, **kwargs):
+		with peak_lock:
+			return(func(*args, **kwargs))
+	return _wrapper
+
+class PeakfinderWindow(EQDockWidget):
+	default_visible = False
+	default_position = None
+	
+	peakfinding_started = pyqtSignal()
+	peakfinding_finished = pyqtSignal()
+	
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle("Peakfinder")
+
+		layout = QVBoxLayout(margin=True)
+		mainwidget = QWidget()
+		mainwidget.setLayout(layout)
+		self.setWidget(mainwidget)
+
+		self.peaks = []
+
+		class CustomPlotWidget(PlotWidget):
+			def gui(self):
+				super().gui()
+				self.peaks_artist = self.ax.scatter([], [], color=config["peakfinder_peakcolor"], marker="*")
+
+			def update_plot(self):
+				xmin, xmax = self.xrange
+				tuples = list(filter(lambda x: xmin < x[0] < xmax, self.parent.peaks))
+				tuples = tuples if len(tuples)!=0 else [[None,None]]
+				self.peaks_artist.set_offsets(tuples)
+				self.peaks_artist.set_color(config["peakfinder_peakcolor"])
+				super().update_plot()
+
+
+		self.plot_widget = CustomPlotWidget(parent=self)
+		layout.addWidget(self.plot_widget)
+
+		tmp_layout = QHBoxLayout()
+		layout.addLayout(tmp_layout)
+
+		self.run_button = QQ(QPushButton, text="Run Peakfinder", change=lambda: self.find_peaks())
+		tmp_layout.addWidget(self.run_button)
+		tmp_layout.addWidget(QQ(QPushButton, text="Export Peaks", change=lambda: self.export_peaks()))
+
+		uncert_input = QQ(QDoubleSpinBox, "peakfinder_width", range=(0, None), enabled=config["peakfinder_onlyunassigned"], minWidth=80)
+		tmp_layout.addWidget(QQ(QCheckBox, "peakfinder_onlyunassigned", text="Only unassigned Lines", change=uncert_input.setEnabled))
+		tmp_layout.addWidget(QQ(QLabel, text="Uncertainty unassigned lines: ", tooltip="Max distance between peak and closest predicted line to count as assigned"))
+		tmp_layout.addWidget(uncert_input)
+
+		tmp_layout.addStretch(1)
+
+		tmp_layout = QGridLayout()
+		layout.addLayout(tmp_layout)
+		tmp_layout.addWidget(QQ(QLabel, text="Configure Peakfinder:"), 0, 0)
+		tmp_layout.addWidget(QQ(QLabel, text="Min:"), 0, 1)
+		tmp_layout.addWidget(QQ(QLabel, text="Max:"), 0, 2)
+
+		self.row_dict = {}
+		for i, key in enumerate(("frequency", "height", "threshold", "distance", "prominence", "width")):
+			label      = QQ(QLabel, text=key.capitalize())
+			input_min  = QQ(QDoubleSpinBox, range=(0, None))
+			input_max  = QQ(QDoubleSpinBox, range=(0, None))
+
+			tmp_layout.addWidget(label, i+1, 0)
+			tmp_layout.addWidget(input_min, i+1, 1)
+			if key == "distance":
+				items = (("Min", "Off"))
+				input_min.setRange(1, None)
+			else:
+				items = (("Min", "Min & Max", "Off"))
+				tmp_layout.addWidget(input_max, i+1, 2)
+			input_type = QQ(QComboBox, items=items, change=lambda x, key=key: self.change_type(key))
+			tmp_layout.addWidget(input_type, i+1, 3)
+
+			self.row_dict[key] = (input_min, input_max, input_type, label)
+
+			if key in config["peakfinder_kwargs"]:
+				value = config["peakfinder_kwargs"][key]
+				try:
+					if type(value) in [tuple, list]:
+						input_min.setValue(value[0])
+						input_max.setValue(value[1])
+						input_type.setCurrentIndex(1)
+					else:
+						input_min.setValue(value)
+						input_type.setCurrentIndex(0)
+				except:
+					pass
+			else:
+				input_type.setCurrentIndex(len(items)-1)
+			self.change_type(key)
+
+		self.infolabel = QQ(QLabel, wordwrap=True, text="Press 'Run Peakfinder' to find peaks.")
+		layout.addWidget(self.infolabel)
+
+		self.table = QTableWidget()
+		self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+		self.table.setHidden(True)
+		self.table.doubleClicked.connect(self.go_to)
+
+		layout.addWidget(self.table)
+
+		self.peakfinding_started.connect(lambda: self.run_button.setEnabled(False))
+		self.peakfinding_started.connect(lambda: self.infolabel.setText("Finding peaks ..."))
+		self.peakfinding_finished.connect(self.after_find_peaks)
+
+	def change_type(self, key):
+		input_min, input_max, input_type, label = self.row_dict[key]
+		type = input_type.currentText()
+
+		if type == "Min":
+			enabled = (True, False)
+		elif type == "Min & Max":
+			enabled = (True, True)
+		else:
+			enabled = (False, False)
+
+		input_min.setEnabled(enabled[0])
+		input_max.setEnabled(enabled[1])
+		label.setEnabled(enabled[0] or enabled[1])
+
+	def get_kwargs(self):
+		kwargs = {}
+		for key, value in self.row_dict.items():
+			input_min, input_max, input_type, label = value
+			type = input_type.currentText()
+
+			if type == "Min":
+				kwargs[key] = input_min.value()
+			elif type == "Min & Max":
+				kwargs[key] = (input_min.value(), input_max.value())
+		config["peakfinder_kwargs"] = kwargs
+		return(kwargs.copy())
+
+	@QThread.threaded_d
+	@peak_locked
+	def find_peaks(self, thread=None):
+		self.peakfinding_started.emit()
+		kwargs = self.get_kwargs()
+
+		if "frequency" in kwargs:
+			val = kwargs["frequency"]
+			if type(val) in [tuple, list]:
+				exp_df = ExpFile.get_data(xrange=val)
+			else:
+				exp_df = ExpFile.get_data().query(f"{val} < x")
+			del kwargs["frequency"]
+		else:
+			exp_df = ExpFile.get_data()
+		xs, ys = exp_df["x"].to_numpy(), exp_df["y"].to_numpy()
+
+		peaks, props = signal.find_peaks(ys, **kwargs)
+		self.peaks = np.array((xs[peaks], ys[peaks])).T
+		self.plot_widget.update_plot()
+
+		if config["peakfinder_onlyunassigned"]:
+			assigned_xs = LinFile.get_data()["x"]
+			uncertainty = config["peakfinder_width"]
+
+			peaks_xs = self.peaks[:, 0]
+			peaks_assigned = np.zeros(self.peaks.shape[0])
+
+			for x in assigned_xs:
+				peaks_assigned += (abs(peaks_xs - x) < uncertainty)
+			self.peaks = self.peaks[peaks_assigned == 0]
+
+		self.peaks = self.peaks[self.peaks[:, 1].argsort()[::-1]]
+		self.peakfinding_finished.emit()
+
+	@peak_locked
+	def after_find_peaks(self):
+		self.table.setRowCount(0)
+		self.table.setColumnCount(2)
+		self.table.setHorizontalHeaderLabels(["x", "y"])
+		for x, y in self.peaks[:config["peakfinder_maxentries"]]:
+			currRowCount = self.table.rowCount()
+			self.table.insertRow(currRowCount)
+			self.table.setItem(currRowCount, 0, QTableWidgetItem(f'{x:{config["flag_xformatfloat"]}}'))
+			self.table.setItem(currRowCount, 1, QTableWidgetItem(f'{y:{config["flag_xformatfloat"]}}'))
+		self.table.resizeColumnsToContents()
+		self.table.setHidden(False)
+
+		self.run_button.setEnabled(True)
+
+		if len(self.peaks) > config["peakfinder_maxentries"]:
+			self.infolabel.setText(f"Found {len(self.peaks)} peaks. Only the highest {config['peakfinder_maxentries']} entries are shown in the table for better performance. You can see all peaks by exporting or increasing the maximum number of displayed peaks in the configuration.")
+		else:
+			self.infolabel.setText(f"Found {len(self.peaks)} peaks.")
+
+	@peak_locked
+	def export_peaks(self):
+		fname = QFileDialog.getSaveFileName(None, 'Choose file to save peaks to',"","CSV Files (*.csv);;All Files (*)")[0]
+		if fname:
+			np.savetxt(fname, self.peaks, delimiter="\t")
+
+	@peak_locked
+	def go_to(self, event):
+		for idx in self.table.selectionModel().selectedIndexes():
+			row_number = idx.row()
+
+		if type(row_number) == int and len(self.peaks) > row_number:
+			xmin, xmax = self.plot_widget.xrange
+			width = (xmax - xmin)
+			xcenter = self.peaks[row_number, 0]
+			self.plot_widget.xrange = xcenter - width / 2 , xcenter + width / 2
+			self.plot_widget.update_plot()
+
+	def activateWindow(self):
+		if hasattr(self, 'plot_widget'):
+			self.plot_widget.from_current_plot()
+		super().activateWindow()
+
+
+cmd_lock = threading.RLock()
+def cmd_locked(func):
+	def _wrapper(*args, **kwargs):
+		with cmd_lock:
+			return(func(*args, **kwargs))
+	return _wrapper
+
+class CmdWindow(EQDockWidget):
+	default_visible = False
+	default_position = None
+	
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle("Cmd Window")
+
+		layout = QVBoxLayout(margin=True)
+		mainwidget = QWidget()
+		mainwidget.setLayout(layout)
+		self.setWidget(mainwidget)
+
+		self.tabs = QTabWidget()
+		self.tabs.setTabsClosable(True)
+		self.tabs.setMovable(True)
+		self.tabs.setDocumentMode(True)
+
+		if not config["cmd_commands"]:
+			config["cmd_commands"] = [["Initial", "", True, True, True]]
+
+		for values in config["cmd_commands"]:
+			self.add_tab(*values)
+
+		self.tabs.tabCloseRequested.connect(self.close_tab)
+		self.tabs.tabBarDoubleClicked.connect(self.renameoradd_tab)
+		self.tabs.setCurrentIndex(config["cmd_current"])
+		self.tabs.currentChanged.connect(lambda x: self.update_cmd_command())
+
+		layout.addWidget(QQ(QLabel, wordwrap=True, text="Here you can set up a command to run fitting and prediction programs to update your files."))
+		layout.addWidget(self.tabs)
+		layout.addWidget(QQ(QPushButton, text="Run", change=lambda x: self.run_pipe()))
+
+	def add_tab(self, title, command=None, exp_checked=True, cat_checked=True, lin_checked=True):
+		tmp = QWidget()
+		layout = QVBoxLayout()
+
+		if not command:
+			command = ""
+
+		layout.addWidget(QQ(QPlainTextEdit, value=command, change=lambda: self.update_cmd_command(), placeholder="Write your command line command here"))
+		layout.addWidget(QQ(QCheckBox, text="Reread Exp Files after command finished", value=exp_checked, change=lambda x: self.update_cmd_command()))
+		layout.addWidget(QQ(QCheckBox, text="Reread Cat Files after command finished", value=cat_checked, change=lambda x: self.update_cmd_command()))
+		layout.addWidget(QQ(QCheckBox, text="Reread Lin Files after command finished", value=lin_checked, change=lambda x: self.update_cmd_command()))
+
+		tmp.setLayout(layout)
+		self.tabs.addTab(tmp, title)
+
+	@cmd_locked
+	def close_tab(self, index):
+		tab = self.tabs.widget(index)
+		tab.deleteLater()
+		self.tabs.removeTab(index)
+		if len(config["cmd_commands"]) > index:
+			config["cmd_commands"].pop(index)
+		if self.tabs.count() == 0:
+			self.add_tab("New Tab")
+			config["cmd_commands"].append(["New Tab", "", True, True, True])
+
+	@cmd_locked
+	def renameoradd_tab(self, index):
+		if index == -1:
+			self.add_tab("New Tab")
+			config["cmd_commands"].append(["New Tab", "", True, True, True])
+		elif self.tabs.widget(index) != 0:
+			text, ok = QInputDialog().getText(self, "Tab Name","Enter the Tabs Name:")
+			if ok and text:
+				self.tabs.setTabText(index, text)
+				config["cmd_commands"][index][0] = text
+
+	@cmd_locked
+	def update_cmd_command(self):
+		result = []
+		for i in range(self.tabs.count()):
+			tab = self.tabs.widget(i)
+			title = self.tabs.tabText(i)
+			command = tab.findChildren(QPlainTextEdit)[0].toPlainText()
+			if command.strip() == "":
+				command = None
+			rereadCheckboxs = tab.findChildren(QCheckBox)
+			reread_files = [x.isChecked() for x in rereadCheckboxs]
+
+			tmp = [title, command, *reread_files]
+			result.append(tmp)
+
+		config["cmd_commands"] = result
+		config["cmd_current"] = self.tabs.currentIndex()
+
+	@staticmethod
+	@cmd_locked
+	def run_pipe(index=None):
+		if index == None:
+			index = config["cmd_current"]
+
+		if len(config["cmd_commands"]) == 0:
+			notify_warning.emit("No Pipe command specified, therefore no Pipe process was started.")
+			return
+
+		title, command, exp_rr, cat_rr, lin_rr = config["cmd_commands"][index]
+
+		if command == None:
+			notify_warning.emit("No Pipe command specified, therefore no Pipe process was started.")
+			return
+
+		command = command.replace("\n", " && ")
+		try:
+			output = subprocess.check_output(command, shell=True)
+			output = output.decode("utf-8")
+
+			notify_info.emit(f"The subprocess was started and returned:\n{output}")
+
+			for cls, reread in zip((ExpFile, CatFile, LinFile), (exp_rr, cat_rr, lin_rr)):
+				if reread:
+					cls.reread_all()
+
+		except Exception as E:
+			notify_error.emit(f"The command '{command}' failed with the Exception '{E}'.")
+			raise
 
 ##
 ## Global Functions
@@ -5655,11 +6447,11 @@ if __name__ == '__main__':
 ## To Do
 ##
 
-# - Add back the most important modules
-	# - Seriesfinder
-	# - Peakfinder
-	# - Energy Levels
-	# - Create Report
+# - Which of these modules do we want to keep?
+	# - EnergyLevelsTrendWindow
+	# - SpectraResolverWindow
+	# - CalibrateSpectrumWindow
+
 # - Think about mechanism to group setting_data calls in beginning/ or just skip drawing and draw once everything is set up
 
 # - Files: allow to open files by glob string -> no annoying stuff with subfolders
