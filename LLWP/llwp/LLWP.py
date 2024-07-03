@@ -60,7 +60,10 @@ from matplotlib import style, figure
 from matplotlib.backends.backend_qtagg import FigureCanvas, NavigationToolbar2QT
 
 import warnings
-warnings.simplefilter('ignore', np.RankWarning)
+try:
+	warnings.simplefilter('ignore', np.RankWarning)
+except AttributeError:
+	warnings.simplefilter('ignore', np.exceptions.RankWarning)
 
 QLocale.setDefault(QLocale("en_EN"))
 
@@ -1539,7 +1542,6 @@ class PlotWidget(QGroupBox):
 						"Voigt 2nd Derivative":		(lambda *x: lineshape("Voigt", 2, *x),   (x0, y0, w0, w0),  ((xmin, amp_min, 0, 0), (xmax, amp_max, 5*w0, 5*w0))),
 					}.get(fitfunction)
 
-				print(f"{p0=}\n{bounds=}")
 
 				try:
 					popt, pcov = optimize.curve_fit(function, exp_xs, exp_ys, p0=p0, bounds=bounds)
@@ -3202,6 +3204,16 @@ class BlendWindow(EQWidget):
 		self.update_gui(entries, dict_, index)
 
 	def update_gui(self, entries, dict_, index):
+		tmp_cat = main.get_visible_data("cat", (dict_["xpre"], dict_["xpre"]))
+		qn_labels = [f"qn{ul}{i+1}" for ul in "ul" for i in range(6)]
+		query = " and ".join([f"( {label} == {dict_[label]} )" for label in qn_labels if label in dict_])
+		tmp_cat = tmp_cat.query(query)
+		y_at_xpre = tmp_cat["y"].values[0]
+
+		if main.config["series_blendminrelratio"] > 0:
+			min_y_value = y_at_xpre * main.config["series_blendminrelratio"]
+			entries = entries.query("y >= @min_y_value")
+
 		self.noq = main.config["series_qns"]
 		self.entries = entries.reset_index(drop=True)
 		self.xmiddle = dict_["x"]
@@ -5305,7 +5317,7 @@ class ReferenceSelector(QTabWidget):
 		button_apply = QQ(QPushButton, text="Apply", change=lambda x: main.plotwidget.reset_offsets())
 
 		label_N0 = QQ(QLabel, text="N0: ")
-		self.input_N0 = QQ(QSpinBox, value=self.state["expression"]["N0"], range=(0, None), change=lambda: self.state["expression"].__setitem__("N0", self.input_N0.value()))
+		self.input_N0 = QQ(QSpinBox, value=self.state["expression"]["N0"], range=(None, None), change=lambda: self.state["expression"].__setitem__("N0", self.input_N0.value()))
 
 		layout.addWidget(self.input_expr)
 		hbox = QHBoxLayout()
@@ -5348,7 +5360,7 @@ class ReferenceSelector(QTabWidget):
 				return
 
 			xs = []
-			tmp_xs = re.split('; |, |\s', line)
+			tmp_xs = re.split(r'; |, |\s', line)
 			for x in tmp_xs:
 				if not x.strip():
 					continue
@@ -5375,7 +5387,7 @@ class ReferenceSelector(QTabWidget):
 						if line == "" or line.startswith("#"):
 							continue
 
-						tmp = re.split('; |, |\s', line)
+						tmp = re.split(r'; |, |\s', line)
 						for x in tmp:
 							try:
 								xs.append(float(x))
@@ -6851,6 +6863,7 @@ config_specs = {
 	"series_annotate_xs":					[False, bool],
 	"series_annotate_fmt":					[".4f", str],
 	"series_blendwidth":					[1, float],
+	"series_blendminrelratio":				[0, float],
 	"series_blenddialog":					[True, bool],
 	"series_currenttab":					[1, int],
 	"series_references":					[[], list],
