@@ -67,9 +67,16 @@ try:
 except AttributeError:
 	warnings.simplefilter('ignore', np.exceptions.RankWarning)
 
-
-N_QNS = os.environ.get('LLWP_NQNS', 6)
+N_QNS = 6 if not pyckett.USE_10_QUANTA else 10
+N_QNS = int(os.environ.get('LLWP_QNS', N_QNS))
 ADD_QNS_DTYPES = {f'qn{ul}{i+1}': pyckett.cat_dtypes['qnu1'] for ul in ('u', 'l') for i in range(6, N_QNS)}
+
+
+# Can be changed right before starting program:
+# On Unix systems:
+# export LLWP_QNS=10
+# On Windows systems:
+# set LLWP_QNS=10
 
 QLocale.setDefault(QLocale('en_EN'))
 matplotlib.rcParams['axes.formatter.useoffset'] = False
@@ -1483,10 +1490,10 @@ class CatFile(File):
 
 			if y_is_log:
 				data['y'] = 10 ** data['y']
-			for column in dtypes.columns:
+			for column in self.dtypes.columns:
 				if column not in data.columns:
 					data[column] = pyckett.SENTINEL
-			data = data[cat_dtypes.keys()]
+			data = data[self.dtypes.keys()]
 
 		return(data)
 
@@ -1539,10 +1546,10 @@ class LinFile(File):
 			data = pd.read_fwf(self.filename_abs, **kwargs)
 			data['filename'] = pd.Series(self.filename_abs, index=data.index, dtype='category')
 
-			for column in dtypes.columns:
+			for column in self.dtypes.columns:
 				if column not in data.columns:
 					data[column] = pyckett.SENTINEL
-			data = data[cat_dtypes.keys()]
+			data = data[self.dtypes.keys()]
 
 		return(data)
 	
@@ -1663,7 +1670,7 @@ class NewAssignments(LinFile):
 		self.add_rows(rows_dict)
 
 	def add_rows(self, rows_dict):
-		dtypes = pyckett.lin_dtypes
+		dtypes = {**pyckett.lin_dtypes, **ADD_QNS_DTYPES}
 		new_row = pd.DataFrame(rows_dict).astype(dtypes)[dtypes.keys()]
 		self.new_assignments_df = pd.concat( (self.new_assignments_df, new_row) ).reset_index(drop=True)
 		self.load_file()
@@ -2307,8 +2314,8 @@ class LWPAx():
 			qnus = [f'qnu{i+1}' for i in range(noq)]
 			qnls = [f'qnl{i+1}' for i in range(noq)]
 
-			qnus_string = ','.join([f'{qns_dict[qn]}' for qn in qnus if qn in qnus])
-			qnls_string = ','.join([f'{qns_dict[qn]}' for qn in qnls if qn in qnls])
+			qnus_string = ','.join([f'{qns_dict[qn]}' for qn in qnus if qn in qns_dict])
+			qnls_string = ','.join([f'{qns_dict[qn]}' for qn in qnls if qn in qns_dict])
 
 			qnstring = f'{qnus_string} ← {qnls_string}'
 		else:
@@ -3740,12 +3747,10 @@ class ReferenceSelector(QTabWidget):
 			'diff': state['diff'] if state['use_diff'] else state['incr'],
 		}
 
-		print(f'{state["qnus"]=}')
 		tmp = {key: np.array(value[:n_qns]) for key, value in tmp.items()}
 		return(tmp)
 
 	def calc_references(self, n_rows, n_qns):
-		print(f'{n_qns=}')
 		method = self.state['method']
 		shape = (n_rows, 2, n_qns)
 		qns = np.zeros(shape, dtype=np.int64)
@@ -3917,9 +3922,9 @@ class ReferenceSelector(QTabWidget):
 class SeriesSelector(QWidget):
 	values_changed = pyqtSignal()
 
-	def __init__(self, parent, initial_values={}, n_qns=N_QNS):
+	def __init__(self, parent, initial_values={}):
 		super().__init__(parent)
-		self.n_qns = n_qns
+		self.n_qns = N_QNS
 		self.parent = parent
 		self.updating = False
 		self.state = {
@@ -3933,13 +3938,13 @@ class SeriesSelector(QWidget):
 
 		layout = QGridLayout()
 
-		create_qn = lambda: QQ(QSpinBox, minWidth=40, maxWidth=40, range=(None, None),
+		create_qn = lambda: QQ(QSpinBox, minWidth=40, maxWidth=40, range=(None, None), visible=False,
 							singlestep=1, buttons=False, change=lambda x: self.changed())
 
 		self.qnus = [create_qn() for _ in range(self.n_qns)]
 		self.qnls = [create_qn() for _ in range(self.n_qns)]
 
-		create_widget = lambda widget, kwargs: QQ(widget, minWidth=40, maxWidth=40, 
+		create_widget = lambda widget, kwargs: QQ(widget, minWidth=40, maxWidth=40, visible=False,
 							change=lambda x: self.changed(), **kwargs)
 
 		self.incr = [create_widget(QCheckBox, {'text':'Inc'}) for _ in range(self.n_qns)]
@@ -6169,7 +6174,7 @@ def fit_polynom_multirank(xs, ys, peakdirection, fit_xs, maxrank):
 def fit_lineshape(xs, ys, peakdirection, fit_xs, profilname, derivative, offset):
 	xmin, xmax = xs.min(), xs.max()
 	x0, w0 = (xmin + xmax) / 2, (xmax - xmin)
-	ymin, ymax, ymean, yptp = ys.min(), ys.max(), ys.mean(), ys.ptp()
+	ymin, ymax, ymean, yptp = ys.min(), ys.max(), ys.mean(), np.ptp(ys)
 	y0 = 0
 
 	amp_min, amp_max = -3*yptp, 3*yptp
