@@ -61,7 +61,15 @@ import matplotlib
 from matplotlib.backends.backend_qtagg import FigureCanvas, NavigationToolbar2QT
 
 import warnings
-warnings.simplefilter('ignore', np.RankWarning) 
+
+try:
+	warnings.simplefilter('ignore', np.RankWarning)
+except AttributeError:
+	warnings.simplefilter('ignore', np.exceptions.RankWarning)
+
+
+N_QNS = os.environ.get('LLWP_NQNS', 6)
+ADD_QNS_DTYPES = {f'qn{ul}{i+1}': pyckett.cat_dtypes['qnu1'] for ul in ('u', 'l') for i in range(6, N_QNS)}
 
 QLocale.setDefault(QLocale('en_EN'))
 matplotlib.rcParams['axes.formatter.useoffset'] = False
@@ -248,7 +256,7 @@ class Config(dict):
 		
 		'commandlinedialog_commands': ([], list),
 		'commandlinedialog_current': (0, int),
-
+	
 		'closebylines_catfstring': ('{x:12.4f} {qns} {ylog}', str),
 		'closebylines_linfstring': ('{x:12.4f} {qns}', str),
 
@@ -1453,7 +1461,7 @@ class CatFile(File):
 	decorator = DynamicDecorator()
 	
 	default_color_key = "color_cat"
-	dtypes = {**pyckett.cat_dtypes, **File.additional_dtypes}
+	dtypes = {**pyckett.cat_dtypes, **File.additional_dtypes, **ADD_QNS_DTYPES}
 	df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
 	
 	@QThread.threaded_d
@@ -1493,7 +1501,7 @@ class CatFile(File):
 		if not len(df):
 			return
 		
-		qnu_labels = [f'qnu{i+1}' for i in range(6)]
+		qnu_labels = [f'qnu{i+1}' for i in range(N_QNS)]
 		noq = len(qnu_labels)
 		for i, qnu_label in enumerate(qnu_labels):
 			unique_values = df[qnu_label].unique()
@@ -1511,7 +1519,7 @@ class LinFile(File):
 	decorator = DynamicDecorator()
 	
 	default_color_key = "color_lin"
-	dtypes = {**pyckett.lin_dtypes, **File.additional_dtypes}
+	dtypes = {**pyckett.lin_dtypes, **File.additional_dtypes, **ADD_QNS_DTYPES}
 	df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
 	has_y_data = False
 	
@@ -1579,7 +1587,7 @@ class NewAssignments(LinFile):
 		self.is_initialized = True
 		self.__class__._instance = self
 
-		dtypes = pyckett.lin_dtypes
+		dtypes = {**pyckett.lin_dtypes, **ADD_QNS_DTYPES}
 		self.new_assignments_df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
 		self.filename_abs = filename
 		self.basename = "New Assignments"
@@ -2361,7 +2369,7 @@ class LWPAx():
 			self.fit_data(xmin, xmax)
 	
 	def create_qns_dict(self, complete=False):
-		qns_dict = {} if not complete else {f'qn{ul}{i+1}': pyckett.SENTINEL for ul in 'ul' for i in range(6)}
+		qns_dict = {} if not complete else {f'qn{ul}{i+1}': pyckett.SENTINEL for ul in 'ul' for i in range(N_QNS)}
 		if self.qns is None:
 			return(qns_dict)
 		
@@ -2906,7 +2914,7 @@ class LLWP(QApplication):
 		config = Config(self.configsignal)
 		config.load()
 		messages = config.messages
-		
+
 		self.initialize_matplotlib_settings()
 		self.initialize_dynamic_decorators_for_file_classes()
 
@@ -2985,7 +2993,7 @@ class AssignBlendsDialog(QDialog):
 	def update_gui(self, new_assignment, entries):
 		
 		if config['series_blendminrelratio']:
-			qn_labels = [f'qn{ul}{i+1}'for ul in 'ul' for i in range(6)]
+			qn_labels = [f'qn{ul}{i+1}'for ul in 'ul' for i in range(N_QNS)]
 			query = ' and '.join([f'( {label} == {dict_[label]} )' for label in qn_labels if dict_[label] != pyckett.SENTINEL])
 			tmp_cat = tmp_cat.query(query)
 			y_at_xpre = tmp_cat["y"].values[0]
@@ -3026,7 +3034,7 @@ class AssignBlendsDialog(QDialog):
 			self.checkboxes.append(checkbox)
 			table.setCellWidget(currRowCount, 0, checkbox)
 
-		for i in range(6):
+		for i in range(N_QNS):
 			table.setColumnHidden(i+ 4, i>=noq)
 			table.setColumnHidden(i+10, i>=noq)
 
@@ -3040,11 +3048,11 @@ class AssignBlendsDialog(QDialog):
 		layout.addWidget(self.label)
 
 		self.table = QTableWidget()
-		self.cols = ["x", "y", "dist"] + [f"qn{ul}{i+1}" for ul in ("u", "l") for i in range(6)] + ["filename"]
+		self.cols = ["x", "y", "dist"] + [f"qn{ul}{i+1}" for ul in ("u", "l") for i in range(N_QNS)] + ["filename"]
 		self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 		self.table.setRowCount(0)
 		self.table.setColumnCount(len(self.cols)+1)
-		self.table.setHorizontalHeaderLabels(["Y/N", "x", "log. y", "Dist"] +  [f"{ul}{i+1}" for ul in ("U", "L") for i in range(6)] + ["Filename"])
+		self.table.setHorizontalHeaderLabels(["Y/N", "x", "log. y", "Dist"] +  [f"{ul}{i+1}" for ul in ("U", "L") for i in range(N_QNS)] + ["Filename"])
 		layout.addWidget(self.table)
 
 		buttons_layout = QHBoxLayout()
@@ -3082,7 +3090,7 @@ class AssignBlendsDialog(QDialog):
 			new_assignments[f'qnu{i+1}'] = selected_rows[f'qnu{i+1}']
 			new_assignments[f'qnl{i+1}'] = selected_rows[f'qnl{i+1}']
 		
-		for i in range(self.noq, 6):
+		for i in range(self.noq, N_QNS):
 			new_assignments[f'qnu{i+1}'] = pyckett.SENTINEL
 			new_assignments[f'qnl{i+1}'] = pyckett.SENTINEL
 
@@ -3731,10 +3739,13 @@ class ReferenceSelector(QTabWidget):
 			'qnls': state['qnls'],
 			'diff': state['diff'] if state['use_diff'] else state['incr'],
 		}
+
+		print(f'{state["qnus"]=}')
 		tmp = {key: np.array(value[:n_qns]) for key, value in tmp.items()}
 		return(tmp)
 
 	def calc_references(self, n_rows, n_qns):
+		print(f'{n_qns=}')
 		method = self.state['method']
 		shape = (n_rows, 2, n_qns)
 		qns = np.zeros(shape, dtype=np.int64)
@@ -3906,7 +3917,7 @@ class ReferenceSelector(QTabWidget):
 class SeriesSelector(QWidget):
 	values_changed = pyqtSignal()
 
-	def __init__(self, parent, initial_values={}, n_qns=6):
+	def __init__(self, parent, initial_values={}, n_qns=N_QNS):
 		super().__init__(parent)
 		self.n_qns = n_qns
 		self.parent = parent
@@ -3940,9 +3951,9 @@ class SeriesSelector(QWidget):
 		self.togglediff = QQ(QToolButton, text="⇆", change=lambda x: self.change_incr_mode(), width=40)
 		
 		for i, widget in enumerate(self.qnus + self.qnls):
-			layout.addWidget(widget, i//6, i%6)
+			layout.addWidget(widget, i//N_QNS, i%N_QNS)
 
-		for i, incr, diff in zip(range(6), self.incr, self.diff):
+		for i, incr, diff in zip(range(N_QNS), self.incr, self.diff):
 			tmp = QHBoxLayout()
 			tmp.addWidget(incr)
 			tmp.addWidget(diff)
@@ -3950,13 +3961,13 @@ class SeriesSelector(QWidget):
 			layout.addLayout(tmp, 4, i)
 			layout.setColumnStretch(i, 100)
 
-		for i in range(6):
+		for i in range(N_QNS):
 			layout.setColumnStretch(i, 100)
 		
-		layout.addWidget(self.togglediff, 4, 6, 1, 1)
+		layout.addWidget(self.togglediff, 4, N_QNS, 1, 1)
 
-		layout.addWidget(self.incqns, 0, 6, 1, 2)
-		layout.addWidget(self.decqns, 1, 6, 1, 2)
+		layout.addWidget(self.incqns, 0, N_QNS, 1, 2)
+		layout.addWidget(self.decqns, 1, N_QNS, 1, 2)
 
 		layout.setRowStretch(6, 10)
 		layout.setColumnStretch(8, 1)
@@ -4294,9 +4305,9 @@ class CatTableModel(QAbstractTableModel):
 
 	def update_columns_visibility(self):
 		qns = config['series_qns']
-		for i in range(6):
+		for i in range(N_QNS):
 			self.table.setColumnHidden(i,   i>=qns)
-			self.table.setColumnHidden(i+6, i>=qns)
+			self.table.setColumnHidden(i+N_QNS, i>=qns)
 
 class NewAssignmentsWindow(EQDockWidget):
 	default_visible = True
@@ -4327,7 +4338,7 @@ class NewAssignmentsWindow(EQDockWidget):
 			'error': QQ(QDoubleSpinBox, 'fit_uncertainty', range=(-3, None), minWidth=120, singlestep=config["fit_uncertaintystep"], tooltip=tooltip_uncert),
 		}
 
-		tmp = { f'qn{UL.lower()}{i+1}': f'{UL}{i+1}' for UL in 'UL' for i in range(6) }
+		tmp = { f'qn{UL.lower()}{i+1}': f'{UL}{i+1}' for UL in 'UL' for i in range(N_QNS) }
 		headers = { **tmp, 'x': 'Freq', 'error': 'Unc', 'weight': 'Weight', 'comment': 'Comment'}
 
 		self.table = QTableView()
@@ -5492,7 +5503,7 @@ class SeriesfinderWindow(EQDockWidget):
 		self.noq = noq = config["series_qns"]
 
 		qns_visible = [f"qn{ul}{n+1}" for ul in ("u", "l") for n in range(noq)]
-		qns_invisible = [f"qn{ul}{n+1}" for ul in ("u", "l") for n in range(noq, 6)]
+		qns_invisible = [f"qn{ul}{n+1}" for ul in ("u", "l") for n in range(noq, N_QNS)]
 
 		if config["seriesfinder_onlyunassigned"]:
 			tmp_lin_df = LinFile.get_data()
