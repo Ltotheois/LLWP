@@ -38,10 +38,8 @@ import re
 import io
 import time
 import wrapt
-import random
 import pickle
 import json
-import queue
 import threading
 import configparser
 import traceback as tb
@@ -67,8 +65,12 @@ try:
 except AttributeError:
 	warnings.simplefilter('ignore', np.exceptions.RankWarning)
 
-N_QNS = 6 if not pyckett.USE_10_QUANTA else 10
-N_QNS = int(os.environ.get('LLWP_QNS', N_QNS))
+N_QNS = int(os.environ.get('LLWP_QNS', 0))
+N_QNS = max(6, N_QNS)
+
+# @Luis: Hardcoded for Marie-Aline
+# Think about a clever way to set this initially
+N_QNS = 10
 ADD_QNS_DTYPES = {f'qn{ul}{i+1}': pyckett.cat_dtypes['qnu1'] for ul in ('u', 'l') for i in range(6, N_QNS)}
 
 
@@ -260,6 +262,7 @@ class Config(dict):
 		'flag_syncreferencestocolumns': (True, bool),
 		'flag_appendonsave': (True, bool),
 		'flag_showmainplotposition': (True, bool),
+		'flag_pyckettuse10quanta': (True, bool),
 		
 		'commandlinedialog_commands': ([], list),
 		'commandlinedialog_current': (0, int),
@@ -2921,6 +2924,9 @@ class LLWP(QApplication):
 		config = Config(self.configsignal)
 		config.load()
 		messages = config.messages
+		
+		config.register('flag_pyckettuse10quanta', self.update_pyckett_quanta_settings)
+		self.update_pyckett_quanta_settings()
 
 		self.initialize_matplotlib_settings()
 		self.initialize_dynamic_decorators_for_file_classes()
@@ -2971,6 +2977,9 @@ class LLWP(QApplication):
 			cls.decorator.init_func = init_func
 			cls.decorator.exit_func = exit_func
 
+	def update_pyckett_quanta_settings(self):
+		pyckett.USE_10_QUANTA = config['flag_pyckettuse10quanta']
+
 ##
 ## Dialogs
 ##
@@ -2998,7 +3007,6 @@ class AssignBlendsDialog(QDialog):
 		self.update_gui(new_assignment, entries)
 
 	def update_gui(self, new_assignment, entries):
-		
 		if config['series_blendminrelratio']:
 			qn_labels = [f'qn{ul}{i+1}'for ul in 'ul' for i in range(N_QNS)]
 			query = ' and '.join([f'( {label} == {dict_[label]} )' for label in qn_labels if dict_[label] != pyckett.SENTINEL])
@@ -3956,7 +3964,7 @@ class SeriesSelector(QWidget):
 		self.togglediff = QQ(QToolButton, text="⇆", change=lambda x: self.change_incr_mode(), width=40)
 		
 		for i, widget in enumerate(self.qnus + self.qnls):
-			layout.addWidget(widget, i//N_QNS, i%N_QNS)
+			layout.addWidget(widget, i//self.n_qns, i%self.n_qns)
 
 		for i, incr, diff in zip(range(N_QNS), self.incr, self.diff):
 			tmp = QHBoxLayout()
@@ -3966,13 +3974,13 @@ class SeriesSelector(QWidget):
 			layout.addLayout(tmp, 4, i)
 			layout.setColumnStretch(i, 100)
 
-		for i in range(N_QNS):
+		for i in range(self.n_qns):
 			layout.setColumnStretch(i, 100)
 		
-		layout.addWidget(self.togglediff, 4, N_QNS, 1, 1)
+		layout.addWidget(self.togglediff, 4, self.n_qns, 1, 1)
 
-		layout.addWidget(self.incqns, 0, N_QNS, 1, 2)
-		layout.addWidget(self.decqns, 1, N_QNS, 1, 2)
+		layout.addWidget(self.incqns, 0, self.n_qns, 1, 2)
+		layout.addWidget(self.decqns, 1, self.n_qns, 1, 2)
 
 		layout.setRowStretch(6, 10)
 		layout.setColumnStretch(8, 1)
