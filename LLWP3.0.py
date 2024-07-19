@@ -69,10 +69,12 @@ N_QNS = int(os.environ.get('LLWP_QNS', 0))
 N_QNS = max(6, N_QNS)
 
 # @Luis: Hardcoded for Marie-Aline
+# @Luis: Is there a way to change that sensibly in runtime? Change dtypes/columns of the important dataframes?
 # Think about a clever way to set this initially
-N_QNS = 10
+N_QNS = 7
 ADD_QNS_DTYPES = {f'qn{ul}{i+1}': pyckett.cat_dtypes['qnu1'] for ul in ('u', 'l') for i in range(6, N_QNS)}
 
+print(f'{ADD_QNS_DTYPES=}')
 
 # Can be changed right before starting program:
 # On Unix systems:
@@ -258,11 +260,12 @@ class Config(dict):
 		'flag_extensions': ({"exp": [".csv"], "cat": [".cat"], "lin": [".lin"], "project": [".files"]}, dict),
 		'flag_notificationtime': (2000, int),
 		'flag_logmaxrows': (1000, int),
+		'flag_statusbarmaxcharacters': (100, int),
 		'flag_xformatfloat': (".4f", str),
 		'flag_syncreferencestocolumns': (True, bool),
 		'flag_appendonsave': (True, bool),
 		'flag_showmainplotposition': (True, bool),
-		'flag_pyckettuse10quanta': (True, bool),
+		'flag_pyckettquanta': (6, int),
 		
 		'commandlinedialog_commands': ([], list),
 		'commandlinedialog_current': (0, int),
@@ -1060,6 +1063,7 @@ class File():
 		mask = (df['filename'] == self.filename_abs)
 		xs = df.loc[mask, 'x']
 		self.xmin, self.xmax = xs.min(), xs.max()
+		
 		notify_info.emit(f"Successfully loaded '{self.filename_abs}'")
 	
 	def to_dict(self):
@@ -1382,7 +1386,8 @@ class File():
 		
 		# Color query
 		if not self.color_query:
-			return()
+			mainwindow.lwpwidget.set_data()
+			return
 		
 		for command in self.color_query.split("\n"):
 			if not command.strip():
@@ -1391,6 +1396,7 @@ class File():
 			indices = (df.loc[mask].query(query)).index
 			df.loc[indices, "color"] = color
 
+		mainwindow.lwpwidget.set_data()
 
 	def toggle_visibility(self):
 		self.is_visible = not self.is_visible
@@ -1421,7 +1427,8 @@ class File():
 		else:
 			df.loc[mask, 'visible'] = False
 		
-
+		mainwindow.lwpwidget.set_data()
+		
 	def apply_transformation(self, col, transform, fallback_col):
 		df = self.__class__.df
 		mask = (df['filename'] == self.filename_abs)
@@ -1430,6 +1437,8 @@ class File():
 			df.loc[mask, col] = df.loc[mask, fallback_col]
 		else:
 			df.loc[mask, col] = df.loc[mask].eval(transform)
+		
+		mainwindow.lwpwidget.set_data()
 
 	def apply_xtransformation(self):
 		self.apply_transformation('x', self.xtransformation, 'x0')
@@ -1482,7 +1491,7 @@ class CatFile(File):
 
 	def load_file_core(self):
 		if self.extension not in config['flag_catformats']:
-			data = pyckett.cat_to_df(self.filename_abs)
+			data = pyckett.cat_to_df(self.filename_abs, sort=False)
 			data['filename'] = data['filename'].astype('category')
 		else:
 			kwargs = config['flag_catformats'][self.extension].copy()
@@ -1541,7 +1550,7 @@ class LinFile(File):
 
 	def load_file_core(self):
 		if self.extension not in config['flag_linformats']:
-			data = pyckett.lin_to_df(self.filename_abs)
+			data = pyckett.lin_to_df(self.filename_abs, sort=False)
 			data['filename'] = data['filename'].astype('category')
 		else:
 			kwargs = config['flag_linformats'][self.extension].copy()
@@ -1644,7 +1653,7 @@ class NewAssignments(LinFile):
 		mask = (df['filename'] == self.filename_abs)
 		xs = df.loc[mask, 'x']
 		self.xmin, self.xmax = xs.min(), xs.max()
-		notify_info.emit(f"Succesfully loaded '{self.basename}'")
+		# notify_info.emit(f"Succesfully loaded '{self.basename}'")
 
 	def gui_settings_widgets(self):
 		dcolor = self.color
@@ -1674,8 +1683,9 @@ class NewAssignments(LinFile):
 
 	def add_rows(self, rows_dict):
 		dtypes = {**pyckett.lin_dtypes, **ADD_QNS_DTYPES}
-		new_row = pd.DataFrame(rows_dict).astype(dtypes)[dtypes.keys()]
-		self.new_assignments_df = pd.concat( (self.new_assignments_df, new_row) ).reset_index(drop=True)
+		new_rows = pd.DataFrame(rows_dict).astype(dtypes)[dtypes.keys()]
+		new_rows['filename'] = self.filename_abs
+		self.new_assignments_df = pd.concat( (self.new_assignments_df, new_rows) ).reset_index(drop=True)
 		self.load_file()
 		new_assignments_window = NewAssignmentsWindow._instance
 		new_assignments_window.model.update()
@@ -1692,7 +1702,6 @@ class NewAssignments(LinFile):
 	def get_df(self):
 		return(self.new_assignments_df)
 	
-
 	def save_gui(self):
 		append = config['flag_appendonsave']
 		format = config['flag_saveformat']
@@ -2780,7 +2789,7 @@ class StatusBar(QStatusBar):
 
 		self.setStyleSheet("QStatusBar::item {border-left: 1px solid inherit;}")
 
-		self.messages_label = QQ(QLabel, text='')
+		self.messages_label = QQ(QLabel, text='', wordwrap=True)
 		self.addPermanentWidget(self.messages_label, 1)
 
 		self.position_label = QQ(QLabel, text='')
@@ -2800,8 +2809,14 @@ class StatusBar(QStatusBar):
 		style_string = {
 			'error': "<span style='color:#ff0000;'>ERROR</span>: ",
 			'warning': "<span style='color:#eda711;'>WARNING</span>: ",
+			'info': "<span style='color:#0096FF;'>INFO</span>: ",
 		}.get(style, '')
 
+		max_characters = config['flag_statusbarmaxcharacters']
+		
+		if len(text) > max_characters:
+			text = f'{text[:max_characters]} ...'
+		
 		text = f'  {style_string}{text}'
 		self._disappearing_messages.append(text)
 
@@ -2874,6 +2889,7 @@ class NotificationsBox(QScrollArea):
 		style_string = {
 			'error': "<span style='color:#ff0000;'>ERROR</span>: ",
 			'warning': "<span style='color:#eda711;'>WARNING</span>: ",
+			'info': "<span style='color:#0096FF;'>INFO</span>: ",
 		}.get(style, '')
 
 		text = f'{style_string}{text}'
@@ -2915,6 +2931,9 @@ class LLWP(QApplication):
 	configsignal = pyqtSignal(tuple)
 	
 	def __init__(self, *args, **kwargs):
+		sys.excepthook = except_hook
+		threading.excepthook = lambda args: except_hook(*args[:3])
+		
 		super().__init__(sys.argv, *args, **kwargs)
 		self.setStyle("Fusion")
 
@@ -2925,7 +2944,7 @@ class LLWP(QApplication):
 		config.load()
 		messages = config.messages
 		
-		config.register('flag_pyckettuse10quanta', self.update_pyckett_quanta_settings)
+		config.register('flag_pyckettquanta', self.update_pyckett_quanta_settings)
 		self.update_pyckett_quanta_settings()
 
 		self.initialize_matplotlib_settings()
@@ -2978,7 +2997,7 @@ class LLWP(QApplication):
 			cls.decorator.exit_func = exit_func
 
 	def update_pyckett_quanta_settings(self):
-		pyckett.USE_10_QUANTA = config['flag_pyckettuse10quanta']
+		pyckett.QUANTA = config['flag_pyckettquanta']
 
 ##
 ## Dialogs
@@ -3009,8 +3028,8 @@ class AssignBlendsDialog(QDialog):
 	def update_gui(self, new_assignment, entries):
 		if config['series_blendminrelratio']:
 			qn_labels = [f'qn{ul}{i+1}'for ul in 'ul' for i in range(N_QNS)]
-			query = ' and '.join([f'( {label} == {dict_[label]} )' for label in qn_labels if dict_[label] != pyckett.SENTINEL])
-			tmp_cat = tmp_cat.query(query)
+			query = ' and '.join([f'( {label} == {new_assignment[label]} )' for label in qn_labels if new_assignment[label] != pyckett.SENTINEL])
+			tmp_cat = entries.query(query)
 			y_at_xpre = tmp_cat["y"].values[0]
 		
 			min_y_value = y_at_xpre * config['series_blendminrelratio']
@@ -4180,10 +4199,11 @@ class LogWindow(EQDockWidget):
 		layout.addWidget(self.log_area)
 
 	def writelog(self, text, style=None):
-		tmp = self.log_area.toPlainText()
-		tmp = tmp.split("\n")
+		separator = "<br/>"
+		tmp = self.log_area.toHtml()
+		tmp = tmp.split(separator)
 		if len(tmp)-1 > config["flag_logmaxrows"]:
-			self.log_area.setText("\n".join(tmp[-config["flag_logmaxrows"]:]))
+			self.log_area.setHtml(separator.join(tmp[-config["flag_logmaxrows"]:]))
 
 		time_str = time.strftime("%H:%M", time.localtime())
 		
@@ -4191,9 +4211,10 @@ class LogWindow(EQDockWidget):
 		style_string = {
 			'error': "<span style='color:#ff0000;'>ERROR</span>: ",
 			'warning': "<span style='color:#eda711;'>WARNING</span>: ",
+			'info': "<span style='color:#0096FF;'>INFO</span>: ",
 		}.get(style, '')
 
-		text = f"{time_str}: {style_string}{text}\n"
+		text = f"{time_str}: {style_string}{text}{separator}"
 		self.log_area.append(text)
 		sb = self.log_area.verticalScrollBar()
 		sb.setValue(sb.maximum())
@@ -4391,6 +4412,7 @@ class NewAssignmentsWindow(EQDockWidget):
 
 		df.reset_index(inplace=True, drop=True)
 		self.model.update()
+		self.new_assignments.load_file()
 		mainwindow.lwpwidget.set_data()
 
 class ConvolutionWindow(EQDockWidget):
@@ -6455,6 +6477,23 @@ def restart():
 	mainwindow.closeEvent()
 	NewAssignments.get_instance().save_backup()
 	os.execl(sys.executable, sys.executable, __file__, project_filename)
+
+def except_hook(cls, exception, traceback):
+	if isinstance(exception, GUIAbortedError):
+		return
+	
+	if issubclass(cls, KeyboardInterrupt):
+		sys.exit(0)
+
+	sys.__excepthook__(cls, exception, traceback)
+	with open(llwpfile(".err"), "a+", encoding="utf-8") as file:
+		time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+		file.write(f"{time_str}: \n{exception}\n{''.join(tb.format_tb(traceback))}\n\n")
+	try:
+		NewAssignments.get_instance().save_backup()
+		notify_error.emit(f"{exception}\n{''.join(tb.format_tb(traceback))}")
+	except Exception as E:
+		pass
 
 ##
 ## Startup
