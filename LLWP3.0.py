@@ -1965,6 +1965,9 @@ class LWPWidget(QGroupBox):
 		# The following performed better than self.fig.clf()
 		for ax in self.fig.get_axes():
 			self.fig.delaxes(ax)
+		
+		for lwpax in self.lwpaxes.flatten():
+			lwpax.span = None
 
 		thread.earlyreturn()
 
