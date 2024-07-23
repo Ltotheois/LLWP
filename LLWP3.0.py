@@ -1791,46 +1791,72 @@ class FileAdditionalSettingsDialog(QDialog):
 			self.layout.addWidget(tmp['widget'])
 		
 		if hasattr(self.file, 'is_stickspectrum'):
-			tmp_widget = QQ(QCheckBox, text='Is Stick Spectrum: ', change=self.update_stickspectrum)
+			tmp_widget = QQ(QCheckBox, text='Is Stick Spectrum: ', change=self.update_stickspectrum, value=file.is_stickspectrum)
 			self.widgets['is_stickspectrum'] = tmp_widget
 			self.layout.addWidget(tmp_widget)
 
-		self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+		self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Reset | QDialogButtonBox.StandardButton.Close)
 		self.button_box.rejected.connect(lambda: self.done(0))
+
+		self.button_box.button(QDialogButtonBox.StandardButton.Reset).clicked.connect(lambda _: self.reset_all())
+		self.button_box.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(lambda _: self.apply_all())
 
 		self.layout.addWidget(self.button_box)
 
-	def update_query(self, _):
+	def reset_all(self):
+		self.widgets['query']['widget'].setPlainText('')
+		self.widgets['xtransformation']['widget'].setPlainText('')
+		self.widgets['ytransformation']['widget'].setPlainText('')
+		self.widgets['color_query']['widget'].setPlainText('')
+
+		if hasattr(self.file, 'is_stickspectrum'):
+			self.widgets['is_stickspectrum'].setChecked(False)
+		
+		self.apply_all()
+
+	@drawplot_decorator.d
+	def apply_all(self):
+		self.done(0)
+
+		self.update_query()
+		self.update_xtransformation()
+		self.update_ytransformation()
+		self.update_color_query()
+		if hasattr(self.file, 'is_stickspectrum'):
+			self.update_stickspectrum()
+		
+
+	def update_query(self, _=None):
 		file = self.file
 		query = self.widgets['query']['widget'].toPlainText()
 		file.query = query
 		file.apply_visibility()
 		
-	def update_xtransformation(self, _):
+	def update_xtransformation(self, _=None):
 		file = self.file
 		xtransformation = self.widgets['xtransformation']['widget'].toPlainText()
 		file.xtransformation = xtransformation
 		file.apply_xtransformation()
 
-	def update_ytransformation(self, _):
+	def update_ytransformation(self, _=None):
 		file = self.file
 		ytransformation = self.widgets['ytransformation']['widget'].toPlainText()
 		file.ytransformation = ytransformation
 		file.apply_ytransformation()
 
-	def update_color_query(self, _):
+	def update_color_query(self, _=None):
 		file = self.file
 		color_query = self.widgets['color_query']['widget'].toPlainText()
 		file.color_query = color_query
 		file.apply_color()
 	
-	def update_stickspectrum(self, _):
+	def update_stickspectrum(self, _=None):
 		file = self.file
 		is_stickspectrum = self.widgets['is_stickspectrum'].isChecked()
 		file.is_stickspectrum = is_stickspectrum
 		mainwindow.lwpwidget.set_data()
 
-	def on_exit(self, _):
+	def on_exit(self, _=None):
 		del self.__class__.open_dialogs[self.file]
 
 
