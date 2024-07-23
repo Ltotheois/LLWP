@@ -65,26 +65,16 @@ try:
 except AttributeError:
 	warnings.simplefilter('ignore', np.exceptions.RankWarning)
 
-N_QNS = int(os.environ.get('LLWP_QNS', 0))
-N_QNS = max(6, N_QNS)
-
-# @Luis: Hardcoded for Marie-Aline
-# @Luis: Is there a way to change that sensibly in runtime? Change dtypes/columns of the important dataframes?
-# Think about a clever way to set this initially
-N_QNS = 7
-ADD_QNS_DTYPES = {f'qn{ul}{i+1}': pyckett.cat_dtypes['qnu1'] for ul in ('u', 'l') for i in range(6, N_QNS)}
-
-print(f'{ADD_QNS_DTYPES=}')
-
 # Can be changed right before starting program:
 # On Unix systems:
 # export LLWP_QNS=10
 # On Windows systems:
 # set LLWP_QNS=10
+N_QNS = int(os.environ.get('LLWP_QNS', 10))
+N_QNS = max(6, N_QNS)
 
 QLocale.setDefault(QLocale('en_EN'))
 matplotlib.rcParams['axes.formatter.useoffset'] = False
-
 
 def status_d(func):
 	def _wrapper(*args, **kwargs):
@@ -1057,6 +1047,7 @@ class File():
 		with self.lock:
 			mask = self.df[self.df['filename'] == self.filename_abs].index
 			self.__class__.df = pd.concat([self.df.drop(mask), data], ignore_index=True)
+			self.clean_up_data()
 			self.apply_all()
 
 		df = self.__class__.df
@@ -1065,6 +1056,9 @@ class File():
 		self.xmin, self.xmax = xs.min(), xs.max()
 		
 		notify_info.emit(f"Successfully loaded '{self.filename_abs}'")
+	
+	def clean_up_data(self):
+		pass
 	
 	def to_dict(self):
 		dict_ = {
@@ -1130,29 +1124,31 @@ class File():
 		
 	@classmethod
 	def get_data(cls, xrange=None, binning=False):
-		df = cls.df
+		with cls.lock:
+			df = cls.df
 
-		if xrange is not None:
-			x_start = df["x"].searchsorted(xrange[0], side="left")
-			x_stop  = df["x"].searchsorted(xrange[1], side="right")
-			df = df.iloc[x_start:x_stop].copy()
+			if xrange is not None:
+				x_start = df["x"].searchsorted(xrange[0], side="left")
+				x_stop  = df["x"].searchsorted(xrange[1], side="right")
+				df = df.iloc[x_start:x_stop].copy()
 
-		df = df[df['visible']]
+			df = df[df['visible']]
 
-		if binning and xrange is not None:
-			bins = config['plot_bins']
-			nobinning = config['plot_skipbinning']
-			binwidth = (xrange[1]-xrange[0]) / bins
+			if binning and xrange is not None:
+				bins = config['plot_bins']
+				nobinning = config['plot_skipbinning']
+				binwidth = (xrange[1]-xrange[0]) / bins
 
-			if len(df) > max(bins, nobinning)  and binwidth != 0:
-				df = bin_data(df, binwidth, xrange)
+				if len(df) > max(bins, nobinning)  and binwidth != 0:
+					df = bin_data(df, binwidth, xrange)
 
 		return(df)
 
 	@classmethod
 	def xs_to_indices(cls, xmins, xmaxs):
-		minindices = cls.df["x"].searchsorted(xmins, side="left")
-		maxindices = cls.df["x"].searchsorted(xmaxs, side="right")
+		with cls.lock:
+			minindices = cls.df["x"].searchsorted(xmins, side="left")
+			maxindices = cls.df["x"].searchsorted(xmaxs, side="right")
 		return(minindices, maxindices)
 
 	@classmethod
@@ -1480,7 +1476,7 @@ class CatFile(File):
 	decorator = DynamicDecorator()
 	
 	default_color_key = "color_cat"
-	dtypes = {**pyckett.cat_dtypes, **File.additional_dtypes, **ADD_QNS_DTYPES}
+	dtypes = {**pyckett.cat_dtypes_from_quanta(N_QNS), **File.additional_dtypes}
 	df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
 	
 	@QThread.threaded_d
@@ -1502,12 +1498,23 @@ class CatFile(File):
 
 			if y_is_log:
 				data['y'] = 10 ** data['y']
-			for column in self.dtypes.columns:
+				
+			for column in self.dtypes.keys():
+				if column.startswith('qn'):
+					continue
+				
 				if column not in data.columns:
-					data[column] = pyckett.SENTINEL
+					message = f'The format used to load the file \'{self.filename_abs}\' does not provide the column \'{column}\'.'
+					notify_warning.emit(message)
+					raise GUIAbortedError(message)
 			data = data[self.dtypes.keys()]
 
 		return(data)
+
+	def clean_up_data(self):
+		qn_columns = pyckett.qnlabels_from_quanta(N_QNS)
+		self.__class__.df.loc[:, qn_columns] = self.__class__.df.loc[:, qn_columns].fillna(pyckett.SENTINEL).astype(pyckett.pickett_int)
+		# self.__class__.df = self.__class__.df.dropna()
 
 	@decorator.d
 	def apply_xtransformation(self, *args, **kwargs):
@@ -1538,7 +1545,8 @@ class LinFile(File):
 	decorator = DynamicDecorator()
 	
 	default_color_key = "color_lin"
-	dtypes = {**pyckett.lin_dtypes, **File.additional_dtypes, **ADD_QNS_DTYPES}
+	dtypes = {**pyckett.lin_dtypes_from_quanta(N_QNS), **File.additional_dtypes}
+	del dtypes['y0']
 	df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
 	has_y_data = False
 	
@@ -1558,13 +1566,24 @@ class LinFile(File):
 			data = pd.read_fwf(self.filename_abs, **kwargs)
 			data['filename'] = pd.Series(self.filename_abs, index=data.index, dtype='category')
 
-			for column in self.dtypes.columns:
+			for column in self.dtypes.keys():
+				if column.startswith('qn'):
+					continue
+				
 				if column not in data.columns:
-					data[column] = pyckett.SENTINEL
+					message = f'The format used to load the file \'{self.filename_abs}\' does not provide the column \'{column}\'.'
+					notify_warning.emit(message)
+					raise GUIAbortedError(message)
+			
 			data = data[self.dtypes.keys()]
 
 		return(data)
 	
+	def clean_up_data(self):
+		qn_columns = pyckett.qnlabels_from_quanta(N_QNS)
+		self.__class__.df[qn_columns] = self.__class__.df[qn_columns].fillna(pyckett.SENTINEL).astype(pyckett.pickett_int)
+		# self.__class__.df = self.__class__.df.dropna()
+
 	@decorator.d
 	def apply_xtransformation(self, *args, **kwargs):
 		return(super().apply_xtransformation(*args, **kwargs))
@@ -1606,7 +1625,7 @@ class NewAssignments(LinFile):
 		self.is_initialized = True
 		self.__class__._instance = self
 
-		dtypes = {**pyckett.lin_dtypes, **ADD_QNS_DTYPES}
+		dtypes = pyckett.lin_dtypes_from_quanta(N_QNS)
 		self.new_assignments_df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
 		self.filename_abs = filename
 		self.basename = "New Assignments"
@@ -1647,6 +1666,11 @@ class NewAssignments(LinFile):
 		with self.lock:
 			mask = self.df[self.df['filename'] == self.filename_abs].index
 			LinFile.df = pd.concat([self.df.drop(mask), data], ignore_index=True)
+			
+			qn_columns = [column for column in self.__class__.df.columns if column.startswith('qn')]
+			self.__class__.df[qn_columns] = self.__class__.df[qn_columns].fillna(pyckett.SENTINEL)
+			self.__class__.df[qn_columns] = self.__class__.df[qn_columns].astype(pyckett.pickett_int)
+			
 			self.apply_all()
 
 		df = LinFile.df
@@ -1682,7 +1706,7 @@ class NewAssignments(LinFile):
 		self.add_rows(rows_dict)
 
 	def add_rows(self, rows_dict):
-		dtypes = {**pyckett.lin_dtypes, **ADD_QNS_DTYPES}
+		dtypes = pyckett.lin_dtypes_from_quanta(N_QNS)
 		new_rows = pd.DataFrame(rows_dict).astype(dtypes)[dtypes.keys()]
 		new_rows['filename'] = self.filename_abs
 		self.new_assignments_df = pd.concat( (self.new_assignments_df, new_rows) ).reset_index(drop=True)
@@ -1806,7 +1830,8 @@ class FileAdditionalSettingsDialog(QDialog):
 	def reset_all(self):
 		self.widgets['query']['widget'].setPlainText('')
 		self.widgets['xtransformation']['widget'].setPlainText('')
-		self.widgets['ytransformation']['widget'].setPlainText('')
+		if self.file.has_y_data:
+			self.widgets['ytransformation']['widget'].setPlainText('')
 		self.widgets['color_query']['widget'].setPlainText('')
 
 		if hasattr(self.file, 'is_stickspectrum'):
@@ -1820,7 +1845,8 @@ class FileAdditionalSettingsDialog(QDialog):
 
 		self.update_query()
 		self.update_xtransformation()
-		self.update_ytransformation()
+		if self.file.has_y_data:
+			self.update_ytransformation()
 		self.update_color_query()
 		if hasattr(self.file, 'is_stickspectrum'):
 			self.update_stickspectrum()
@@ -2163,7 +2189,7 @@ class LWPWidget(QGroupBox):
 		elif action == get_qns_action:
 			output_string = []
 			qnus, qnls = lwpax.qns
-			tmp_string = ','.join([f'{qn:3d}' for qn in qnus]) + ' ← ' + ','.join([f'{qn:3d}' for qn in qnls])
+			tmp_string = ','.join([f'{qn:3.0f}' for qn in qnus]) + ' ← ' + ','.join([f'{qn:3.0f}' for qn in qnls])
 			output_string.append(tmp_string)
 
 			output_string = '\n'.join(output_string)
@@ -2221,7 +2247,8 @@ class LWPAx():
 		for datatype, cls in {'exp': ExpFile, 'cat': CatFile, 'lin': LinFile}.items():
 			minindex, maxindex = self.indices[datatype]
 			xmin, xmax = self.xrange
-			dataframe = cls.df.iloc[minindex:maxindex].copy()
+			with cls.lock:
+				dataframe = cls.df.iloc[minindex:maxindex].copy()
 			bins = config['plot_bins']
 			nobinning = config['plot_skipbinning']
 			scaling = config["plot_yscale"]
@@ -2545,7 +2572,8 @@ class LWPAx():
 		if file_to_limit_data_to:
 			condition += ' and filename == @file_to_limit_data_to'
 		
-		entries = CatFile.df.query(condition)
+		with CatFile.lock:
+			entries = CatFile.df.query(condition)
 		if len(entries) < 2:
 			return
 		
@@ -2854,7 +2882,11 @@ class StatusBar(QStatusBar):
 
 	def next_disappearing_message(self):
 		try:
-			next_message = self._disappearing_messages.pop()
+			if len(self._disappearing_messages) > 3:
+				self._disappearing_messages = []
+				next_message = 'Many new messages. Please see the log window for all messages.'
+			else:
+				next_message = self._disappearing_messages.pop(0)
 		except IndexError:
 			self.messages_label.setText('')
 			return
@@ -3135,6 +3167,7 @@ class AssignBlendsDialog(QDialog):
 			cb.setChecked(state)
 
 	def blendassign(self, all=True):
+		self.done(0)
 		checked = True if all else [x.isChecked() for x in self.checkboxes]
 		self.entries['checked'] = checked
 
@@ -3158,7 +3191,6 @@ class AssignBlendsDialog(QDialog):
 			new_assignments[f'qnl{i+1}'] = pyckett.SENTINEL
 
 		NewAssignments.get_instance().add_rows(new_assignments)
-		self.done(0)
 
 	def on_exit(self):
 		self.__class__._instance = None
@@ -3218,6 +3250,7 @@ class ConsoleDialog(QDialog):
 				self.tabs.setTabText(index, text)
 
 	def done(self, val):
+		super().done(val)
 		commands = []
 		for i in range(self.tabs.count()):
 			tab = self.tabs.widget(i)
@@ -3228,7 +3261,6 @@ class ConsoleDialog(QDialog):
 		config['commandlinedialog_commands'] = commands
 		config['commandlinedialog_current'] = self.tabs.currentIndex()
 
-		super().done(val)
 	
 	@staticmethod
 	def run_current_command():
@@ -3476,14 +3508,14 @@ class QNsDialog(QDialog):
 		layout.addWidget(buttonBox)
 
 	def table_save(self, tmpd):
-		self.result_.update(tmpd)
 		self.done(1)
+		self.result_.update(tmpd)
 
 	def selector_save(self, val):
+		self.done(val)
 		tmp_dict = {key: sb.value() for key, sb in self.sbs.items()}
 		tmp_dict["xpre"] = self.frequency
 		self.result_.update(tmp_dict)
-		self.done(val)
 
 	def on_exit(self):
 		self.__class__._instance = None
@@ -3843,7 +3875,9 @@ class ReferenceSelector(QTabWidget):
 				conditions.append('(filename == @file_to_limit_data_to)')
 			
 			conditions = " and ".join(conditions)
-			cat_df = cat_df.query(conditions)
+			
+			with CatFile.lock:
+				cat_df = cat_df.query(conditions)
 
 			# Select the desired transitions
 
@@ -3925,13 +3959,15 @@ class ReferenceSelector(QTabWidget):
 				# @Luis:
 				# - write custom cache for cat.query functions -> queries are normalized now
 				cat_df = CatFile.df
-				cat_df = cat_df.query(conditions)
+				with CatFile.lock:
+					cat_df = cat_df.query(conditions)
 
 				# Get the exact predictions from prefiltered dataframe
 				qn_labels = [f'qn{ul}{i+1}' for ul in ('u', 'l') for i in range(n_qns)]
 				for i_row, row_qns in enumerate(rows_qns):
 					query = " and ".join([f'({label} == {qn})' for qn, label in zip(row_qns, qn_labels) ])
-					vals = cat_df.query(query)["x"].to_numpy()
+					with CatFile.lock:
+						vals = cat_df.query(query)["x"].to_numpy()
 					val = vals[0] if len(vals) else 0
 					positions[i_row] = val
 					qns[i_row] = np.split(np.array(row_qns), 2)
@@ -3969,7 +4005,7 @@ class ReferenceSelector(QTabWidget):
 
 			output_string = []
 			for qnus, qnls in qns:
-				tmp_string = ','.join([f'{qn:3d}' for qn in qnus]) + ' ← ' + ','.join([f'{qn:3d}' for qn in qnls])
+				tmp_string = ','.join([f'{qn:3.0f}' for qn in qnus]) + ' ← ' + ','.join([f'{qn:3.0f}' for qn in qnls])
 				output_string.append(tmp_string)
 
 			output_string = '\n'.join(output_string)
@@ -4629,6 +4665,9 @@ class CloseByLinesWindow(EQDockWidget):
 		self.text_is_frozen = not self.text_is_frozen
 	
 	def on_cursor_change(self, x, y):
+		if not self.isVisible():
+			return
+		
 		if self.text_is_frozen:
 			return
 		self.update_closeby_lines(x)
@@ -4652,8 +4691,8 @@ class CloseByLinesWindow(EQDockWidget):
 				qnus = [row[f'qnu{i+1}'] for i in range(noq)]
 				qnls = [row[f'qnl{i+1}'] for i in range(noq)]
 
-				qnus_string = ''.join([f'{qn:3d}' for qn in qnus if qn != pyckett.SENTINEL])
-				qnls_string = ''.join([f'{qn:3d}' for qn in qnls if qn != pyckett.SENTINEL])
+				qnus_string = ''.join([f'{qn:3.0f}' for qn in qnus if qn != pyckett.SENTINEL])
+				qnls_string = ''.join([f'{qn:3.0f}' for qn in qnls if qn != pyckett.SENTINEL])
 
 				qnstring = f'{qnus_string} ← {qnls_string}'
 
@@ -6539,7 +6578,10 @@ if __name__ == '__main__':
 ## To Do
 ##
 
-# - Which of these modules do we want to keep?
+# - Hotkey to change series selector in specific way (+Ka, -Kc)
+# - Auto detect format of .lin file
+
+# - Which of these modules should be kept?
 	# - EnergyLevelsTrendWindow
 	# - SpectraResolverWindow
 	# - CalibrateSpectrumWindow
@@ -6550,15 +6592,3 @@ if __name__ == '__main__':
 # - Files: maybe also custom transformations -> change some quantum numbers if needed
 
 # - maybe build something like a command palette
-
-
-
-# Causes for redrawing
-# - reference series changed
-# - file reloaded
-# - colors changed
-# - visibility changed
-# - x/y-transform changed
-# - file added
-# - file deleted
-# - 
