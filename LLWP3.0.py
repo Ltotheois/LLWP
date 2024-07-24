@@ -256,6 +256,7 @@ class Config(dict):
 		'flag_appendonsave': (True, bool),
 		'flag_showmainplotposition': (True, bool),
 		'flag_pyckettquanta': (6, int),
+		'flag_showseriesarrows': (True, bool),
 		
 		'commandlinedialog_commands': ([], list),
 		'commandlinedialog_current': (0, int),
@@ -3025,6 +3026,7 @@ class LLWP(QApplication):
 			if messages:
 				notify_warning.emit('\n'.join(messages))
 			
+			self.run_init_commands()
 			self.debug_setup()
 
 		sys.exit(self.exec())
@@ -3032,6 +3034,12 @@ class LLWP(QApplication):
 	# Used to automatically reproduce behavior when testing
 	def debug_setup(self):
 		pass
+
+	def run_init_commands(self):
+		commands = config['commandlinedialog_commands']
+		for _, command, run_initially in commands:
+			if run_initially:
+				ConsoleDialog.run_command(command)
 
 	def initialize_matplotlib_settings(self):
 		matplotlib.rc('font', **config["plot_fontdict"])
@@ -3207,8 +3215,8 @@ class ConsoleDialog(QDialog):
 
 		initial_values = config['commandlinedialog_commands']
 		if initial_values:
-			for title, command in initial_values:
-				self.add_tab(title, command)
+			for title, command, run_initially in initial_values:
+				self.add_tab(title, command, run_initially)
 		else:
 			self.add_tab()
 
@@ -3227,12 +3235,21 @@ class ConsoleDialog(QDialog):
 		buttons_layout.addStretch()
 		layout.addLayout(buttons_layout)
 
-	def add_tab(self, title='Command', command=''):
+	def add_tab(self, title='Command', command='', run_initially=False):
+		widget = QWidget()
+		layout = QVBoxLayout()
+		widget.setLayout(layout)
+
 		textarea = QQ(QPlainTextEdit, value=command)
 		cursor = textarea.textCursor()
 		cursor.movePosition(QTextCursor.MoveOperation.End)
 		textarea.setTextCursor(cursor)
-		self.tabs.addTab(textarea, title)
+
+		runinit_checkbox = QQ(QCheckBox, value=run_initially, text='Run on startup')
+
+		layout.addWidget(textarea)
+		layout.addWidget(runinit_checkbox)
+		self.tabs.addTab(widget, title)
 
 	def close_tab(self, index):
 		tab = self.tabs.widget(index)
@@ -3245,7 +3262,7 @@ class ConsoleDialog(QDialog):
 		if index == -1:
 			self.add_tab()
 		elif self.tabs.widget(index) != 0:
-			text, ok = QInputDialog().getText(self, "Tab Name","Enter the Tabs Name:")
+			text, ok = QInputDialog().getText(self, "Tab Name", "Enter the Tabs Name:")
 			if ok and text:
 				self.tabs.setTabText(index, text)
 
@@ -3255,8 +3272,10 @@ class ConsoleDialog(QDialog):
 		for i in range(self.tabs.count()):
 			tab = self.tabs.widget(i)
 			title = self.tabs.tabText(i)
-			command = tab.toPlainText()
-			commands.append((title, command))
+
+			command = tab.findChildren(QPlainTextEdit)[0].toPlainText()
+			run_initially = tab.findChildren(QCheckBox)[0].isChecked()
+			commands.append((title, command, run_initially))
 
 		config['commandlinedialog_commands'] = commands
 		config['commandlinedialog_current'] = self.tabs.currentIndex()
@@ -3274,10 +3293,14 @@ class ConsoleDialog(QDialog):
 			notify_warning.emit('The index of the command is out of the range.')
 			return
 		
-		title, command = commands[index]
+		_, command, _ = commands[index]
 		if not command.strip():
 			return
+		ConsoleDialog.run_command(command)
 		
+	
+	@staticmethod
+	def run_command(command):
 		message = []
 		old_stdout = sys.stdout
 		red_output = sys.stdout = io.StringIO()
@@ -4030,8 +4053,8 @@ class SeriesSelector(QWidget):
 
 		layout = QGridLayout()
 
-		create_qn = lambda: QQ(QSpinBox, minWidth=40, maxWidth=40, range=(None, None), visible=False,
-							singlestep=1, buttons=False, change=lambda x: self.changed())
+		create_qn = lambda: QQ(QSpinBox, minWidth=60, maxWidth=60, range=(None, None), visible=False,
+							singlestep=1, change=lambda x: self.changed())
 
 		self.qnus = [create_qn() for _ in range(self.n_qns)]
 		self.qnls = [create_qn() for _ in range(self.n_qns)]
@@ -4074,6 +4097,8 @@ class SeriesSelector(QWidget):
 		self.set_state()
 
 		config.register_widget("series_qns", self.togglediff, self.set_state)
+		config.register_widget("flag_showseriesarrows", self.togglediff, self.change_arrows)
+		self.change_arrows()
 
 	def set_state(self):
 		self.updating = True
@@ -4125,6 +4150,17 @@ class SeriesSelector(QWidget):
 	def wheelEvent(self, event):
 		steps = event.angleDelta().y() // 120
 		self.incdecqns(steps)
+	
+	def change_arrows(self):
+		show_arrows = config['flag_showseriesarrows']
+		width = 60 if show_arrows else 40
+		button_symbols = QAbstractSpinBox.ButtonSymbols.UpDownArrows if show_arrows else QAbstractSpinBox.ButtonSymbols.NoButtons
+
+		for widget in self.qnus + self.qnls + self.diff:
+			widget.setMinimumWidth(width)
+			widget.setMaximumWidth(width)
+			widget.setButtonSymbols(button_symbols)
+
 
 class ReferenceSeriesWindow(EQDockWidget):
 	default_visible = True
