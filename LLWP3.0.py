@@ -1046,17 +1046,19 @@ class File():
 		data['visible'] = True
 		
 		with self.lock:
-			mask = self.df[self.df['filename'] == self.filename_abs].index
-			self.__class__.df = pd.concat([self.df.drop(mask), data], ignore_index=True)
+			df = self.get_df()
+			mask = df[df['filename'] == self.filename_abs].index
+			self.set_df(pd.concat([self.df.drop(mask), data], ignore_index=True))
 			self.clean_up_data()
 			self.apply_all()
 
-		df = self.__class__.df
+		df = self.get_df()
 		mask = (df['filename'] == self.filename_abs)
 		xs = df.loc[mask, 'x']
 		self.xmin, self.xmax = xs.min(), xs.max()
 		
-		notify_info.emit(f"Successfully loaded '{self.filename_abs}'")
+		if not isinstance(self, NewAssignments):
+			notify_info.emit(f"Successfully loaded '{self.filename_abs}'")
 	
 	def clean_up_data(self):
 		pass
@@ -1146,6 +1148,14 @@ class File():
 		return(df)
 
 	@classmethod
+	def get_df(cls):
+		return(cls.df)
+	
+	@classmethod
+	def set_df(cls, value):
+		cls.df = value
+
+	@classmethod
 	def xs_to_indices(cls, xmins, xmaxs):
 		with cls.lock:
 			minindices = cls.df["x"].searchsorted(xmins, side="left")
@@ -1155,7 +1165,6 @@ class File():
 	@classmethod
 	def sort_df(cls):
 		with cls.lock:
-			# @Luis: Think about checking df.x.is_monotonic
 			cls.df = cls.df.sort_values('x')
 			if cls.has_y_data:
 				tmp = cls.df[ cls.df['visible'] ]['y']
@@ -1549,6 +1558,7 @@ class LinFile(File):
 	dtypes = {**pyckett.lin_dtypes_from_quanta(N_QNS), **File.additional_dtypes}
 	del dtypes['y0']
 	df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
+	
 	has_y_data = False
 	
 	@QThread.threaded_d
@@ -1650,35 +1660,13 @@ class NewAssignments(LinFile):
 	def load_file_core(self, thread=None):
 		return(self.new_assignments_df.copy())
 	
-	# @Luis: Check if this can be done more beautifully
-	@QThread.threaded_d
-	@status_d
-	@LinFile.decorator.d
-	def load_file(self, thread=None):
-		data = self.load_file_core()
-
-		# Add additional columns
-		data['x0'] = data['x']
-		if self.has_y_data:
-			data['y0'] = data['y']
-		data['color'] = self.color
-		data['visible'] = True
-		
-		with self.lock:
-			mask = self.df[self.df['filename'] == self.filename_abs].index
-			LinFile.df = pd.concat([self.df.drop(mask), data], ignore_index=True)
-			
-			qn_columns = [column for column in self.__class__.df.columns if column.startswith('qn')]
-			self.__class__.df[qn_columns] = self.__class__.df[qn_columns].fillna(pyckett.SENTINEL)
-			self.__class__.df[qn_columns] = self.__class__.df[qn_columns].astype(pyckett.pickett_int)
-			
-			self.apply_all()
-
-		df = LinFile.df
-		mask = (df['filename'] == self.filename_abs)
-		xs = df.loc[mask, 'x']
-		self.xmin, self.xmax = xs.min(), xs.max()
-		# notify_info.emit(f"Succesfully loaded '{self.basename}'")
+	@classmethod
+	def get_df(cls):
+		return(LinFile.df)
+	
+	@classmethod
+	def set_df(cls, value):
+		LinFile.df = value
 
 	def gui_settings_widgets(self):
 		dcolor = self.color
@@ -1724,7 +1712,7 @@ class NewAssignments(LinFile):
 		else:
 			return(cls._instance)
 	
-	def get_df(self):
+	def get_new_assignments_df(self):
 		return(self.new_assignments_df)
 	
 	def save_gui(self):
@@ -1745,7 +1733,7 @@ class NewAssignments(LinFile):
 	
 	def save(self, savepath, append, format):
 		handle = "a+" if append else "w+"
-		df = self.get_df().copy()
+		df = self.get_new_assignments_df().copy()
 
 		with open(savepath, handle, encoding="utf-8") as file:
 			if format:
@@ -2569,12 +2557,21 @@ class LWPAx():
 		xpre = new_assignment['xpre']
 		xmin, xmax = xpre - blendwidth, xpre + blendwidth
 		
-		condition = "@xmin < x and x < @xmax and visible"
-		if file_to_limit_data_to:
-			condition += ' and filename == @file_to_limit_data_to'
 		
-		with CatFile.lock:
-			entries = CatFile.df.query(condition)
+		entries = CatFile.get_data(xrange=(xmin, xmax)).copy()
+		if file_to_limit_data_to:
+			query = 'filename == @file_to_limit_data_to'
+			entries = entries.query(query)
+		
+		if config['series_blendminrelratio']:
+			qn_labels = pyckett.qnlabels_from_quanta(N_QNS)
+			query = ' and '.join([f'( {label} == {new_assignment[label]} )' for label in qn_labels if new_assignment[label] != pyckett.SENTINEL])
+			tmp_cat = entries.query(query)
+			y_at_xpre = tmp_cat["y"].values[0]
+		
+			min_y_value = y_at_xpre * config['series_blendminrelratio']
+			entries = entries.query('y >= @min_y_value')
+			
 		if len(entries) < 2:
 			return
 		
@@ -3036,10 +3033,13 @@ class LLWP(QApplication):
 		pass
 
 	def run_init_commands(self):
-		commands = config['commandlinedialog_commands']
-		for _, command, run_initially in commands:
-			if run_initially:
-				ConsoleDialog.run_command(command)
+		try:
+			commands = config['commandlinedialog_commands']
+			for _, command, run_initially in commands:
+				if run_initially:
+					ConsoleDialog.run_command(command)
+		except Exception as E:
+			notify_error.emit(f'{E}:\n{tb.format_stack()}')
 
 	def initialize_matplotlib_settings(self):
 		matplotlib.rc('font', **config["plot_fontdict"])
@@ -3095,15 +3095,6 @@ class AssignBlendsDialog(QDialog):
 		self.update_gui(new_assignment, entries)
 
 	def update_gui(self, new_assignment, entries):
-		if config['series_blendminrelratio']:
-			qn_labels = [f'qn{ul}{i+1}'for ul in 'ul' for i in range(N_QNS)]
-			query = ' and '.join([f'( {label} == {new_assignment[label]} )' for label in qn_labels if new_assignment[label] != pyckett.SENTINEL])
-			tmp_cat = entries.query(query)
-			y_at_xpre = tmp_cat["y"].values[0]
-		
-			min_y_value = y_at_xpre * config['series_blendminrelratio']
-			entries = entries.query('y >= @min_y_value')
-		
 		self.noq = config["series_qns"]
 		self.entries = entries.reset_index(drop=True)
 		self.xmiddle = new_assignment['x']
@@ -3139,7 +3130,7 @@ class AssignBlendsDialog(QDialog):
 
 		for i in range(N_QNS):
 			table.setColumnHidden(i+ 4, i>=noq)
-			table.setColumnHidden(i+10, i>=noq)
+			table.setColumnHidden(i+ 4 + N_QNS, i>=noq)
 
 		table.resizeColumnsToContents()
 
@@ -4020,14 +4011,14 @@ class ReferenceSelector(QTabWidget):
 			n_rows = config['plot_rows']
 			n_qns = config['series_qns']
 			positions, _ = self.calc_references(n_rows, n_qns)
-			QApplication.clipboard().setText('\n'.join(map(str, positions)))
+			QApplication.clipboard().setText('\n'.join(map(str, positions[::-1])))
 		elif action == get_qns_action:
 			n_rows = config['plot_rows']
 			n_qns = config['series_qns']
 			_, qns = self.calc_references(n_rows, n_qns)
 
 			output_string = []
-			for qnus, qnls in qns:
+			for qnus, qnls in qns[::-1]:
 				tmp_string = ','.join([f'{qn:3.0f}' for qn in qnus]) + ' ← ' + ','.join([f'{qn:3.0f}' for qn in qnls])
 				output_string.append(tmp_string)
 
@@ -4466,7 +4457,7 @@ class NewAssignmentsWindow(EQDockWidget):
 			'save': QQ(QToolButton, text='Save', change=lambda x: new_assignments.save_gui()),
 			'delete': QQ(QToolButton, text='×', change=lambda x: self.delete()),
 			'delete_all': QQ(QToolButton, text='Del All', change=lambda x: self.delete_all()),
-			'add_row': QQ(QToolButton, text='+', change=lambda x: addemptyrow_inplace(new_assignments.get_df(), self.model)),
+			'add_row': QQ(QToolButton, text='+', change=lambda x: addemptyrow_inplace(new_assignments.get_new_assignments_df(), self.model)),
 			'resize': QQ(QToolButton, text='Resize', change=lambda x: self.model.resize_columns(reset=True)),
 			# 'append': QQ(QCheckBox, 'flag_appendonsave', text='Append', tooltip=tooltip_append),
 			'error_label': QQ(QLabel, text='Default Uncertainty: ', tooltip=tooltip_uncert),
@@ -4477,7 +4468,7 @@ class NewAssignmentsWindow(EQDockWidget):
 		headers = { **tmp, 'x': 'Freq', 'error': 'Unc', 'weight': 'Weight', 'comment': 'Comment'}
 
 		self.table = QTableView()
-		self.model = CatTableModel(headers, new_assignments.get_df, self.table)
+		self.model = CatTableModel(headers, new_assignments.get_new_assignments_df, self.table)
 		self.table.setModel(self.model)
 		self.model.update_columns_visibility()
 		self.model.resize_columns()
@@ -4502,7 +4493,7 @@ class NewAssignmentsWindow(EQDockWidget):
 		self.delete(delete_all=True)
 
 	def delete(self, delete_all=False):
-		df = self.new_assignments.get_df()
+		df = self.new_assignments.get_new_assignments_df()
 		df.reset_index(drop=True, inplace=True)
 
 		if delete_all:
