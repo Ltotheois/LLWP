@@ -2706,17 +2706,17 @@ class Menu():
 		top_menu_labels = ("Files", "View", "Fit", "Plot", "Modules", "Info")
 		self.top_menus = {}
 		for label in top_menu_labels:
-			menu = mb.addMenu(f'&{label}')
+			menu = mb.addMenu(f'{label}')
 			self.top_menus[label] = menu
 		
 
 		toggleaction_files = FileWindow._instance.toggleViewAction()
-		toggleaction_files.setText('&Edit Files')
+		toggleaction_files.setText('Edit Files')
 		toggleaction_convolution = ConvolutionWindow._instance.toggleViewAction()
-		toggleaction_convolution.setText('&Sticks to Lineshape')
+		toggleaction_convolution.setText('Sticks to Lineshape')
 		toggleaction_convolution.setToolTip('Choose a function to create a spectrum from stick data')
 		toggleaction_credits = CreditsWindow._instance.toggleViewAction()
-		toggleaction_credits.setText("&Credits and License")
+		toggleaction_credits.setText("Credits and License")
 		toggleaction_credits.setToolTip("See the Credits and License")
 
 
@@ -2727,34 +2727,34 @@ class Menu():
 		for method in LWPAx.fit_methods:
 			is_checked = (method == current_method)
 			callback = lambda _, method=method: self.set_fitmethod(method)
-			self.fitfunction_actions[method] = QQ(QAction, parent=parent, text=f"&{method}", change=callback, checkable=True, value=is_checked)
+			self.fitfunction_actions[method] = QQ(QAction, parent=parent, text=f"{method}", change=callback, checkable=True, value=is_checked)
 			fitfunction_menu.addAction(self.fitfunction_actions[method])
 		config.register('fit_fitmethod', self.on_fitfunction_changed)
 
 		actions = {
 			'Files': (
-				QQ(QAction, parent=parent, text="&Add Files", change=File.add_files_dialog, tooltip="Add Files"),
-				QQ(QAction, parent=parent, text='&Reread All Files', change=lambda _: File.reread_all(), tooltip="Reread all Exp, Cat and Lin files"),
+				QQ(QAction, parent=parent, text="Add Files", change=File.add_files_dialog, tooltip="Add Files"),
+				QQ(QAction, parent=parent, text='Reread All Files', change=lambda _: File.reread_all(), tooltip="Reread all Exp, Cat and Lin files"),
 				None,
 				toggleaction_files,
 				None,
-				QQ(QAction, parent=parent, text="&Save current values as default", tooltip="Save current configuration as default", change=lambda _: config.save()),
+				QQ(QAction, parent=parent, text="Save current values as default", tooltip="Save current configuration as default", change=lambda _: config.save()),
 				None,
-				QQ(QAction, parent=parent, text="&Save Files as Project", change=lambda _: File.save_files_gui(), tooltip="Save all loaded files and their parameters as a project."),
-				QQ(QAction, parent=parent, text="&Load Project", change=lambda _: File.load_files_gui(), tooltip="Load a project."),
+				QQ(QAction, parent=parent, text="Save Files as Project", change=lambda _: File.save_files_gui(), tooltip="Save all loaded files and their parameters as a project."),
+				QQ(QAction, parent=parent, text="Load Project", change=lambda _: File.load_files_gui(), tooltip="Load a project."),
 
 			),
 			'Fit': (
 				fitfunction_menu,
-				QQ(QAction, parent=parent, text="&Change Function", shortcut="Ctrl+F", tooltip="Cycle through the available fit-functions", change=lambda _: self.next_fitmethod()),
+				QQ(QAction, parent=parent, text="Change Function", shortcut="Ctrl+F", tooltip="Cycle through the available fit-functions", change=lambda _: self.next_fitmethod()),
 				None,
-				QQ(QAction, parent=parent, text="&Change Fit Color", tooltip="Change the color of the fitfunction", change=lambda _: self.change_fitcolor()),
+				QQ(QAction, parent=parent, text="Change Fit Color", tooltip="Change the color of the fitfunction", change=lambda _: self.change_fitcolor()),
 			),
 			'Plot': (
-				QQ(QAction, parent=parent, text="&# Plots", shortcut="Ctrl+N", tooltip="Change number of plots", change=lambda _: self.plot_number()),
+				QQ(QAction, parent=parent, text="# Plots", shortcut="Ctrl+N", tooltip="Change number of plots", change=lambda _: self.plot_number()),
 				None,
-				QQ(QAction, parent=parent, text="&Set Width", shortcut="Ctrl+W", change=lambda _: WidthDialog.show_dialog()),
-				QQ(QAction, parent=parent, text="&Set Offset", shortcut="Ctrl+G", change=lambda _: OffsetDialog.show_dialog()),
+				QQ(QAction, parent=parent, text="Set Width", shortcut="Ctrl+W", change=lambda _: WidthDialog.show_dialog()),
+				QQ(QAction, parent=parent, text="Set Offset", shortcut="Ctrl+G", change=lambda _: OffsetDialog.show_dialog()),
 				None,
 				toggleaction_convolution,
 			),
@@ -2780,7 +2780,7 @@ class Menu():
 				
 			),
 			'Info': (
-				QQ(QAction, parent=parent, text="&Send Mail to Author", tooltip="Send a mail to the developer", change=lambda x: self.send_mail_to_author()),
+				QQ(QAction, parent=parent, text="Send Mail to Author", tooltip="Send a mail to the developer", change=lambda x: self.send_mail_to_author()),
 				toggleaction_credits,
 			)
 			
