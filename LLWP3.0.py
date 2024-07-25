@@ -36,6 +36,7 @@ import os
 import sys
 import re
 import io
+import csv
 import time
 import wrapt
 import pickle
@@ -312,6 +313,9 @@ class Config(dict):
 		
 		'cmd_current': (0, int),
 		'cmd_commands': ([], list),
+		
+		'asap_query': ('', str),
+		'asap_resolution': (6e-6, float),
 	}
 
 	def __init__(self, signal, *args, **kwargs):
@@ -1878,314 +1882,6 @@ class FileAdditionalSettingsDialog(QDialog):
 ##
 ## Application and MainWindow
 ##
-class LWPWidget(QGroupBox):
-	drawplot = pyqtSignal()
-	plotscreated = pyqtSignal()
-	draw_counter = AtomicCounter()
-	_active_ax_index = (0, 0)
-
-	def __init__(self, *args, **kwargs):
-		super().__init__(*args, **kwargs)
-		self.initialize_dynamic_decorator_for_drawing_plot()
-
-		with matplotlib_lock:
-			self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
-			self.listener_onclick = self.fig.canvas.mpl_connect('button_press_event', self.on_click)
-			self.listener_onhover = self.fig.canvas.mpl_connect("motion_notify_event", self.on_hover)
-			self.plotcanvas = FigureCanvas(self.fig)
-			self.plotcanvas.contextMenuEvent = self.contextMenuCanvas
-	
-		config.register("plot_dpi", lambda: self.fig.set_dpi(config["plot_dpi"]))
-		
-		self.plotcanvas.setMinimumHeight(200)
-		self.plotcanvas.setMinimumWidth(200)
-		
-		self.drawplot.connect(self.draw_canvas)
-		config.register(('plot_width', 'plot_widthexpression', 'plot_offset', 'plot_offsetexpression', 'plot_offsetisrelative', "series_annotate_xs", "plot_annotate", "plot_bins", "flag_automatic_draw"), lambda: self.set_data())
-
-		self.mpltoolbar = NavigationToolbar2QT(self.plotcanvas, self)
-		self.mpltoolbar.setVisible(config["isvisible_matplotlibtoolbar"])
-		config.register('isvisible_matplotlibtoolbar', lambda: self.mpltoolbar.setVisible(config['isvisible_matplotlibtoolbar']))
-
-		toplayout = QHBoxLayout()
-
-		buttonsdict = {
-			'in':			lambda _: WidthDialog.gui_set_width('++'),
-			'out':			lambda _: WidthDialog.gui_set_width('--'),
-			'left':			lambda _: OffsetDialog.gui_set_offset('-'),
-			'right':		lambda _: OffsetDialog.gui_set_offset('+'),
-		}
-
-		for label, func in buttonsdict.items():
-			button = QQ(QPushButton, text=label, change=func, visible=config['isvisible_controlsmainplot'])
-			toplayout.addWidget(button)
-			config.register('isvisible_controlsmainplot', lambda button=button: button.setVisible(config['isvisible_controlsmainplot']))
-
-		toplayout.addStretch(1)
-
-		rows_cols_elements = (
-			QQ(QLabel, text="Plots: ", visible=config["isvisible_controlsrowscols"]),
-			QQ(QSpinBox, "plot_rows", range=(1, None), maxWidth=45, visible=config["isvisible_controlsrowscols"]),
-			QQ(QLabel, text="x", visible=config["isvisible_controlsrowscols"]),
-			QQ(QSpinBox, "plot_cols", range=(1, None), maxWidth=45, visible=config["isvisible_controlsrowscols"]),
-		)
-		for elem in rows_cols_elements:
-			toplayout.addWidget(elem)
-			config.register("isvisible_controlsrowscols", lambda elem=elem: elem.setVisible(config["isvisible_controlsrowscols"]))
-
-		width_elements = (
-			QQ(QLabel, text="    Width: ", visible=config["isvisible_controlswidth"]),
-			QQ(QDoubleSpinBox, "plot_width", range=(0, None), minWidth=85, visible=config["isvisible_controlswidth"]),
-		)
-		for elem in width_elements:
-			toplayout.addWidget(elem)
-			config.register("isvisible_controlswidth", lambda elem=elem: elem.setVisible(config["isvisible_controlswidth"]))
-
-		layout = QVBoxLayout()
-		layout.addLayout(toplayout)
-		layout.addWidget(self.plotcanvas, 1)
-		layout.addWidget(self.mpltoolbar)
-		self.setLayout(layout)
-
-		self.lwpaxes = np.zeros((0, config['plot_cols']))
-
-		config.register(("plot_rows", "plot_cols"), self.create_plots)
-		self.create_plots()
-
-	def initialize_dynamic_decorator_for_drawing_plot(self):
-		def exit_func():
-			counter_value = self.draw_counter.decrease()
-			if not counter_value:
-				self.drawplot.emit()
-
-		def init_func():
-			self.draw_counter.increase()
-
-		drawplot_decorator.init_func = init_func
-		drawplot_decorator.exit_func = exit_func
-
-	def draw_canvas(self):
-		with matplotlib_lock:
-			self.plotcanvas.draw()
-
-	def on_click(self, event):
-		ax = event.inaxes
-		index = np.asarray(np.where(self.axes  == ax)).T
-		
-		if len(index):
-			self.__class__._active_ax_index = tuple(index[0])
-
-	def on_hover(self, event):
-		x = event.xdata
-		y = event.ydata
-
-		if not all([x, y, event.inaxes]):
-			text_cursor = ""
-		else:
-			if config['flag_showmainplotposition']:
-				text_cursor = f"  ({x=:{config['flag_xformatfloat']}}, {y=:{config['flag_xformatfloat']}})  "
-			else:
-				text_cursor = ""
-
-			CloseByLinesWindow._instance.cursor_changed.emit(x, y)
-		mainwindow.statusbar.position_label.setText(text_cursor)
-
-	def wheelEvent(self,event):
-		steps = event.angleDelta().y() // 120
-		factor = 2**(-steps)
-		WidthDialog.gui_set_width(factor)
-
-	@QThread.threaded_d
-	@lock_d(matplotlib_lock)
-	@status_d
-	def create_plots(self, thread=None):
-		n_rows = max(config["plot_rows"], 1)
-		n_cols = max(config["plot_cols"], 1)
-		gridspec_kw = config["plot_gridspeckwargs"]
-
-		# The following performed better than self.fig.clf()
-		for ax in self.fig.get_axes():
-			self.fig.delaxes(ax)
-		
-		for lwpax in self.lwpaxes.flatten():
-			lwpax.span = None
-
-		thread.earlyreturn()
-
-		axes = self.fig.subplots(n_rows, n_cols, gridspec_kw=gridspec_kw, squeeze=False)[::-1]
-		self.axes = axes
-
-		thread.earlyreturn()
-
-		indices = np.indices(axes.shape)
-		vLWPAx = np.vectorize(LWPAx, otypes=[object])
-		self.lwpaxes = vLWPAx(axes, *indices)
-
-		thread.earlyreturn()
-
-		self.set_data()
-		self.plotscreated.emit()
-	
-	def calculate_widths(self):
-		expression = config['plot_widthexpression']
-		value = config['plot_width']
-		if not expression:
-			return(value)
-		
-		compiled_expression = compile(expression, '', 'eval')
-		return(compiled_expression)
-		
-	@QThread.threaded_d
-	@status_d
-	@drawplot_decorator.d
-	def set_data(self, thread=None):
-		if not hasattr(ReferenceSeriesWindow, '_instance'):
-			return
-		
-		if not hasattr(ReferenceSeriesWindow._instance, 'tab'):
-			return
-
-		n_rows = config['plot_rows']
-		n_cols = config['plot_cols']
-		n_qns = config['series_qns']
-
-		# Setup arrays to hold final data
-		positions_shape = (n_rows, n_cols)
-		positions = np.empty(positions_shape, dtype=np.float64)
-		qns_shape = (n_rows, n_cols, 2, n_qns)
-		qns = np.empty(qns_shape, dtype=np.int64)
-
-		thread.earlyreturn()
-
-		# Calculate positions and qns for each column
-		tab_widget = ReferenceSeriesWindow._instance.tab
-		n_widgets = tab_widget.count()
-
-		for i_col in range(n_widgets):
-			thread.earlyreturn()
-			if i_col > n_cols:
-				continue
-
-			refwidget = tab_widget.widget(i_col)
-			positions[:, i_col], qns[:, i_col] = refwidget.calc_references(n_rows, n_qns)
-		
-		thread.earlyreturn()
-
-		# Edge cases of no reference tabs and too few tabs
-		if n_widgets < 1:
-			positions[:] = 0
-			qns[:] = 0
-
-		elif n_widgets < n_cols:
-			for i_col in range(n_widgets, n_cols):
-				positions[:, i_col] = positions[:, n_widgets - 1]
-				qns[:, i_col] = qns[:, n_widgets - 1]
-
-		thread.earlyreturn()
-
-		# Calculate the widths and offsets
-		width_value = config['plot_width']
-		width_expr = config['plot_widthexpression']
-
-		offset_value = config['plot_offset']
-		offset_expr = config['plot_offsetexpression']
-
-		if not width_expr:
-			widths = width_value
-		else:
-			width_expr_comp = compile(width_expr, '', 'eval')
-			i_rows, i_cols = np.indices((n_rows, n_cols))
-			vars = {'x': positions, 'w': width_value, 'i_row': i_rows, 'i_col': i_cols}
-			for i in range(n_qns):
-				vars[f'qnu{i+1}'] = qns[:,:,0,i]
-				vars[f'qnl{i+1}'] = qns[:,:,1,i]
-
-			widths = eval(width_expr_comp, vars)
-		
-		if not offset_expr:
-			offsets = offset_value
-		else:
-			offset_expr_comp = compile(offset_expr, '', 'eval')
-			i_rows, i_cols = np.indices((n_rows, n_cols))
-			vars = {'x': positions, 'o': offset_value, 'i_row': i_rows, 'i_col': i_cols}
-			for i in range(n_qns):
-				vars[f'qnu{i+1}'] = qns[:,:,0,i]
-				vars[f'qnl{i+1}'] = qns[:,:,1,i]
-
-			offsets = eval(offset_expr_comp, vars)
-
-		thread.earlyreturn()
-
-		# Calculate the plot positions and get indices
-		xmins = positions + offsets - widths/2
-		xmaxs = xmins + widths
-
-		min_indices, max_indices = {}, {}
-		for label, cls in {'exp': ExpFile, 'cat': CatFile, 'lin': LinFile}.items():
-			min_indices[label], max_indices[label] = cls.xs_to_indices(xmins, xmaxs)
-		
-		thread.earlyreturn()
-
-		# Set the correct values to the LWPAxes
-		if self.lwpaxes.shape != (n_rows, n_cols):
-			notify_error.emit('Shape of LWPAxes is out of sync with requested values.')
-			return
-		
-		threads = []
-		for i_row in range(n_rows):
-			for i_col in range(n_cols):
-				ax = self.lwpaxes[i_row, i_col]
-				ax.ref_position = positions[i_row, i_col]
-				ax.xrange = (xmins[i_row, i_col], xmaxs[i_row, i_col])
-				ax.qns = qns[i_row, i_col]
-				ax.indices = {label: (min_indices[label][i_row, i_col], max_indices[label][i_row, i_col]) for label in ('exp', 'cat', 'lin')}
-				threads.append(ax.update())
-
-		thread.earlyreturn()
-
-		for thread_ in threads:
-			thread_.wait()
-
-	def get_current_ax(self):
-		shape = self.lwpaxes.shape
-		index = self.__class__._active_ax_index
-		if 0 <= index[0] < shape[0] and 0 <= index[1] < shape[1]:
-			return(self.lwpaxes[index])
-		else:
-			return(self.lwpaxes[0,0])
-
-	def contextMenuCanvas(self, event):
-		x, y = event.x(), event.y()
-		geometry = self.plotcanvas.geometry()
-		width, height = geometry.width(), geometry.height()
-		x_rel, y_rel = x/width, 1 - y/height
-
-		for lwpax in self.lwpaxes.flatten():
-			xmin, ymin, width, height = lwpax.ax.get_position().bounds
-			if xmin <= x_rel <= xmin + width and ymin <= y_rel <= ymin+height:
-				break
-		else: # Clicked outside of ax
-			return
-
-		menu = QMenu(self)
-		get_position_action = menu.addAction('Copy Reference Position')
-		get_qns_action = menu.addAction('Copy QNs')
-		set_active_action = menu.addAction('Make active Ax')
-
-		action = menu.exec(self.mapToGlobal(event.pos()))
-		if action == get_position_action:
-			QApplication.clipboard().setText(str(lwpax.ref_position))
-		elif action == get_qns_action:
-			output_string = []
-			qnus, qnls = lwpax.qns
-			tmp_string = ','.join([f'{qn:3.0f}' for qn in qnus]) + ' ← ' + ','.join([f'{qn:3.0f}' for qn in qnls])
-			output_string.append(tmp_string)
-
-			output_string = '\n'.join(output_string)
-			QApplication.clipboard().setText(output_string)
-		elif action == set_active_action:
-			mainwindow.lwpwidget._active_ax_index = (lwpax.row_i, lwpax.col_i)
-
 class LWPAx():
 	fit_vline = None
 	fit_curve = None
@@ -2578,6 +2274,318 @@ class LWPAx():
 		# After guard clauses we want to show the dialog
 		AssignBlendsDialog.show_dialog(new_assignment, entries)
 		raise GUIAbortedError
+
+
+class LWPWidget(QGroupBox):
+	drawplot = pyqtSignal()
+	plotscreated = pyqtSignal()
+	draw_counter = AtomicCounter()
+	_active_ax_index = (0, 0)
+
+	_ax_class = LWPAx
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.initialize_dynamic_decorator_for_drawing_plot()
+
+		with matplotlib_lock:
+			self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
+			self.listener_onclick = self.fig.canvas.mpl_connect('button_press_event', self.on_click)
+			self.listener_onhover = self.fig.canvas.mpl_connect("motion_notify_event", self.on_hover)
+			self.plotcanvas = FigureCanvas(self.fig)
+			self.plotcanvas.contextMenuEvent = self.contextMenuCanvas
+	
+		config.register("plot_dpi", lambda: self.fig.set_dpi(config["plot_dpi"]))
+		
+		self.plotcanvas.setMinimumHeight(200)
+		self.plotcanvas.setMinimumWidth(200)
+		
+		self.drawplot.connect(self.draw_canvas)
+		config.register(('plot_width', 'plot_widthexpression', 'plot_offset', 'plot_offsetexpression', 'plot_offsetisrelative', "series_annotate_xs", "plot_annotate", "plot_bins", "flag_automatic_draw"), lambda: self.set_data())
+
+		self.mpltoolbar = NavigationToolbar2QT(self.plotcanvas, self)
+		self.mpltoolbar.setVisible(config["isvisible_matplotlibtoolbar"])
+		config.register('isvisible_matplotlibtoolbar', lambda: self.mpltoolbar.setVisible(config['isvisible_matplotlibtoolbar']))
+
+		toplayout = self.toplayout = QHBoxLayout()
+
+		buttonsdict = {
+			'in':			lambda _: WidthDialog.gui_set_width('++'),
+			'out':			lambda _: WidthDialog.gui_set_width('--'),
+			'left':			lambda _: OffsetDialog.gui_set_offset('-'),
+			'right':		lambda _: OffsetDialog.gui_set_offset('+'),
+		}
+
+		for label, func in buttonsdict.items():
+			button = QQ(QPushButton, text=label, change=func, visible=config['isvisible_controlsmainplot'])
+			toplayout.addWidget(button)
+			config.register('isvisible_controlsmainplot', lambda button=button: button.setVisible(config['isvisible_controlsmainplot']))
+
+		toplayout.addStretch(1)
+
+		rows_cols_elements = (
+			QQ(QLabel, text="Plots: ", visible=config["isvisible_controlsrowscols"]),
+			QQ(QSpinBox, "plot_rows", range=(1, None), maxWidth=45, visible=config["isvisible_controlsrowscols"]),
+			QQ(QLabel, text="x", visible=config["isvisible_controlsrowscols"]),
+			QQ(QSpinBox, "plot_cols", range=(1, None), maxWidth=45, visible=config["isvisible_controlsrowscols"]),
+		)
+		for elem in rows_cols_elements:
+			toplayout.addWidget(elem)
+			config.register("isvisible_controlsrowscols", lambda elem=elem: elem.setVisible(config["isvisible_controlsrowscols"]))
+
+		width_elements = (
+			QQ(QLabel, text="    Width: ", visible=config["isvisible_controlswidth"]),
+			QQ(QDoubleSpinBox, "plot_width", range=(0, None), minWidth=85, visible=config["isvisible_controlswidth"]),
+		)
+		for elem in width_elements:
+			toplayout.addWidget(elem)
+			config.register("isvisible_controlswidth", lambda elem=elem: elem.setVisible(config["isvisible_controlswidth"]))
+
+		layout = QVBoxLayout()
+		layout.addLayout(toplayout)
+		layout.addWidget(self.plotcanvas, 1)
+		layout.addWidget(self.mpltoolbar)
+		self.setLayout(layout)
+
+		self.lwpaxes = np.zeros((0, config['plot_cols']))
+
+		config.register(("plot_rows", "plot_cols"), self.create_plots)
+		self.create_plots()
+
+	def initialize_dynamic_decorator_for_drawing_plot(self):
+		def exit_func():
+			counter_value = self.draw_counter.decrease()
+			if not counter_value:
+				self.drawplot.emit()
+
+		def init_func():
+			self.draw_counter.increase()
+
+		drawplot_decorator.init_func = init_func
+		drawplot_decorator.exit_func = exit_func
+
+	def draw_canvas(self):
+		with matplotlib_lock:
+			self.plotcanvas.draw()
+
+	def on_click(self, event):
+		ax = event.inaxes
+		index = np.asarray(np.where(self.axes  == ax)).T
+		
+		if len(index):
+			self.__class__._active_ax_index = tuple(index[0])
+
+	def on_hover(self, event):
+		x = event.xdata
+		y = event.ydata
+
+		if not all([x, y, event.inaxes]):
+			text_cursor = ""
+		else:
+			if config['flag_showmainplotposition']:
+				text_cursor = f"  ({x=:{config['flag_xformatfloat']}}, {y=:{config['flag_xformatfloat']}})  "
+			else:
+				text_cursor = ""
+
+			CloseByLinesWindow._instance.cursor_changed.emit(x, y)
+		mainwindow.statusbar.position_label.setText(text_cursor)
+
+	def wheelEvent(self,event):
+		steps = event.angleDelta().y() // 120
+		factor = 2**(-steps)
+		WidthDialog.gui_set_width(factor)
+
+	@QThread.threaded_d
+	@lock_d(matplotlib_lock)
+	@status_d
+	def create_plots(self, thread=None):
+		n_rows = max(config["plot_rows"], 1)
+		n_cols = max(config["plot_cols"], 1)
+		gridspec_kw = config["plot_gridspeckwargs"]
+
+		# The following performed better than self.fig.clf()
+		for ax in self.fig.get_axes():
+			self.fig.delaxes(ax)
+		
+		for lwpax in self.lwpaxes.flatten():
+			lwpax.span = None
+
+		thread.earlyreturn()
+
+		axes = self.fig.subplots(n_rows, n_cols, gridspec_kw=gridspec_kw, squeeze=False)[::-1]
+		self.axes = axes
+
+		thread.earlyreturn()
+
+		indices = np.indices(axes.shape)
+		vectorized_ax_class = np.vectorize(self._ax_class, otypes=[object])
+		self.lwpaxes = vectorized_ax_class(axes, *indices)
+
+		thread.earlyreturn()
+
+		self.set_data()
+		self.plotscreated.emit()
+	
+	def calculate_widths(self):
+		expression = config['plot_widthexpression']
+		value = config['plot_width']
+		if not expression:
+			return(value)
+		
+		compiled_expression = compile(expression, '', 'eval')
+		return(compiled_expression)
+		
+	@QThread.threaded_d
+	@status_d
+	@drawplot_decorator.d
+	def set_data(self, thread=None):
+		if not hasattr(ReferenceSeriesWindow, '_instance'):
+			return
+		
+		if not hasattr(ReferenceSeriesWindow._instance, 'tab'):
+			return
+
+		n_rows = config['plot_rows']
+		n_cols = config['plot_cols']
+		n_qns = config['series_qns']
+
+		# Setup arrays to hold final data
+		positions_shape = (n_rows, n_cols)
+		positions = np.empty(positions_shape, dtype=np.float64)
+		qns_shape = (n_rows, n_cols, 2, n_qns)
+		qns = np.empty(qns_shape, dtype=np.int64)
+
+		thread.earlyreturn()
+
+		# Calculate positions and qns for each column
+		tab_widget = ReferenceSeriesWindow._instance.tab
+		n_widgets = tab_widget.count()
+
+		for i_col in range(n_widgets):
+			thread.earlyreturn()
+			if i_col > n_cols:
+				continue
+
+			refwidget = tab_widget.widget(i_col)
+			positions[:, i_col], qns[:, i_col] = refwidget.calc_references(n_rows, n_qns)
+		
+		thread.earlyreturn()
+
+		# Edge cases of no reference tabs and too few tabs
+		if n_widgets < 1:
+			positions[:] = 0
+			qns[:] = 0
+
+		elif n_widgets < n_cols:
+			for i_col in range(n_widgets, n_cols):
+				positions[:, i_col] = positions[:, n_widgets - 1]
+				qns[:, i_col] = qns[:, n_widgets - 1]
+
+		thread.earlyreturn()
+
+		# Calculate the widths and offsets
+		width_value = config['plot_width']
+		width_expr = config['plot_widthexpression']
+
+		offset_value = config['plot_offset']
+		offset_expr = config['plot_offsetexpression']
+
+		if not width_expr:
+			widths = width_value
+		else:
+			width_expr_comp = compile(width_expr, '', 'eval')
+			i_rows, i_cols = np.indices((n_rows, n_cols))
+			vars = {'x': positions, 'w': width_value, 'i_row': i_rows, 'i_col': i_cols}
+			for i in range(n_qns):
+				vars[f'qnu{i+1}'] = qns[:,:,0,i]
+				vars[f'qnl{i+1}'] = qns[:,:,1,i]
+
+			widths = eval(width_expr_comp, vars)
+		
+		if not offset_expr:
+			offsets = offset_value
+		else:
+			offset_expr_comp = compile(offset_expr, '', 'eval')
+			i_rows, i_cols = np.indices((n_rows, n_cols))
+			vars = {'x': positions, 'o': offset_value, 'i_row': i_rows, 'i_col': i_cols}
+			for i in range(n_qns):
+				vars[f'qnu{i+1}'] = qns[:,:,0,i]
+				vars[f'qnl{i+1}'] = qns[:,:,1,i]
+
+			offsets = eval(offset_expr_comp, vars)
+
+		thread.earlyreturn()
+
+		# Calculate the plot positions and get indices
+		xmins = positions + offsets - widths/2
+		xmaxs = xmins + widths
+
+		min_indices, max_indices = {}, {}
+		for label, cls in {'exp': ExpFile, 'cat': CatFile, 'lin': LinFile}.items():
+			min_indices[label], max_indices[label] = cls.xs_to_indices(xmins, xmaxs)
+		
+		thread.earlyreturn()
+
+		# Set the correct values to the LWPAxes
+		if self.lwpaxes.shape != (n_rows, n_cols):
+			notify_error.emit('Shape of LWPAxes is out of sync with requested values.')
+			return
+		
+		threads = []
+		for i_row in range(n_rows):
+			for i_col in range(n_cols):
+				ax = self.lwpaxes[i_row, i_col]
+				ax.ref_position = positions[i_row, i_col]
+				ax.xrange = (xmins[i_row, i_col], xmaxs[i_row, i_col])
+				ax.qns = qns[i_row, i_col]
+				ax.indices = {label: (min_indices[label][i_row, i_col], max_indices[label][i_row, i_col]) for label in ('exp', 'cat', 'lin')}
+				threads.append(ax.update())
+
+		thread.earlyreturn()
+
+		for thread_ in threads:
+			thread_.wait()
+
+	def get_current_ax(self):
+		shape = self.lwpaxes.shape
+		index = self.__class__._active_ax_index
+		if 0 <= index[0] < shape[0] and 0 <= index[1] < shape[1]:
+			return(self.lwpaxes[index])
+		else:
+			return(self.lwpaxes[0,0])
+
+	def contextMenuCanvas(self, event):
+		x, y = event.x(), event.y()
+		geometry = self.plotcanvas.geometry()
+		width, height = geometry.width(), geometry.height()
+		x_rel, y_rel = x/width, 1 - y/height
+
+		for lwpax in self.lwpaxes.flatten():
+			xmin, ymin, width, height = lwpax.ax.get_position().bounds
+			if xmin <= x_rel <= xmin + width and ymin <= y_rel <= ymin+height:
+				break
+		else: # Clicked outside of ax
+			return
+
+		menu = QMenu(self)
+		get_position_action = menu.addAction('Copy Reference Position')
+		get_qns_action = menu.addAction('Copy QNs')
+		set_active_action = menu.addAction('Make active Ax')
+
+		action = menu.exec(self.mapToGlobal(event.pos()))
+		if action == get_position_action:
+			QApplication.clipboard().setText(str(lwpax.ref_position))
+		elif action == get_qns_action:
+			output_string = []
+			qnus, qnls = lwpax.qns
+			tmp_string = ','.join([f'{qn:3.0f}' for qn in qnus]) + ' ← ' + ','.join([f'{qn:3.0f}' for qn in qnls])
+			output_string.append(tmp_string)
+
+			output_string = '\n'.join(output_string)
+			QApplication.clipboard().setText(output_string)
+		elif action == set_active_action:
+			mainwindow.lwpwidget._active_ax_index = (lwpax.row_i, lwpax.col_i)
+
 
 class MainWindow(QMainWindow):
 	notify_info = pyqtSignal(str)
@@ -2989,6 +2997,9 @@ class NotificationsBox(QScrollArea):
 class LLWP(QApplication):
 	configsignal = pyqtSignal(tuple)
 	
+	def get_main_window_class(self):
+		return(MainWindow)
+	
 	def __init__(self, *args, **kwargs):
 		sys.excepthook = except_hook
 		threading.excepthook = lambda args: except_hook(*args[:3])
@@ -3011,7 +3022,8 @@ class LLWP(QApplication):
 
 		with config:
 			global mainwindow
-			mainwindow = MainWindow(self)
+			mainwindow_class = self.get_main_window_class()
+			mainwindow = mainwindow_class(self)
 			mainwindow.create_gui_components()
 
 			if len(sys.argv) > 1:
@@ -3067,6 +3079,7 @@ class LLWP(QApplication):
 
 	def update_pyckett_quanta_settings(self):
 		pyckett.QUANTA = config['flag_pyckettquanta']
+
 
 ##
 ## Dialogs
@@ -6547,10 +6560,9 @@ def llwpfile(extension=""):
 
 	return(os.path.join(llwpfolder, extension))
 
-def exp_to_df(fname, **kwargs):
+def exp_to_df(fname, n_bytes=4096, **kwargs):
 	kwargs = {
 		'dtype': np.float64,
-		'sep': '\t',
 		'names': ['x', 'y'],
 		'usecols': [0, 1],
 		'comment': '#',
@@ -6558,6 +6570,14 @@ def exp_to_df(fname, **kwargs):
 		'engine': 'c',
 		** kwargs,
 	}
+
+	# Find the delimiter automatically if not specified
+	if 'delimiter' not in kwargs and 'sep' not in kwargs:
+		sniffer = csv.Sniffer()
+		with open(fname, 'r') as file:
+			data = file.read(n_bytes)
+		delimiter = sniffer.sniff(data).delimiter
+		kwargs['delimiter'] = delimiter
 
 	data = pd.read_csv(fname, **kwargs)
 	data = data.dropna()
@@ -6589,15 +6609,648 @@ def except_hook(cls, exception, traceback):
 	except Exception as E:
 		pass
 
+
+
+
+
+
+
+#################################################################################
+class LevelSelector(SeriesSelector):
+	values_changed = pyqtSignal()
+
+	def __init__(self, parent, initial_values={}):
+		super(SeriesSelector, self).__init__(parent)
+		self.n_qns = N_QNS
+		self.parent = parent
+		self.updating = False
+		self.state = {
+			'is_upper_state': True,
+			'qns': (1, 0, 1, 0, 0, 0),
+			'incr': (True, False, True, False, False, False),
+			'diff': (1, 0, 1, 0, 0, 0),
+			'use_diff': False,
+		}
+		self.state.update(initial_values)
+
+		layout = QGridLayout()
+
+		create_qn = lambda: QQ(QSpinBox, minWidth=60, maxWidth=60, range=(None, None), visible=False,
+							singlestep=1, change=lambda x: self.changed())
+
+		self.qns = [create_qn() for _ in range(self.n_qns)]
+
+		create_widget = lambda widget, kwargs: QQ(widget, minWidth=40, maxWidth=40, visible=False,
+							change=lambda x: self.changed(), **kwargs)
+
+		self.incr = [create_widget(QCheckBox, {'text':'Inc'}) for _ in range(self.n_qns)]
+		self.diff = [create_widget(QSpinBox, {'range': (None, None), 'singlestep': 1, }) for _ in range(self.n_qns)]
+
+		self.incqns = QQ(QPushButton, text="Inc", change=lambda x: self.incdecqns(+1), width=40)
+		self.decqns = QQ(QPushButton, text="Dec", change=lambda x: self.incdecqns(-1), width=40)
+
+		self.togglediff = QQ(QToolButton, text="⇆", change=lambda x: self.change_incr_mode(), width=40)
+		
+		for i, widget in enumerate(self.qns):
+			layout.addWidget(widget, 0, i)
+
+		for i, incr, diff in zip(range(N_QNS), self.incr, self.diff):
+			tmp = QHBoxLayout()
+			tmp.addWidget(incr)
+			tmp.addWidget(diff)
+
+			layout.addLayout(tmp, 4, i)
+			layout.setColumnStretch(i, 100)
+
+		for i in range(self.n_qns):
+			layout.setColumnStretch(i, 100)
+		
+		layout.addWidget(self.togglediff, 5, self.n_qns, 1, 1)
+
+		layout.addWidget(self.incqns, 0, self.n_qns, 1, 2)
+		layout.addWidget(self.decqns, 4, self.n_qns, 1, 2)
+		
+		self.is_upper_state_checkbox = QQ(QCheckBox, change=lambda x: self.changed(), text='Upper State Level')
+		layout.addWidget(self.is_upper_state_checkbox, 5, 0, 1, self.n_qns)
+
+		layout.setRowStretch(6, 10)
+		layout.setColumnStretch(8, 1)
+
+		self.layout = layout
+		self.setLayout(layout)
+
+		self.set_state()
+
+		config.register_widget("series_qns", self.togglediff, self.set_state)
+		config.register_widget("flag_showseriesarrows", self.togglediff, self.change_arrows)
+		self.change_arrows()
+
+	def set_state(self):
+		self.updating = True
+		state = self.state
+
+		n_qns = config["series_qns"]
+		are_visible = [True] * n_qns +[False] * (self.n_qns - n_qns)
+
+		for qn, value, is_visible in zip(self.qns, state["qns"], are_visible):
+			qn.setValue(value)
+			qn.setVisible(is_visible)
+		for widget, value, is_visible in zip(self.incr, state["incr"], are_visible):
+			widget.setChecked(value)
+			widget.setVisible(is_visible and not state['use_diff'])
+		for widget, value, is_visible in zip(self.diff, state["diff"], are_visible):
+			widget.setValue(value)
+			widget.setVisible(is_visible and state['use_diff'])
+		
+		self.is_upper_state_checkbox.setChecked(state['is_upper_state'])
+		self.updating = False
+		self.changed()
+
+	def incdecqns(self, dir):
+		self.updating = True
+		incr_values = (x.value() for x in self.diff) if self.state['use_diff'] else (x.isChecked() for x in self.incr)
+
+		for qn, incr in zip(self.qns, incr_values):
+			qn.setValue(qn.value()+dir*incr)
+		self.updating = False
+		self.changed()
+
+	def changed(self):
+		if self.updating:
+			return
+	
+		self.state["qns"] = [x.value() for x in self.qns]
+		self.state["incr"] = [x.isChecked() for x in self.incr]
+		self.state["diff"] = [x.value() for x in self.diff]
+		self.state["is_upper_state"] = self.is_upper_state_checkbox.isChecked()
+		self.values_changed.emit()
+		mainwindow.lwpwidget.set_data()
+	
+	def change_arrows(self):
+		show_arrows = config['flag_showseriesarrows']
+		width = 60 if show_arrows else 40
+		button_symbols = QAbstractSpinBox.ButtonSymbols.UpDownArrows if show_arrows else QAbstractSpinBox.ButtonSymbols.NoButtons
+
+		for widget in self.qns + self.diff:
+			widget.setMinimumWidth(width)
+			widget.setMaximumWidth(width)
+			widget.setButtonSymbols(button_symbols)
+
+	def calc_references(self, n_rows, n_qns):
+		qns = self.state['qns'][:n_qns]
+		diffs = (self.state['diff'] if self.state['use_diff'] else self.state['incr'])[:n_qns]
+
+		qns = np.array(qns)
+		diffs = np.array(diffs)
+
+		# Prefilter df to all transitins belonging to series
+		conditions, conditions_incr = ['(visible)'], []
+		normalizing_value = None
+		ul = 'u' if self.state['is_upper_state'] else 'l'
+		
+		for i, qn, diff in zip(range(n_qns), qns, diffs):
+			diff = int(diff)
+			if diff:
+				if normalizing_value is None:
+					normalizing_value = qn // diff
+				conditions_incr.append(f"((qn{ul}{i+1} - {qn-normalizing_value*diff})/{diff})")
+			else:
+				conditions.append(f"(qn{ul}{i+1} == {qn})")
+
+		if len(conditions_incr):
+			conditions.append(" == ".join(conditions_incr))
+		
+		conditions = " and ".join(conditions)
+		
+		with CatFile.lock:
+			entries = CatFile.df.query(conditions).copy()
+
+		if config['asap_query']:
+			entries['use_for_cross_correlation'] = entries.eval(config['asap_query'])
+		else:
+			entries['use_for_cross_correlation'] = True
+
+		return(entries, qns, diffs, ul)
+
+class ASAPAx(LWPAx):
+	fit_vline = None
+	fit_curve = None
+	fit_methods = ('Pgopher', 'Polynom', 'MultiPolynom', 'Gauss', 'Lorentz',
+				'Voigt', 'Gauss 1st Derivative', 'Lorentz 1st Derivative', 'Voigt 1st Derivative',
+				'Gauss 2nd Derivative', 'Lorentz 2nd Derivative', 'Voigt 2nd Derivative', )
+
+	def __init__(self, ax, row_i, col_i):
+		self.ax = ax
+		self.row_i = row_i
+		self.col_i = col_i
+		
+		self.xrange = (-1, 1)
+		self.annotation = None
+		self.qns = None
+		self.entries = None
+
+		self.corr_xs = None
+		self.corr_ys = None
+		
+		with matplotlib_lock:
+			self.span =  matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax: self.on_range(xmin, xmax), 'horizontal', useblit=True, button=1)
+		
+		self.exp_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_exp"])
+
+		with matplotlib_lock:
+			ax.add_collection(self.exp_coll)
+			
+			ax.yaxis.set_visible(False)
+			if row_i:
+				ax.xaxis.set_visible(False)
+			else:
+				ax.set_xticks([])
+
+	# @status_d
+	@QThread.threaded_d
+	@drawplot_decorator.d
+	def update(self, thread=None):
+		ax = self.ax
+
+		offset, width = config['plot_offset'], config['plot_width']
+		resolution = config['asap_resolution']
+		self.xrange = (offset - width/2, offset + width/2)
+		ax.set_xlim(self.xrange)
+
+		self.set_xticklabels()
+		yrange = [-1, 1]
+
+		# Cross-Correlation Plots
+		transitions = self.entries[self.entries['use_for_cross_correlation']]
+
+		ref_xs = transitions['x']
+
+		min_indices, max_indices = transitions['min_indices'], transitions['max_indices']
+
+		tot_xs = np.arange(-width/2, width/2 + resolution, resolution)
+		tot_ys = np.ones_like(tot_xs)
+
+		exp_len = len(ExpFile.df)
+		n_correlated_transitions = 0
+
+		for min_index, max_index, ref_pos in zip(min_indices, max_indices, ref_xs):
+			min_index = max(0, min_index-1)
+			max_index = min(exp_len, max_index+1)
+
+			dataframe = ExpFile.df.iloc[min_index:max_index].copy()
+			dataframe = dataframe[dataframe['visible']]
+
+			if not len(dataframe):
+				continue
+			
+			xs = dataframe['x']
+			ys = dataframe['y']
+
+			interp_ys = np.interp(tot_xs, xs-ref_pos, ys, left=1, right=1)			
+			tot_ys *= interp_ys
+			n_correlated_transitions += 1
+
+		if n_correlated_transitions:
+			segs = np.array(((tot_xs[:-1], tot_xs[1:]), (tot_ys[:-1], tot_ys[1:]))).T
+			self.corr_xs = tot_xs
+			self.corr_ys = tot_ys
+		else:
+			segs = []
+			self.corr_xs = None
+			self.corr_ys = None
+		
+		self.exp_coll.set(segments=segs, color=config['color_exp'])
+
+		if len(tot_ys):
+			yrange = (np.min(tot_ys), np.max(tot_ys))
+		margin = config['plot_ymargin']
+
+		yrange = [yrange[0]-margin*(yrange[1]-yrange[0]), yrange[1]+margin*(yrange[1]-yrange[0])]
+		if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
+			yrange = [-1,+1]
+
+		ax.set_ylim(yrange)
+		self.update_annotation()
+
+	def update_annotation(self):
+		fstring = config['plot_annotationfstring']
+
+		if not fstring:
+			if self.annotation:
+				self.annotation.remove()
+				self.annotation.set_visible(False)
+				self.annotation = None
+			return
+
+		color = matplotlib.rcParams['text.color']
+
+		if self.qns is not None:
+			qnstring = ','.join(map(str, self.qns))
+		else:
+			qnstring = ''
+
+
+		vars = {
+			'x': config['plot_offset'],
+			'qns': qnstring,
+			'width': config['plot_width'],
+		}
+		text = fstring.format(**vars)
+
+		if self.annotation is None:
+			kwargs = config['plot_annotationkwargs']
+			ax = self.ax
+			self.annotation = ax.text(**kwargs, s=text, color=color, transform=ax.transAxes)
+		else:
+			self.annotation.set_text(text)
+			self.annotation.set_color(color)
+
+	def set_xticklabels(self):
+		if self.row_i:
+			return
+		
+		ax = self.ax
+		ticks = np.linspace(*self.xrange, config['plot_xticks'])
+		tickformat = config['plot_xtickformat']
+
+		if tickformat == 'scientific':
+			ticklabels = [f"{x:.2e}".replace("e+00", "").rstrip("0").rstrip(".") for x in ticks]
+		else:
+			ticklabels = symmetric_ticklabels(ticks)		
+
+		if self.col_i and len(ticks) > 1:
+			ticks = ticks[1:]
+			ticklabels = ticklabels[1:]
+		ax.set_xticks(ticks)
+		ax.set_xticklabels(ticklabels)
+	
+	def create_qns_dict(self, complete=False):
+		qns_dict = {} if not complete else {f'qn{i+1}': pyckett.SENTINEL for i in range(N_QNS)}
+		if self.qns is None:
+			return(qns_dict)
+		
+		qnus, qnls = self.qns
+		for i, qn in enumerate(self.qns):
+			qns_dict[f'qn{i+1}'] = qn
+		return(qns_dict)
+
+	def on_range(self, xmin, xmax):
+		xmin_ax, xmax_ax = self.xrange
+		if xmax == xmin or xmax > xmax_ax or xmin < xmin_ax:
+			return
+		self.fit_data(xmin, xmax)
+
+	# @Luis: Check this
+	def fit_determine_uncert(self, xmiddle, xuncert):
+		error_param = config['fit_uncertainty']
+		if error_param > 0:
+			return(error_param)
+		elif error_param >= -1:
+			return( abs(xmiddle - self.ref_position) )
+		elif error_param >= -2:
+			resp, rc = QInputDialog.getText(self, 'Set error', 'Error:')
+			if rc:
+				try:
+					return(float(resp))
+				except ValueError:
+					notify_error.emit("Did not understand the given value for the error. The line was not assigned.")
+					raise CustomError("Did not understand the given value for the error. The line was not assigned.")
+			else:
+				GUIAbortedError
+		
+		elif error_value >= -3:
+			return(xuncert)
+
+	def fit_data(self, xmin, xmax):
+		# Delete artists highlighting previous fit
+		if self.__class__.fit_vline is not None:
+			self.__class__.fit_vline.remove()
+			self.__class__.fit_vline = None
+		if self.__class__.fit_curve is not None:
+			self.__class__.fit_curve.remove()
+			self.__class__.fit_curve = None
+		
+		# Fit the data
+		xmiddle, xuncert, fit_xs, fit_ys = self.fit_peak(xmin, xmax)			
+		if config['fit_copytoclipboard']:
+			QApplication.clipboard().setText(str(xmiddle))
+
+
+		# Highlight fit in plot
+		self.__class__.fit_curve = self.ax.plot(fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1)[0]
+		self.__class__.fit_vline = self.ax.axvline(x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1)
+
+		mainwindow.lwpwidget.set_data()
+
+		# @Luis: Check how to fit this data
+		# # Create assignment object
+		# new_assignment = {'x': xmiddle, 'error': self.fit_determine_uncert(xmiddle, xuncert), 'xpre': self.ref_position}
+		# new_assignment.update(self.create_qns_dict(complete=True))
+		# new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
+		
+		# NewAssignments.get_instance().add_row(new_assignment)
+
+	def fit_peak(self, xmin, xmax):
+		exp_xs, exp_ys = self.corr_xs, self.corr_ys
+		mask = (exp_xs < xmax) & (exp_xs > xmin)
+		exp_xs, exp_ys = exp_xs[mask], exp_ys[mask]
+		
+		fit_xs = np.linspace(xmin, xmax, config['fit_xpoints'])
+
+		peakdirection = config['fit_peakdirection']
+		fitmethod = config['fit_fitmethod']
+
+		if (len(exp_xs) == 0) or ((len(exp_xs) < 2) and fitmethod != 'Pgopher'):
+			notify_error.emit('The data could not be fit as there were too few points selected.')
+			raise GUIAbortedError('The data could not be fit as there were too few points selected.')
+
+		try:
+			function_to_call = {
+				'Pgopher': fit_pgopher,
+				'Polynom': lambda *args: fit_polynom(*args, config['fit_polynomrank']),
+				'MultiPolynom': lambda *args: fit_polynom_multirank(*args, config['fit_polynommaxrank']),
+			}.get(fitmethod)
+			
+			if not function_to_call:
+				offset = config['fit_offset']
+				profilname, derivative = {
+					'Gauss':					('Gauss', 0),
+					'Lorentz':					('Lorentz', 0),
+					'Voigt':					('Voigt', 0),
+					'Gauss 1st Derivative':		('Gauss', 1),
+					'Lorentz 1st Derivative':	('Lorentz', 1),
+					'Voigt 1st Derivative':		('Voigt', 1),
+					'Gauss 2nd Derivative':		('Gauss', 2),
+					'Lorentz 2nd Derivative':	('Lorentz', 2),
+					'Voigt 2nd Derivative':		('Voigt', 2),
+				}[fitmethod]
+				function_to_call = lambda *args: fit_lineshape(*args, profilname, derivative, offset)
+
+			xmiddle, xuncert, fit_xs, fit_ys = function_to_call(exp_xs, exp_ys, peakdirection, fit_xs)
+
+		except Exception as E:
+			self.fitcurve = None
+			self.fitline = None
+			notify_error.emit(f"The fitting failed with the following error message : {str(E)}")
+			raise
+
+		return(xmiddle, xuncert, fit_xs, fit_ys)
+
+
+class LASAP(LLWP):
+	def get_main_window_class(self):
+		return(LASAPMainWindow)
+
+	def debug_setup(self):
+		ConfigWindow._instance.show()
+		FileWindow._instance.show()
+		pass
+
+class ASAPWidget(LWPWidget):
+	_ax_class = ASAPAx
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		
+		elem = QQ(QLabel, text='    Offset: ', visible=config['isvisible_controlswidth'])
+		config.register("isvisible_controlswidth", lambda elem=elem: elem.setVisible(config["isvisible_controlswidth"]))
+		self.toplayout.addWidget(elem)
+		
+		elem = QQ(QDoubleSpinBox, 'plot_offset', range=(None, None), minWidth=85, visible=config['isvisible_controlswidth'])
+		config.register("isvisible_controlswidth", lambda elem=elem: elem.setVisible(config["isvisible_controlswidth"]))
+		self.toplayout.addWidget(elem)
+
+
+	@QThread.threaded_d
+	@status_d
+	@drawplot_decorator.d
+	def set_data(self, thread=None):
+		if not hasattr(ASAPSettingsWindow, '_instance'):
+			return
+		
+		if not hasattr(ASAPSettingsWindow._instance, 'tab'):
+			return
+
+		n_rows = config['plot_rows']
+		n_cols = config['plot_cols']
+		n_qns = config['series_qns']
+
+		thread.earlyreturn()
+
+		# Calculate positions and qns for each column
+		tab_widget = ASAPSettingsWindow._instance.tab
+		n_widgets = tab_widget.count()
+
+		offset = config['plot_offset']
+		width = config['plot_width']
+
+		threads = []
+		with matplotlib_lock:
+			if self.lwpaxes.shape != (n_rows, n_cols):
+				notify_error.emit('Shape of LWPAxes is out of sync with requested values.')
+				return
+
+			for i_col in range(n_widgets):
+				thread.earlyreturn()
+				if i_col > n_cols:
+					continue
+
+				refwidget = tab_widget.widget(i_col)
+				entries, qns, diffs, ul = refwidget.calc_references(n_rows, n_qns)
+
+				# Calculate the plot positions and get indices
+				entries['xmins'] = entries['x'] + offset - width/2
+				entries['xmaxs'] = entries['xmins'] + width
+				entries['min_indices'], entries['max_indices'] = ExpFile.xs_to_indices(entries['xmins'], entries['xmaxs'])
+				
+				thread.earlyreturn()
+
+				# Get the specific entries for each ax 
+				for i_row in range(n_rows):
+					row_qns = qns + i_row * diffs
+					cond = ['(use_for_cross_correlation)'] + [f"(qn{ul}{i+1} == {qn})" for i, qn in enumerate(row_qns)]
+					condition  = " & ".join(cond)
+
+					row_entries = entries.query(condition)
+					
+					ax = self.lwpaxes[i_row, i_col]
+					ax.entries = row_entries
+					ax.qns = row_qns
+					threads.append(ax.update())
+				
+				thread.earlyreturn()
+
+			# Edge cases of no reference tabs and too few tabs
+			for i_col in range(n_widgets, n_cols):
+				for i_row in range(n_rows):
+					ax.entries = None
+					ax.qns = None
+					threads.append(ax.update())
+
+			thread.earlyreturn()
+
+			for thread_ in threads:
+				thread_.wait()
+	
+	def on_hover(self, event):
+		x = event.xdata
+		y = event.ydata
+
+		if not all([x, y, event.inaxes]):
+			text_cursor = ""
+		else:
+			if config['flag_showmainplotposition']:
+				text_cursor = f"  ({x=:{config['flag_xformatfloat']}}, {y=:{config['flag_xformatfloat']}})  "
+			else:
+				text_cursor = ""
+		mainwindow.statusbar.position_label.setText(text_cursor)
+	
+	def on_click(self, event):
+		super().on_click(event)
+		# @Luis: Do we want to fit here as well?
+		# @Luis: Should this also lead to showing this plot in the detail window
+
+	def contextMenuCanvas(self, event):
+		super().contextMenuEvent(event)
+		# @Luis: Update the context Menu here
+
+class LASAPMainWindow(MainWindow):
+	def create_gui_components(self):
+		global notify_info, notify_warning, notify_error
+		notify_info = self.notify_info
+		notify_warning = self.notify_warning
+		notify_error = self.notify_error
+
+		self.statusbar = StatusBar()
+		self.setStatusBar(self.statusbar)
+
+		self.notificationsbox = NotificationsBox()
+
+		self.lwpwidget = ASAPWidget()
+		self.setCentralWidget(self.lwpwidget)
+		
+		# @Luis:
+		# Create NewAssignments
+		
+		for subclass in (FileWindow, ConfigWindow, ASAPSettingsWindow, ASAPDetailViewer, CreditsWindow):
+			subclass()
+		dockstate = Geometry.get('__dockstate__')
+		if dockstate:
+			self.restoreState(dockstate)
+		
+		# @Luis:
+		# self.menu = Menu(self)
+		# self.shortcuts()
+
+
+class ASAPDetailViewer(EQDockWidget):
+	pass
+
+class ASAPSettingsWindow(ReferenceSeriesWindow):
+	default_visible = True
+
+	def __init__(self, *args, **kwargs):
+		super(ReferenceSeriesWindow, self).__init__(*args, **kwargs)
+		self.setWindowTitle("ASAP Settings")
+
+		widget = QGroupBox()
+		layout = QVBoxLayout()
+		self.setWidget(widget)
+		widget.setLayout(layout)
+
+		self.tab = QTabWidget()
+		self.tab_order = None
+		layout.addWidget(self.tab)
+
+		self.tab.setTabsClosable(True)
+		self.tab.setMovable(True)
+		self.tab.setDocumentMode(True)
+
+		self.tab.setTabBarAutoHide(True)
+		self.tab.setCornerWidget(QQ(QToolButton, text="Dupl.", tooltip="Duplicate current tab", change=self.duplicate_tab), Qt.Corner.TopRightCorner)
+		self.tab.tabCloseRequested.connect(self.close_tab)
+		self.tab.tabBarDoubleClicked.connect(self.renameoradd_tab)
+		self.tab.setCurrentIndex(config["series_currenttab"])
+
+		self.tab_order = [self.tab.widget(i) for i in range(self.tab.count())]
+		self.set_state(config["series_references"])
+		if not self.tab.count():
+			self.add_tab()
+
+		mainwindow.lwpwidget.plotscreated.connect(self.update_number_of_references)
+		self.tab.currentChanged.connect(self.check_order)
+		
+		
+		
+		layout.addWidget(QQ(QLabel, text='Filter for transitions: '))
+		layout.addWidget(QQ(QPlainTextEdit, 'asap_query'))
+
+	def add_tab(self, init_values={}, check_order=True):
+		title = init_values.get("title", "Series")
+		tmp = LevelSelector(self, init_values)
+		tmp.values_changed.connect(self.changed)
+		self.tab.addTab(tmp, title)
+		if check_order:
+			self.check_order()
+
+
+#################################################################################
+
+
+
+
 ##
 ## Startup
 ##
 
-def start():
+def start_llwp():
 	LLWP()
 
+def start_lasap():
+	LASAP()
+
 if __name__ == '__main__':
-	start()
+	start_lasap()
 	
 
 ##
