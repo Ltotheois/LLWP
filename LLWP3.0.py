@@ -4803,12 +4803,15 @@ class ConfigWindow(EQDockWidget):
 		mainwidget.setLayout(vbox)
 
 		self.updating = False
+		self.visibilityChanged.connect(self.on_visibility_change)
 
-	def show(self, *args, **kwargs):
-		self.timer = QTimer(self)
-		self.timer.timeout.connect(self.get_values)
-		self.timer.start(200)
-		return(super().show(*args, **kwargs))
+	def on_visibility_change(self, is_visible):
+		if is_visible:
+			self.timer = QTimer(self)
+			self.timer.timeout.connect(self.get_values)
+			self.timer.start(200)
+		else:
+			self.timer.stop()
 
 	def search(self, text):
 		for key, value in self.widgets.items():
@@ -4854,10 +4857,6 @@ class ConfigWindow(EQDockWidget):
 		except Exception as E:
 			oklab.setText("Bad")
 
-
-	def closeEvent(self, *args, **kwargs):
-		self.timer.stop()
-		return super().closeEvent(*args, **kwargs)
 
 class CreditsWindow(EQDockWidget):
 	default_visible = False
