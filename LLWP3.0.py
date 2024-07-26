@@ -131,23 +131,6 @@ class Color(str):
 		else:
 			raise CustomError(f"Invalid Color: '{color}' is not a valid color.")
 
-class Unit(str):
-	conversion_factors = {
-		'cm-1': 1,
-		'MHz': 2.997925e+4,
-		'J': 1.986446e-23,
-		'K': 1.438777e+0,
-		'eV': 1.239841e-4,
-		'kcal': 4.744544e-27,
-	}
-
-	@classmethod
-	def get_units(cls):
-		return(cls.conversion_factors.keys())
-	
-	# @classmethod
-	# def 
-
 class CustomError(Exception):
 	pass
 
@@ -335,9 +318,7 @@ class Config(dict):
 		'asap_query': ('', str),
 		'asap_resolution': (6e-6, float),
 		'asap_weighted': (True, bool),
-		'asap_egyunit': (True, bool),
-		'asap_catunit': (True, bool),
-		'asap_expunit': (True, bool),
+		'asap_catunitconversionfactor': (0, float),
 	}
 
 	def __init__(self, signal, *args, **kwargs):
@@ -853,6 +834,19 @@ class QDoubleSpinBox(QDoubleSpinBox):
 		else:
 			return(str(0))
 
+class QDoubleSpinBoxFullPrec(QDoubleSpinBox):
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setDecimals(100)
+		# AdaptiveDecimalStepType is not implemented in earlier versions of PyQt5
+		try:
+			self.setStepType(QAbstractSpinBox.StepType.AdaptiveDecimalStepType)
+		except:
+			pass
+
+	def textFromValue(self, value):
+		return(str(value))
+
 class QHBoxLayout(QHBoxLayout):
 	def __init__(self, *args, **kwargs):
 		margin = kwargs.pop("margin", False)
@@ -1198,7 +1192,12 @@ class File():
 		mainwindow.lwpwidget.set_data()
 
 	@staticmethod
+	def handle_special_file_types(files):
+		return(files)
+
+	@staticmethod
 	def sort_files_by_type(files):
+		files = File.handle_special_file_types(files)
 		types = config['flag_extensions']
 		files_by_type = {key: [] for key in list(types.keys())}
 
@@ -6519,7 +6518,7 @@ def QQ(widgetclass, config_key=None, **kwargs):
 	if kwargs.get("buttons", True) is False:
 		widget.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
 
-	if widgetclass in [QSpinBox, QDoubleSpinBox]:
+	if widgetclass in [QSpinBox, QDoubleSpinBox, QDoubleSpinBoxFullPrec]:
 		setter = widget.setValue
 		changer = widget.valueChanged.connect
 		getter = widget.value
@@ -7098,6 +7097,9 @@ class ASAPWidget(LWPWidget):
 		
 		with CatFile.lock:
 			entries = CatFile.df.query(conditions).copy()
+		
+		if config['asap_catunitconversionfactor']:
+			entries['x'] *= config['asap_catunitconversionfactor']
 
 		if config['asap_query']:
 			entries['use_for_cross_correlation'] = entries.eval(config['asap_query'])
@@ -7450,11 +7452,6 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 		self.toolbox = QToolBox()
 		layout.addWidget(self.toolbox)
 
-		# @Luis: Add conversion factors somewhere
-		# the one from energy to lin can be applied in the fit function after offset + predicted value has happened
-		# the lin and cat to energy can be done in line 6765
-
-
 		settings_widget = QWidget()
 		self.toolbox.addItem(settings_widget, 'Settings')
 		tmp_layout = QGridLayout(margin=True)
@@ -7491,20 +7488,10 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 		
 		row_i += 1
 
-		units = Unit.get_units()
-		tmp_layout.addWidget(QQ(QLabel, text='Units Energy File:'), row_i, 0)
-		tmp_layout.addWidget(QQ(QComboBox, 'asap_egyunit', options=units), row_i, 1)
-		
-		row_i += 1
-
 		tmp_layout.addWidget(QQ(QLabel, text='Units Cat File:'), row_i, 0)
-		tmp_layout.addWidget(QQ(QComboBox, 'asap_catunit', options=units), row_i, 1)
+		tmp_layout.addWidget(QQ(QDoubleSpinBoxFullPrec, 'asap_catunitconversionfactor'), row_i, 1)
 
-		row_i += 1
-
-		tmp_layout.addWidget(QQ(QLabel, text='Units Spectrum:'), row_i, 0)
-		tmp_layout.addWidget(QQ(QComboBox, 'asap_expunit', options=units), row_i, 1)
-
+		
 		tmp_layout.setRowStretch(row_i + 1, 1)
 
 
@@ -7545,6 +7532,27 @@ def start_llwp():
 	LLWP()
 
 def start_lasap():
+
+	def handle_special_file_types(files):
+		egy_files = []
+		other_files = []
+
+		for file in files:
+			is_egy_file = (os.path.splitext(file)[1] == '.egy')
+
+			if is_egy_file:
+				egy_files.append(file)
+			else:
+				other_files.append(file)
+		
+		if len(egy_files) > 1:
+			notify_warning.emit('Only a single *.egy file can be loaded at the same time.')
+		elif len(egy_files) == 1:
+			ASAPAx.load_egy_file(egy_files[0])
+		return(other_files)
+
+	File.handle_special_file_types = handle_special_file_types
+
 	global APP_TAG
 	APP_TAG = 'LASAP'
 	LASAP()
