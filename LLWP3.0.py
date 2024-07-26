@@ -7558,8 +7558,8 @@ def start_lasap():
 	LASAP()
 
 if __name__ == '__main__':
-	start_lasap()
-	# start_llwp()
+	# start_lasap()
+	start_llwp()
 	
 
 ##
