@@ -316,6 +316,8 @@ class Config(dict):
 		
 		'asap_query': ('', str),
 		'asap_resolution': (6e-6, float),
+		'asap_weighted': (True, bool),
+		'asap_keeponlylatestresults': (True, bool),
 	}
 
 	def __init__(self, signal, *args, **kwargs):
@@ -521,7 +523,7 @@ class PlotWidget(QWidget):
 		self.ax.add_collection(self.exp_coll)
 		self.ax.add_collection(self.cat_coll)
 
-		self.request_redraw.connect(self.plot_canvas.draw)
+		self.request_redraw.connect(self.plot_canvas.draw_idle)
 
 	def from_current_plot(self):
 		tmp_ax = mainwindow.lwpwidget.get_current_ax()
@@ -874,7 +876,7 @@ class FigureCanvas(FigureCanvas):
 				spine.set_edgecolor(textcolor)
 
 		self.setStyleSheet(f'background-color: {background}')
-		self.draw()
+		self.draw_idle()
 
 class EQDockWidgetMeta(type(QDockWidget)):
 	def __call__(cls, *args, **kwargs):
@@ -2091,7 +2093,6 @@ class LWPAx():
 			self.annotation.set_text(text)
 			self.annotation.set_color(color)
 
-
 	def set_xticklabels(self):
 		if self.row_i:
 			return
@@ -2182,7 +2183,8 @@ class LWPAx():
 		new_assignment.update(self.create_qns_dict(complete=True))
 		new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
 		
-		self.check_blends(new_assignment)
+		if self.check_blends(new_assignment):
+			return()
 		NewAssignments.get_instance().add_row(new_assignment)
 
 	def fit_peak(self, xmin, xmax):
@@ -2237,13 +2239,13 @@ class LWPAx():
 
 	def check_blends(self, new_assignment):
 		if not config['series_blendwidth']:
-			return
+			return(False)
 		reference_states = ReferenceSeriesWindow._instance.get_state()
 		if self.col_i > len(reference_states):
-			return
+			return(False)
 		reference_state = reference_states[self.col_i]
 		if not reference_state['check_blends']:
-			return
+			return(False)
 
 		
 		if reference_state['method'] == 'Transition':
@@ -2269,12 +2271,12 @@ class LWPAx():
 			entries = entries.query('y >= @min_y_value')
 			
 		if len(entries) < 2:
-			return
+			return(False)
 		
 		# After guard clauses we want to show the dialog
+		mainwindow.lwpwidget.drawplot.emit()
 		AssignBlendsDialog.show_dialog(new_assignment, entries)
-		raise GUIAbortedError
-
+		return(True)
 
 class LWPWidget(QGroupBox):
 	drawplot = pyqtSignal()
@@ -2366,6 +2368,7 @@ class LWPWidget(QGroupBox):
 
 	def draw_canvas(self):
 		with matplotlib_lock:
+			# @Luis: Look into these things
 			self.plotcanvas.draw()
 
 	def on_click(self, event):
@@ -3497,7 +3500,7 @@ class QNsDialog(QDialog):
 			lab = QLabel(f"QN {i+1}")
 			qnslayout.addWidget(QQ(QLabel, text=f"QN{i+1}"), 0, i)
 
-		qnslayout.setColumnStretch(7, 1)
+		qnslayout.setColumnStretch(noq+1, 1)
 		layout.addLayout(qnslayout)
 
 		tmp = ["dist", "x", "log y"]
@@ -3605,7 +3608,6 @@ class FileWindow(EQDockWidget):
 			for key in cls.ids.keys():
 				self.gui_add_file(cls, key)
 		
-
 		self.fileaddition_requested.connect(self.gui_add_file)
 
 	def gui_add_file(self, cls, id):
@@ -4094,7 +4096,7 @@ class SeriesSelector(QWidget):
 		layout.addWidget(self.decqns, 1, self.n_qns, 1, 2)
 
 		layout.setRowStretch(6, 10)
-		layout.setColumnStretch(8, 1)
+		layout.setColumnStretch(self.n_qns+2, 1)
 
 		self.layout = layout
 		self.setLayout(layout)
@@ -4963,7 +4965,7 @@ class ResidualsWindow(EQDockWidget):
 		except Exception as E:
 			notify_warning.emit("<span style='color:#eda711;'>WARNING</span>: There was an error in your Residuals window input")
 		finally:
-			self.fig.canvas.draw()
+			self.fig.canvas.draw_idle()
 			self.update_button.setDisabled(False)
 
 	@QThread.threaded_d
@@ -5032,7 +5034,7 @@ class ResidualsWindow(EQDockWidget):
 				self.annot.set_visible(True)
 			else:
 				self.annot.set_visible(False)
-			self.fig.canvas.draw()
+			self.fig.canvas.draw_idle()
 
 			if click and noq:
 				tab_widget = ReferenceSeriesWindow._instance.tab
@@ -5415,7 +5417,8 @@ class BlendedLinesWindow(EQDockWidget):
 		new_assignment.update(lwpax.create_qns_dict(complete=True))
 		new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
 		
-		lwpax.check_blends(new_assignment)
+		if lwpax.check_blends(new_assignment):
+			return()
 		NewAssignments.get_instance().add_row(new_assignment)
 	
 	def assign_other_qns(self, x, error):
@@ -5438,7 +5441,8 @@ class BlendedLinesWindow(EQDockWidget):
 			return
 		
 		new_assignment.update(dialog.save())
-		lwpax.check_blends(new_assignment)
+		if lwpax.check_blends(new_assignment):
+			return()
 		NewAssignments.get_instance().add_row(new_assignment)
 	
 
@@ -5772,7 +5776,7 @@ class EnergyLevelsWindow(EQDockWidget):
 		
 		self.plotting_started.connect(lambda: self.update_button.setDisabled(True))
 		self.plotting_finished.connect(lambda: self.update_button.setDisabled(False))
-		self.plotting_finished.connect(lambda: self.fig.canvas.draw())
+		self.plotting_finished.connect(lambda: self.fig.canvas.draw_idle())
 
 	def load_file(self, fname=None):
 		if fname is None:
@@ -5848,7 +5852,7 @@ class EnergyLevelsWindow(EQDockWidget):
 				self.annot.set_visible(True)
 			else:
 				self.annot.set_visible(False)
-			self.fig.canvas.draw()
+			self.fig.canvas.draw_idle()
 
 	def dragEnterEvent(self, event):
 		mimeData = event.mimeData()
@@ -6553,7 +6557,7 @@ def bin_data(dataframe, binwidth, range):
 
 def llwpfile(extension=""):
 	home = os.path.expanduser("~")
-	llwpfolder = os.path.join(home, ".llwp")
+	llwpfolder = os.path.join(home, ".{APP_TAG.lower()}")
 	
 	if not os.path.isdir(llwpfolder):
 		os.mkdir(llwpfolder)
@@ -6660,10 +6664,10 @@ class LevelSelector(SeriesSelector):
 			tmp.addWidget(diff)
 
 			layout.addLayout(tmp, 4, i)
-			layout.setColumnStretch(i, 100)
+			# layout.setColumnStretch(i, 100)
 
-		for i in range(self.n_qns):
-			layout.setColumnStretch(i, 100)
+		# for i in range(self.n_qns):
+		# 	# layout.setColumnStretch(i, 100)
 		
 		layout.addWidget(self.togglediff, 5, self.n_qns, 1, 1)
 
@@ -6674,7 +6678,7 @@ class LevelSelector(SeriesSelector):
 		layout.addWidget(self.is_upper_state_checkbox, 5, 0, 1, self.n_qns)
 
 		layout.setRowStretch(6, 10)
-		layout.setColumnStretch(8, 1)
+		layout.setColumnStretch(self.n_qns+2, 1)
 
 		self.layout = layout
 		self.setLayout(layout)
@@ -6724,7 +6728,6 @@ class LevelSelector(SeriesSelector):
 		self.state["diff"] = [x.value() for x in self.diff]
 		self.state["is_upper_state"] = self.is_upper_state_checkbox.isChecked()
 		self.values_changed.emit()
-		mainwindow.lwpwidget.set_data()
 	
 	def change_arrows(self):
 		show_arrows = config['flag_showseriesarrows']
@@ -6736,48 +6739,12 @@ class LevelSelector(SeriesSelector):
 			widget.setMaximumWidth(width)
 			widget.setButtonSymbols(button_symbols)
 
-	def calc_references(self, n_rows, n_qns):
-		qns = self.state['qns'][:n_qns]
-		diffs = (self.state['diff'] if self.state['use_diff'] else self.state['incr'])[:n_qns]
-
-		qns = np.array(qns)
-		diffs = np.array(diffs)
-
-		# Prefilter df to all transitins belonging to series
-		conditions, conditions_incr = ['(visible)'], []
-		normalizing_value = None
-		ul = 'u' if self.state['is_upper_state'] else 'l'
-		
-		for i, qn, diff in zip(range(n_qns), qns, diffs):
-			diff = int(diff)
-			if diff:
-				if normalizing_value is None:
-					normalizing_value = qn // diff
-				conditions_incr.append(f"((qn{ul}{i+1} - {qn-normalizing_value*diff})/{diff})")
-			else:
-				conditions.append(f"(qn{ul}{i+1} == {qn})")
-
-		if len(conditions_incr):
-			conditions.append(" == ".join(conditions_incr))
-		
-		conditions = " and ".join(conditions)
-		
-		with CatFile.lock:
-			entries = CatFile.df.query(conditions).copy()
-
-		if config['asap_query']:
-			entries['use_for_cross_correlation'] = entries.eval(config['asap_query'])
-		else:
-			entries['use_for_cross_correlation'] = True
-
-		return(entries, qns, diffs, ul)
-
 class ASAPAx(LWPAx):
 	fit_vline = None
 	fit_curve = None
-	fit_methods = ('Pgopher', 'Polynom', 'MultiPolynom', 'Gauss', 'Lorentz',
-				'Voigt', 'Gauss 1st Derivative', 'Lorentz 1st Derivative', 'Voigt 1st Derivative',
-				'Gauss 2nd Derivative', 'Lorentz 2nd Derivative', 'Voigt 2nd Derivative', )
+	fit_methods = ('Pgopher', 'Polynom', 'MultiPolynom', 'Gauss', 'Lorentz')
+
+	egy_df = None
 
 	def __init__(self, ax, row_i, col_i):
 		self.ax = ax
@@ -6791,6 +6758,7 @@ class ASAPAx(LWPAx):
 
 		self.corr_xs = None
 		self.corr_ys = None
+		self.curr_state = {}
 		
 		with matplotlib_lock:
 			self.span =  matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax: self.on_range(xmin, xmax), 'horizontal', useblit=True, button=1)
@@ -6806,6 +6774,20 @@ class ASAPAx(LWPAx):
 			else:
 				ax.set_xticks([])
 
+
+	# @status_d
+	@QThread.threaded_d
+	@drawplot_decorator.d
+	def update_correlation_plots(self, thread=None):
+		ax = self.ax
+		tot_xs, tot_ys = self.corr_xs, self.corr_ys
+		segs = np.array(((tot_xs[:-1], tot_xs[1:]), (tot_ys[:-1], tot_ys[1:]))).T
+		self.exp_coll.set(segments=segs, color=config['color_exp'])
+
+		thread_ = self.update()
+		thread_.wait()
+		
+
 	# @status_d
 	@QThread.threaded_d
 	@drawplot_decorator.d
@@ -6813,61 +6795,30 @@ class ASAPAx(LWPAx):
 		ax = self.ax
 
 		offset, width = config['plot_offset'], config['plot_width']
-		resolution = config['asap_resolution']
 		self.xrange = (offset - width/2, offset + width/2)
+		
 		ax.set_xlim(self.xrange)
-
 		self.set_xticklabels()
 		yrange = [-1, 1]
 
-		# Cross-Correlation Plots
-		transitions = self.entries[self.entries['use_for_cross_correlation']]
+		# @Luis: Think how to handle this here: Just show data in plotting range? Keep passing everything to ax?
+		tot_xs = self.corr_xs
+		tot_ys = self.corr_ys
 
-		ref_xs = transitions['x']
+		if tot_xs is not None and len(tot_xs):
+			min_index = tot_xs.searchsorted(self.xrange[0], side='right')
+			max_index = tot_xs.searchsorted(self.xrange[1], side='left')
 
-		min_indices, max_indices = transitions['min_indices'], transitions['max_indices']
+			tot_xs = tot_xs[min_index:max_index]
+			tot_ys = tot_ys[min_index:max_index]
 
-		tot_xs = np.arange(-width/2, width/2 + resolution, resolution)
-		tot_ys = np.ones_like(tot_xs)
-
-		exp_len = len(ExpFile.df)
-		n_correlated_transitions = 0
-
-		for min_index, max_index, ref_pos in zip(min_indices, max_indices, ref_xs):
-			min_index = max(0, min_index-1)
-			max_index = min(exp_len, max_index+1)
-
-			dataframe = ExpFile.df.iloc[min_index:max_index].copy()
-			dataframe = dataframe[dataframe['visible']]
-
-			if not len(dataframe):
-				continue
-			
-			xs = dataframe['x']
-			ys = dataframe['y']
-
-			interp_ys = np.interp(tot_xs, xs-ref_pos, ys, left=1, right=1)			
-			tot_ys *= interp_ys
-			n_correlated_transitions += 1
-
-		if n_correlated_transitions:
-			segs = np.array(((tot_xs[:-1], tot_xs[1:]), (tot_ys[:-1], tot_ys[1:]))).T
-			self.corr_xs = tot_xs
-			self.corr_ys = tot_ys
-		else:
-			segs = []
-			self.corr_xs = None
-			self.corr_ys = None
-		
-		self.exp_coll.set(segments=segs, color=config['color_exp'])
-
-		if len(tot_ys):
+		if tot_ys is not None and len(tot_ys):
 			yrange = (np.min(tot_ys), np.max(tot_ys))
 		margin = config['plot_ymargin']
 
-		yrange = [yrange[0]-margin*(yrange[1]-yrange[0]), yrange[1]+margin*(yrange[1]-yrange[0])]
+		yrange = (yrange[0]-margin*(yrange[1]-yrange[0]), yrange[1]+margin*(yrange[1]-yrange[0]))
 		if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
-			yrange = [-1,+1]
+			yrange = (-1,+1)
 
 		ax.set_ylim(yrange)
 		self.update_annotation()
@@ -6925,13 +6876,13 @@ class ASAPAx(LWPAx):
 		ax.set_xticklabels(ticklabels)
 	
 	def create_qns_dict(self, complete=False):
-		qns_dict = {} if not complete else {f'qn{i+1}': pyckett.SENTINEL for i in range(N_QNS)}
+		qns_dict = {} if not complete else {f'qn{ul}{i+1}': pyckett.SENTINEL for ul in 'ul' for i in range(N_QNS)}
 		if self.qns is None:
 			return(qns_dict)
 		
-		qnus, qnls = self.qns
 		for i, qn in enumerate(self.qns):
-			qns_dict[f'qn{i+1}'] = qn
+			qns_dict[f'qnu{i+1}'] = qn
+			qns_dict[f'qnl{i+1}'] = 0
 		return(qns_dict)
 
 	def on_range(self, xmin, xmax):
@@ -6940,28 +6891,10 @@ class ASAPAx(LWPAx):
 			return
 		self.fit_data(xmin, xmax)
 
-	# @Luis: Check this
-	def fit_determine_uncert(self, xmiddle, xuncert):
-		error_param = config['fit_uncertainty']
-		if error_param > 0:
-			return(error_param)
-		elif error_param >= -1:
-			return( abs(xmiddle - self.ref_position) )
-		elif error_param >= -2:
-			resp, rc = QInputDialog.getText(self, 'Set error', 'Error:')
-			if rc:
-				try:
-					return(float(resp))
-				except ValueError:
-					notify_error.emit("Did not understand the given value for the error. The line was not assigned.")
-					raise CustomError("Did not understand the given value for the error. The line was not assigned.")
-			else:
-				GUIAbortedError
-		
-		elif error_value >= -3:
-			return(xuncert)
+	def fit_data(self, xmin, xmax, onclick=False):
+		if self.qns is None:
+			return
 
-	def fit_data(self, xmin, xmax):
 		# Delete artists highlighting previous fit
 		if self.__class__.fit_vline is not None:
 			self.__class__.fit_vline.remove()
@@ -6970,25 +6903,41 @@ class ASAPAx(LWPAx):
 			self.__class__.fit_curve.remove()
 			self.__class__.fit_curve = None
 		
-		# Fit the data
-		xmiddle, xuncert, fit_xs, fit_ys = self.fit_peak(xmin, xmax)			
-		if config['fit_copytoclipboard']:
-			QApplication.clipboard().setText(str(xmiddle))
 
-
+		if onclick:
+			xmiddle = xmin
+			xuncert = 0
+		
+		else:
+			# Fit the data
+			xmiddle, xuncert, fit_xs, fit_ys = self.fit_peak(xmin, xmax)			
+			self.__class__.fit_curve = self.ax.plot(fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1)[0]
+		
 		# Highlight fit in plot
-		self.__class__.fit_curve = self.ax.plot(fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1)[0]
 		self.__class__.fit_vline = self.ax.axvline(x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1)
 
-		mainwindow.lwpwidget.set_data()
+		# mainwindow.lwpwidget.set_data()
 
-		# @Luis: Check how to fit this data
-		# # Create assignment object
-		# new_assignment = {'x': xmiddle, 'error': self.fit_determine_uncert(xmiddle, xuncert), 'xpre': self.ref_position}
-		# new_assignment.update(self.create_qns_dict(complete=True))
-		# new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
+		# Add predicted energy to offset
+		qns_dict = self.create_qns_dict(complete=True)
+		egy_df = self.__class__.egy_df
+		egy_val = 0
+		if egy_df is not None:
+			query = ' and '.join([f'qn{i+1} == {qn}' for i, qn in enumerate(self.qns)])
+			vals = egy_df.query(query)["egy"].to_numpy()
+			egy_val = vals[0] if len(vals) else 0
 		
-		# NewAssignments.get_instance().add_row(new_assignment)
+		if egy_val == 0:
+			notify_warning.emit('No corresponding energy level found! Please check if an energies file is loaded.')
+		xmiddle += egy_val
+			
+		# Create assignment object
+		new_assignment = {'x': xmiddle, 'error': self.fit_determine_uncert(xmiddle, xuncert), 'xpre': 0}
+		new_assignment.update(qns_dict)
+		new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
+		
+		# @Luis: Implement keeponlylatest
+		NewAssignments.get_instance().add_row(new_assignment)
 
 	def fit_peak(self, xmin, xmax):
 		exp_xs, exp_ys = self.corr_xs, self.corr_ys
@@ -7037,17 +6986,34 @@ class ASAPAx(LWPAx):
 		return(xmiddle, xuncert, fit_xs, fit_ys)
 
 
+	@classmethod
+	def load_egy_file(cls, filename=None):
+		if not filename:
+			filename, filter = QFileDialog.getOpenFileName(None, 'Choose *.egy file')
+			if not filename:
+				return
+		
+		egy_df = pyckett.egy_to_df(filename, sort=False)
+		cls.egy_df = egy_df
+		
+		basename = os.path.basename(filename)
+
+		if hasattr(ASAPSettingsWindow, '_instance'):
+			ASAPSettingsWindow._instance.egy_file_button.setText(basename)
+		
+		notify_info.emit(f'Successfully loaded the energy file \'{basename}\'.')
+		
+
 class LASAP(LLWP):
 	def get_main_window_class(self):
 		return(LASAPMainWindow)
 
 	def debug_setup(self):
-		ConfigWindow._instance.show()
-		FileWindow._instance.show()
 		pass
 
 class ASAPWidget(LWPWidget):
 	_ax_class = ASAPAx
+
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -7061,13 +7027,99 @@ class ASAPWidget(LWPWidget):
 		self.toplayout.addWidget(elem)
 
 
+	def prefilter_correlation_plot_entries(self, state, n_rows, n_qns, offset, width):
+		qns = state['qns'][:n_qns]
+		diffs = (state['diff'] if state['use_diff'] else state['incr'])[:n_qns]
+
+		qns = np.array(qns)
+		diffs = np.array(diffs)
+
+		# Prefilter df to all transitins belonging to series
+		conditions, conditions_incr = ['(visible)'], []
+		normalizing_value = None
+		ul = 'u' if state['is_upper_state'] else 'l'
+		
+		for i, qn, diff in zip(range(n_qns), qns, diffs):
+			diff = int(diff)
+			if diff:
+				if normalizing_value is None:
+					normalizing_value = qn // diff
+				conditions_incr.append(f"((qn{ul}{i+1} - {qn-normalizing_value*diff})/{diff})")
+			else:
+				conditions.append(f"(qn{ul}{i+1} == {qn})")
+
+		if len(conditions_incr):
+			conditions.append(" == ".join(conditions_incr))
+		
+		conditions = " and ".join(conditions)
+		
+		with CatFile.lock:
+			entries = CatFile.df.query(conditions).copy()
+
+		if config['asap_query']:
+			entries['use_for_cross_correlation'] = entries.eval(config['asap_query'])
+		else:
+			entries['use_for_cross_correlation'] = True
+
+		entries['xmins'] = entries['x'] + offset - width/2
+		entries['xmaxs'] = entries['xmins'] + width
+		entries['min_indices'], entries['max_indices'] = ExpFile.xs_to_indices(entries['xmins'], entries['xmaxs'])
+
+		return(entries, qns, diffs, ul)
+
+	def calc_correlation_plot(self, row_qns, row_entries, offset, width, resolution):
+		transitions = row_entries[row_entries['use_for_cross_correlation']]
+
+		ref_xs = transitions['x']
+		ref_ys = transitions['y']
+
+		min_indices, max_indices = transitions['min_indices'], transitions['max_indices']
+
+		xmin, xmax = offset - width/2, offset + width/2
+		tot_xs = np.arange(xmin, xmax + resolution, resolution)
+		tot_ys = np.ones_like(tot_xs)
+
+		exp_len = len(ExpFile.df)
+		n_correlated_transitions = 0
+		use_weights = config['asap_weighted']
+
+		minimum_intensity = np.log10(ref_ys.min())
+
+		for min_index, max_index, ref_pos, ref_int in zip(min_indices, max_indices, ref_xs, ref_ys):
+			min_index = max(0, min_index-1)
+			max_index = min(exp_len, max_index+1)
+
+			dataframe = ExpFile.df.iloc[min_index:max_index].copy()
+			dataframe = dataframe[dataframe['visible']]
+
+			if not len(dataframe):
+				continue
+			
+			xs = dataframe['x']
+			ys = dataframe['y']
+
+			interp_ys = np.interp(tot_xs, xs-ref_pos, ys, left=1, right=1)		
+
+			# @Luis: Check this
+			if use_weights:
+				power = np.log10(ref_int) - minimum_intensity + 1
+				interp_ys = np.power(np.abs(interp_ys), power)
+				
+			tot_ys *= interp_ys
+			n_correlated_transitions += 1
+
+		if n_correlated_transitions < 2:
+			tot_xs = tot_ys = np.array([])
+			
+		return(tot_xs, tot_ys)
+
+
 	@QThread.threaded_d
 	@status_d
 	@drawplot_decorator.d
-	def set_data(self, thread=None):
+	def calc_correlation_plots(self, thread=None):
 		if not hasattr(ASAPSettingsWindow, '_instance'):
 			return
-		
 		if not hasattr(ASAPSettingsWindow._instance, 'tab'):
 			return
 
@@ -7082,7 +7134,8 @@ class ASAPWidget(LWPWidget):
 		n_widgets = tab_widget.count()
 
 		offset = config['plot_offset']
-		width = config['plot_width']
+		width = config['plot_width'] * 2
+		resolution = config['asap_resolution']
 
 		threads = []
 		with matplotlib_lock:
@@ -7096,12 +7149,9 @@ class ASAPWidget(LWPWidget):
 					continue
 
 				refwidget = tab_widget.widget(i_col)
-				entries, qns, diffs, ul = refwidget.calc_references(n_rows, n_qns)
-
-				# Calculate the plot positions and get indices
-				entries['xmins'] = entries['x'] + offset - width/2
-				entries['xmaxs'] = entries['xmins'] + width
-				entries['min_indices'], entries['max_indices'] = ExpFile.xs_to_indices(entries['xmins'], entries['xmaxs'])
+				state = refwidget.state
+				
+				entries, qns, diffs, ul = self.prefilter_correlation_plot_entries(state, n_rows, n_qns, offset, width)
 				
 				thread.earlyreturn()
 
@@ -7110,26 +7160,46 @@ class ASAPWidget(LWPWidget):
 					row_qns = qns + i_row * diffs
 					cond = ['(use_for_cross_correlation)'] + [f"(qn{ul}{i+1} == {qn})" for i, qn in enumerate(row_qns)]
 					condition  = " & ".join(cond)
-
 					row_entries = entries.query(condition)
 					
+					corr_xs, corr_ys = self.calc_correlation_plot(row_qns, row_entries, offset, width, resolution)
+					
 					ax = self.lwpaxes[i_row, i_col]
+					
+					ax.corr_xs = corr_xs
+					ax.corr_ys = corr_ys
 					ax.entries = row_entries
 					ax.qns = row_qns
-					threads.append(ax.update())
+					threads.append(ax.update_correlation_plots())
 				
 				thread.earlyreturn()
 
 			# Edge cases of no reference tabs and too few tabs
 			for i_col in range(n_widgets, n_cols):
 				for i_row in range(n_rows):
+					ax = self.lwpaxes[i_row, i_col]
 					ax.entries = None
 					ax.qns = None
-					threads.append(ax.update())
+					ax.corr_xs = ax.corr_ys = np.array([])
+					threads.append(ax.update_correlation_plots())
 
 			thread.earlyreturn()
 
 			for thread_ in threads:
+				thread_.wait()
+	
+	@QThread.threaded_d
+	@status_d
+	@drawplot_decorator.d
+	def set_data(self, thread=None):
+		n_rows = config['plot_rows']
+		n_cols = config['plot_cols']
+
+		threads = []
+		for asap_ax in self.lwpaxes.flatten():
+			threads.append(asap_ax.update())
+
+		for thread_ in threads:
 				thread_.wait()
 	
 	def on_hover(self, event):
@@ -7147,12 +7217,17 @@ class ASAPWidget(LWPWidget):
 	
 	def on_click(self, event):
 		super().on_click(event)
-		# @Luis: Do we want to fit here as well?
-		# @Luis: Should this also lead to showing this plot in the detail window
+
+		ax = event.inaxes
+		x = event.xdata
+		is_ctrl_pressed = (QApplication.keyboardModifiers() == Qt.KeyboardModifier.ControlModifier)
+
+		if ax and x and is_ctrl_pressed:
+			asap_ax = self.lwpaxes[self.__class__._active_ax_index]
+			asap_ax.fit_data(x, x, onclick=True)
 
 	def contextMenuCanvas(self, event):
-		super().contextMenuEvent(event)
-		# @Luis: Update the context Menu here
+		return
 
 class LASAPMainWindow(MainWindow):
 	def create_gui_components(self):
@@ -7169,22 +7244,131 @@ class LASAPMainWindow(MainWindow):
 		self.lwpwidget = ASAPWidget()
 		self.setCentralWidget(self.lwpwidget)
 		
-		# @Luis:
-		# Create NewAssignments
+		NewAssignments.get_instance()
 		
-		for subclass in (FileWindow, ConfigWindow, ASAPSettingsWindow, ASAPDetailViewer, CreditsWindow):
+		for subclass in (
+			LogWindow, FileWindow, ConfigWindow, ASAPSettingsWindow,
+			ASAPDetailViewer, CreditsWindow, CmdWindow, NewAssignmentsWindow):
 			subclass()
 		dockstate = Geometry.get('__dockstate__')
 		if dockstate:
 			self.restoreState(dockstate)
 		
-		# @Luis:
-		# self.menu = Menu(self)
-		# self.shortcuts()
+		self.menu = ASAPMenu(self)
+		self.shortcuts()
+	
+	def shortcuts(self):
+		shortcuts_dict = {
+			"w": lambda: WidthDialog.gui_set_width("++"),
+			"s": lambda: WidthDialog.gui_set_width("--"),
+			"a": lambda: OffsetDialog.gui_set_offset("--"),
+			"d": lambda: OffsetDialog.gui_set_offset("++"),
+
+			"Shift+w": lambda: WidthDialog.gui_set_width("+"),
+			"Shift+s": lambda: WidthDialog.gui_set_width("-"),
+			"Shift+a": lambda: OffsetDialog.gui_set_offset("-"),
+			"Shift+d": lambda: OffsetDialog.gui_set_offset("+"),
+
+			"Ctrl+Shift+k": lambda: ConsoleDialog.run_current_command(),
+			"F11": lambda: self.togglefullscreen(),
+		}
 
 
+		for keys, function in shortcuts_dict.items():
+			tmp = QShortcut(keys, self)
+			tmp.activated.connect(function)
+			tmp.setContext(Qt.ShortcutContext.WidgetShortcut)
+
+class ASAPMenu(Menu):
+	def __init__(self, parent, *args, **kwargs):
+		mb = parent.menuBar()
+		
+		# Create top level menus
+		top_menu_labels = ("Files", "View", "Fit", "Modules", "Info")
+		self.top_menus = {}
+		for label in top_menu_labels:
+			menu = mb.addMenu(f'{label}')
+			self.top_menus[label] = menu
+		
+
+		toggleaction_files = FileWindow._instance.toggleViewAction()
+		toggleaction_files.setText('Edit Files')
+		toggleaction_credits = CreditsWindow._instance.toggleViewAction()
+		toggleaction_credits.setText("Credits and License")
+		toggleaction_credits.setToolTip("See the Credits and License")
+
+
+		fitfunction_menu = QMenu("Choose Fit Function", parent=parent)
+		self.fitfunction_actions = {}
+
+		current_method = config['fit_fitmethod']
+		for method in ASAPAx.fit_methods:
+			is_checked = (method == current_method)
+			callback = lambda _, method=method: self.set_fitmethod(method)
+			self.fitfunction_actions[method] = QQ(QAction, parent=parent, text=f"{method}", change=callback, checkable=True, value=is_checked)
+			fitfunction_menu.addAction(self.fitfunction_actions[method])
+		config.register('fit_fitmethod', self.on_fitfunction_changed)
+
+		actions = {
+			'Files': (
+				QQ(QAction, parent=parent, text="Add Files", change=File.add_files_dialog, tooltip="Add Files"),
+				QQ(QAction, parent=parent, text='Reread All Files', change=lambda _: File.reread_all(), tooltip="Reread all Exp, Cat and Lin files"),
+				None,
+				toggleaction_files,
+				None,
+				QQ(QAction, parent=parent, text="Save current values as default", tooltip="Save current configuration as default", change=lambda _: config.save()),
+				None,
+				QQ(QAction, parent=parent, text="Save Files as Project", change=lambda _: File.save_files_gui(), tooltip="Save all loaded files and their parameters as a project."),
+				QQ(QAction, parent=parent, text="Load Project", change=lambda _: File.load_files_gui(), tooltip="Load a project."),
+
+			),
+			'Fit': (
+				fitfunction_menu,
+				QQ(QAction, parent=parent, text="Change Function", shortcut="Ctrl+F", tooltip="Cycle through the available fit-functions", change=lambda _: self.next_fitmethod()),
+				None,
+				QQ(QAction, parent=parent, text="Change Fit Color", tooltip="Change the color of the fitfunction", change=lambda _: self.change_fitcolor()),
+			),
+			'View': (
+				ConfigWindow._instance.toggleViewAction(),
+				None,
+				ASAPSettingsWindow._instance.toggleViewAction(),
+				ASAPDetailViewer._instance.toggleViewAction(),
+				NewAssignmentsWindow._instance.toggleViewAction(),
+				LogWindow._instance.toggleViewAction(),
+				CmdWindow._instance.toggleViewAction(),
+
+				None,
+				QQ(QAction, parent=parent, text='Open Console', shortcut='CTRL+K', change= lambda _: ConsoleDialog.show_dialog()),
+				None,
+			),
+			'Info': (
+				QQ(QAction, parent=parent, text="Send Mail to Author", tooltip="Send a mail to the developer", change=lambda x: self.send_mail_to_author()),
+				toggleaction_credits,
+			)
+			
+		}
+
+		for label, menu in self.top_menus.items():
+			for widget in actions.get(label, []):
+				if widget is None:
+					menu.addSeparator()
+				elif isinstance(widget, QAction):
+					menu.addAction(widget)
+				else:
+					menu.addMenu(widget)
+		
+	def next_fitmethod(self):
+		fitmethods = ASAPAx.fit_methods
+		newindex = fitmethods.index( config['fit_fitmethod'] ) + 1
+		newindex = newindex % len(fitmethods)
+		newvalue = fitmethods[newindex]
+		config['fit_fitmethod'] = newvalue
+
+
+# @Luis: Make sure this is not automatically opened for LLWP case
 class ASAPDetailViewer(EQDockWidget):
 	pass
+	# @Luis
 
 class ASAPSettingsWindow(ReferenceSeriesWindow):
 	default_visible = True
@@ -7194,7 +7378,7 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 		self.setWindowTitle("ASAP Settings")
 
 		widget = QGroupBox()
-		layout = QVBoxLayout()
+		layout = QVBoxLayout(margin=True)
 		self.setWidget(widget)
 		widget.setLayout(layout)
 
@@ -7220,10 +7404,64 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 		mainwindow.lwpwidget.plotscreated.connect(self.update_number_of_references)
 		self.tab.currentChanged.connect(self.check_order)
 		
+		self.toolbox = QToolBox()
+		layout.addWidget(self.toolbox)
+
+		# @Luis: Add conversion factors somewhere
+		# the one from energy to lin can be applied in the fit function after offset + predicted value has happened
+		# the lin and cat to energy can be done in line 6765
+
+
+		settings_widget = QWidget()
+		self.toolbox.addItem(settings_widget, 'Settings')
+		tmp_layout = QGridLayout(margin=True)
+		settings_widget.setLayout(tmp_layout)
+
+		row_i = 0
+
+		tmp_layout.addWidget(QQ(QLabel, text='Weighted Transitions: '), row_i, 0)
+		tmp_layout.addWidget(QQ(QCheckBox, 'asap_weighted'), row_i, 1)
+
+		row_i += 1
+
+		tmp_layout.addWidget(QQ(QLabel, text='Interp. Resolution: '), row_i, 0)
+		tmp_layout.addWidget(QQ(QDoubleSpinBox, 'asap_resolution', range=(0, None)), row_i, 1)
+
+		row_i += 1
+
+		tmp_layout.addWidget(QQ(QLabel, text='Only keep latest results: '), row_i, 0)
+		tmp_layout.addWidget(QQ(QCheckBox, 'asap_keeponlylatestresults'), row_i, 1)
 		
+		tmp_layout.setRowStretch(row_i + 1, 1)
+
+
+		egy_widget = QWidget()
+		self.toolbox.addItem(egy_widget, 'Egy File')
+		tmp_layout = QGridLayout(margin=True)
+		egy_widget.setLayout(tmp_layout)
+
+
+		tmp_layout.addWidget(QQ(QLabel, text='Energies File): '), row_i, 0)
+		self.egy_file_button = QQ(QPushButton, text='Load File', change=lambda x: ASAPAx.load_egy_file())
+		tmp_layout.addWidget(self.egy_file_button, row_i, 1)
+		# # @Luis: Add here widgets for
+		# - egy File
+		# - conversion from egy file to lin file
+		tmp_layout.setRowStretch(row_i + 1, 1)
+
+
+		filter_widget = QWidget()
+		self.toolbox.addItem(filter_widget, 'Filter')
+		tmp_layout = QVBoxLayout(margin=True)
+		filter_widget.setLayout(tmp_layout)
 		
-		layout.addWidget(QQ(QLabel, text='Filter for transitions: '))
-		layout.addWidget(QQ(QPlainTextEdit, 'asap_query'))
+		tmp_layout.addWidget(QQ(QLabel, text='Filter for transitions: '))
+		tmp_layout.addWidget(QQ(QPlainTextEdit, 'asap_query'))
+
+		tmp_layout.addStretch()
+
+		layout.addWidget(QQ(QPushButton, text='Calculate Cross Correlation', change=lambda _: mainwindow.lwpwidget.calc_correlation_plots()))
+
 
 	def add_tab(self, init_values={}, check_order=True):
 		title = init_values.get("title", "Series")
@@ -7244,13 +7482,18 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 ##
 
 def start_llwp():
+	global APP_TAG
+	APP_TAG = 'LLWP'
 	LLWP()
 
 def start_lasap():
+	global APP_TAG
+	APP_TAG = 'LASAP'
 	LASAP()
 
 if __name__ == '__main__':
 	start_lasap()
+	# start_llwp()
 	
 
 ##
