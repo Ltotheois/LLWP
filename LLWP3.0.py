@@ -131,6 +131,23 @@ class Color(str):
 		else:
 			raise CustomError(f"Invalid Color: '{color}' is not a valid color.")
 
+class Unit(str):
+	conversion_factors = {
+		'cm-1': 1,
+		'MHz': 2.997925e+4,
+		'J': 1.986446e-23,
+		'K': 1.438777e+0,
+		'eV': 1.239841e-4,
+		'kcal': 4.744544e-27,
+	}
+
+	@classmethod
+	def get_units(cls):
+		return(cls.conversion_factors.keys())
+	
+	# @classmethod
+	# def 
+
 class CustomError(Exception):
 	pass
 
@@ -258,7 +275,8 @@ class Config(dict):
 		'flag_showmainplotposition': (True, bool),
 		'flag_pyckettquanta': (6, int),
 		'flag_showseriesarrows': (True, bool),
-		
+		'flag_deleteduplicatesinnewassignments': (False, bool),
+
 		'commandlinedialog_commands': ([], list),
 		'commandlinedialog_current': (0, int),
 	
@@ -317,7 +335,9 @@ class Config(dict):
 		'asap_query': ('', str),
 		'asap_resolution': (6e-6, float),
 		'asap_weighted': (True, bool),
-		'asap_keeponlylatestresults': (True, bool),
+		'asap_egyunit': (True, bool),
+		'asap_catunit': (True, bool),
+		'asap_expunit': (True, bool),
 	}
 
 	def __init__(self, signal, *args, **kwargs):
@@ -1704,7 +1724,12 @@ class NewAssignments(LinFile):
 		dtypes = pyckett.lin_dtypes_from_quanta(N_QNS)
 		new_rows = pd.DataFrame(rows_dict).astype(dtypes)[dtypes.keys()]
 		new_rows['filename'] = self.filename_abs
-		self.new_assignments_df = pd.concat( (self.new_assignments_df, new_rows) ).reset_index(drop=True)
+		self.new_assignments_df = pd.concat( (self.new_assignments_df, new_rows) )
+		if config['flag_deleteduplicatesinnewassignments']:
+			subset = [f'qn{ul}{i+1}' for ul in 'ul' for i in range(config['series_qns'])]
+			self.new_assignments_df = self.new_assignments_df.drop_duplicates(subset=subset, keep='last', ignore_index=True)
+		self.new_assignments_df = self.new_assignments_df.reset_index(drop=True)
+
 		self.load_file()
 		new_assignments_window = NewAssignmentsWindow._instance
 		new_assignments_window.model.update()
@@ -2369,7 +2394,7 @@ class LWPWidget(QGroupBox):
 	def draw_canvas(self):
 		with matplotlib_lock:
 			# @Luis: Look into these things
-			self.plotcanvas.draw()
+			self.plotcanvas.draw_idle()
 
 	def on_click(self, event):
 		ax = event.inaxes
@@ -6774,6 +6799,15 @@ class ASAPAx(LWPAx):
 			else:
 				ax.set_xticks([])
 
+			if row_i != 0:
+				ax.spines['bottom'].set_visible(False)
+			if row_i != config['plot_rows'] - 1:
+				ax.spines['top'].set_visible(False)
+			if col_i != 0:
+				ax.spines['left'].set_visible(False)
+			if col_i != config['plot_cols'] - 1:
+				ax.spines['right'].set_visible(False)
+
 
 	# @status_d
 	@QThread.threaded_d
@@ -6801,7 +6835,6 @@ class ASAPAx(LWPAx):
 		self.set_xticklabels()
 		yrange = [-1, 1]
 
-		# @Luis: Think how to handle this here: Just show data in plotting range? Keep passing everything to ax?
 		tot_xs = self.corr_xs
 		tot_ys = self.corr_ys
 
@@ -6837,6 +6870,11 @@ class ASAPAx(LWPAx):
 
 		if self.qns is not None:
 			qnstring = ','.join(map(str, self.qns))
+
+			query = ' and '.join([f'(qnu{i+1} == {qn} and qnl{i+1} == 0)' for i, qn in enumerate(self.qns)])
+			# @Luis: check if we can cache this
+			if query and len(LinFile.get_data().query(query)):
+				color = config["color_lin"]
 		else:
 			qnstring = ''
 
@@ -6853,8 +6891,10 @@ class ASAPAx(LWPAx):
 			ax = self.ax
 			self.annotation = ax.text(**kwargs, s=text, color=color, transform=ax.transAxes)
 		else:
-			self.annotation.set_text(text)
-			self.annotation.set_color(color)
+			if self.annotation.get_text() != text:
+				self.annotation.set_text(text)
+			if matplotlib.colors.to_rgba(self.annotation.get_color()) != matplotlib.colors.to_rgba(color):
+				self.annotation.set_color(color)
 
 	def set_xticklabels(self):
 		if self.row_i:
@@ -6929,14 +6969,17 @@ class ASAPAx(LWPAx):
 		
 		if egy_val == 0:
 			notify_warning.emit('No corresponding energy level found! Please check if an energies file is loaded.')
+
+		error = self.fit_determine_uncert(xmiddle, xuncert)
 		xmiddle += egy_val
-			
+
+		error = min(0.0001, -abs(error))
+
 		# Create assignment object
-		new_assignment = {'x': xmiddle, 'error': self.fit_determine_uncert(xmiddle, xuncert), 'xpre': 0}
+		new_assignment = {'x': xmiddle, 'error': error, 'xpre': 0}
 		new_assignment.update(qns_dict)
 		new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
 		
-		# @Luis: Implement keeponlylatest
 		NewAssignments.get_instance().add_row(new_assignment)
 
 	def fit_peak(self, xmin, xmax):
@@ -7134,7 +7177,7 @@ class ASAPWidget(LWPWidget):
 		n_widgets = tab_widget.count()
 
 		offset = config['plot_offset']
-		width = config['plot_width'] * 2
+		width = config['plot_width']
 		resolution = config['asap_resolution']
 
 		threads = []
@@ -7430,7 +7473,7 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 		row_i += 1
 
 		tmp_layout.addWidget(QQ(QLabel, text='Only keep latest results: '), row_i, 0)
-		tmp_layout.addWidget(QQ(QCheckBox, 'asap_keeponlylatestresults'), row_i, 1)
+		tmp_layout.addWidget(QQ(QCheckBox, 'flag_deleteduplicatesinnewassignments'), row_i, 1)
 		
 		tmp_layout.setRowStretch(row_i + 1, 1)
 
@@ -7440,13 +7483,28 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 		tmp_layout = QGridLayout(margin=True)
 		egy_widget.setLayout(tmp_layout)
 
+		row_i = 0
 
-		tmp_layout.addWidget(QQ(QLabel, text='Energies File): '), row_i, 0)
+		tmp_layout.addWidget(QQ(QLabel, text='Energies File: '), row_i, 0)
 		self.egy_file_button = QQ(QPushButton, text='Load File', change=lambda x: ASAPAx.load_egy_file())
 		tmp_layout.addWidget(self.egy_file_button, row_i, 1)
-		# # @Luis: Add here widgets for
-		# - egy File
-		# - conversion from egy file to lin file
+		
+		row_i += 1
+
+		units = Unit.get_units()
+		tmp_layout.addWidget(QQ(QLabel, text='Units Energy File:'), row_i, 0)
+		tmp_layout.addWidget(QQ(QComboBox, 'asap_egyunit', options=units), row_i, 1)
+		
+		row_i += 1
+
+		tmp_layout.addWidget(QQ(QLabel, text='Units Cat File:'), row_i, 0)
+		tmp_layout.addWidget(QQ(QComboBox, 'asap_catunit', options=units), row_i, 1)
+
+		row_i += 1
+
+		tmp_layout.addWidget(QQ(QLabel, text='Units Spectrum:'), row_i, 0)
+		tmp_layout.addWidget(QQ(QComboBox, 'asap_expunit', options=units), row_i, 1)
+
 		tmp_layout.setRowStretch(row_i + 1, 1)
 
 
