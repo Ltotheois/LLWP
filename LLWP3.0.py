@@ -50,6 +50,7 @@ import subprocess
 import webbrowser
 import pyckett
 
+from functools import lru_cache
 from scipy import optimize, special, signal
 
 from PyQt6.QtCore import *
@@ -141,21 +142,34 @@ class GUIAbortedError(Exception):
 	pass
 
 class AtomicCounter():
-	def __init__(self, initial=0):
-		self.value = initial
-		self._lock = threading.Lock()
+    def __init__(self, initial=0, callback=None):
+        self.value = initial
+        self._lock = threading.Lock()
+        
+        if callback is not None:
+            self.callback = callback
 
-	def increase(self, num=1):
-		with self._lock:
-			self.value += num
-			return self.value
-			
-	def decrease(self, num=1):
-		return(self.increase(-num))
+    def increase(self, num=1):
+        with self._lock:
+            self.value += num
+            return self.value
 
-	def get_value(self):
-		with self._lock:
-			return(self.value)
+    def decrease(self, num=1):
+        return(self.increase(-num))
+
+    def get_value(self):
+        with self._lock:
+            return(self.value)
+
+    def __enter__(self, *args):
+        self.increase()
+
+    def __exit__(self, type, value, traceback):
+        if self.decrease() == 0:
+            self.callback()
+
+    def callback(self):
+        pass
 
 class DynamicDecorator():
 	def __init__(self): 
@@ -974,7 +988,6 @@ class QDialog(QDialog):
 class File():
 	ids = {}
 	lock = threading.RLock()
-	sortdf_counter = AtomicCounter()
 
 	default_color_key = ""
 	has_y_data = True
@@ -1040,12 +1053,12 @@ class File():
 		if hasattr(self, 'is_stickspectrum'):
 			self.is_stickspectrum = default_values.get('is_stickspectrum', False)
 
-	def apply_all(self, set_data=True):
-		self.apply_color(set_data=set_data)
-		self.apply_visibility(set_data=set_data)
-		self.apply_xtransformation(set_data=set_data)
+	def apply_all(self):
+		self.apply_color()
+		self.apply_visibility()
+		self.apply_xtransformation()
 		if self.has_y_data:
-			self.apply_ytransformation(set_data=set_data)
+			self.apply_ytransformation()
 
 	def check_file(self):
 		fname = self.filename_abs
@@ -1057,35 +1070,58 @@ class File():
 			notify_warning.emit(f"<span style='color:#eda711;'>WARNING</span>: The file {fname} is empty and was therefore skipped.")
 			raise CustomError(f"The file {fname} is empty and was therefore skipped.")
 	
+	@QThread.threaded_d
+	@status_d
 	def load_file(self, thread=None):
-		self.check_file()
-		data = self.load_file_core()
+		with self.sort_df_counter:
 
-		# Add additional columns
-		data['x0'] = data['x']
-		if self.has_y_data:
-			data['y0'] = data['y']
-		data['color'] = self.color
-		data['visible'] = True
-		
-		with self.lock:
-			df = self.get_df()
-			mask = df[df['filename'] == self.filename_abs].index
-			self.set_df(pd.concat([self.df.drop(mask), data], ignore_index=True))
-			self.clean_up_data()
-			self.apply_all(set_data=False)
+			self.check_file()
+			data = self.load_file_core()
 
-		# df = self.get_df()
-		# mask = (df['filename'] == self.filename_abs)
-		# xs = df.loc[mask, 'x']
-		# self.xmin, self.xmax = xs.min(), xs.max()
-		
-		if not isinstance(self, NewAssignments):
-			notify_info.emit(f"Successfully loaded '{self.filename_abs}'")
+			# Add additional columns
+			data['x0'] = data['x']
+			if self.has_y_data:
+				data['y0'] = data['y']
+			data['color'] = self.color
+			data['visible'] = True
+			
+			with self.lock:
+				df = self.get_df()
+				self.set_df(pd.concat([df[df['filename'] != self.filename_abs], data], ignore_index=True))
+				self.clean_up_data()
+				self.apply_all()
+
+			# df = self.get_df()
+			# mask = (df['filename'] == self.filename_abs)
+			# xs = df.loc[mask, 'x']
+			# self.xmin, self.xmax = xs.min(), xs.max()
+
+			self.clear_caches()
+
+			if not isinstance(self, NewAssignments):
+				notify_info.emit(f"Successfully loaded '{self.filename_abs}'")
 	
 	def clean_up_data(self):
 		pass
 	
+	@classmethod
+	@lru_cache
+	def has_results(cls, query):
+		with cls.lock:
+			n_results = len(cls.get_data().query(query))
+		return(n_results)
+	
+	@classmethod
+	@lru_cache
+	def query_c(cls, query):
+		with cls.lock:
+			return(cls.get_data().query(query))
+
+	@classmethod
+	def clear_caches(cls):
+		cls.query_c.cache_clear()
+		cls.has_results.cache_clear()
+
 	def to_dict(self):
 		dict_ = {
 			'filename': self.filename_abs,
@@ -1115,6 +1151,10 @@ class File():
 		for subclass in cls.__subclasses__():
 			tmp = [instance.to_dict() for instance in subclass.ids.values() if not isinstance(instance, NewAssignments)] 
 			dict_[subclass.__name__] = tmp
+		
+		# @Luis: Refactor this
+		if APP_TAG == 'LASAP' and ASAPAx.egy_filename is not None:
+			dict_['.egy'] = ASAPAx.egy_filename
 
 		with open(filename, 'w+') as file:
 			json.dump(dict_, file, indent=4)
@@ -1134,6 +1174,11 @@ class File():
 	def load_files(cls, filename, thread=None):
 		with open(filename, 'r') as file:
 			dict_ = json.load(file)
+		
+		# @Luis: Refactor this
+		if APP_TAG == 'LASAP' and '.egy' in dict_:
+			egy_filename = dict_.pop('.egy')
+			ASAPAx.load_egy_file(egy_filename)
 
 		label_to_class = {subclass.__name__: subclass for subclass in cls.__subclasses__()}
 		threads = []
@@ -1143,10 +1188,9 @@ class File():
 				filename = filedict.pop('filename')
 				tmp_file = subclass(filename, default_values=filedict, load_manually=True)
 				threads.append(tmp_file.load_file())
-		
+
 		for thread_ in threads:
 			thread_.wait()
-		
 		
 	@classmethod
 	def get_data(cls, xrange=None, binning=False):
@@ -1365,6 +1409,7 @@ class File():
 	def gui_toggle_visbility(self, _):
 		self.toggle_visibility()
 		self.apply_visibility()
+		mainwindow.lwpwidget.set_data()
 
 	@classmethod
 	def reread_all(cls):
@@ -1394,8 +1439,6 @@ class File():
 
 		for file in cls.ids.values():
 			file.is_visible = visibility
-	
-
 
 	@property
 	def color(self):
@@ -1412,7 +1455,7 @@ class File():
 		if color_picker:
 			color_picker.setStyleSheet(f"background-color: {Color.rgbt_to_trgb(value)}")
 
-	def apply_color(self, set_data=True):
+	def apply_color(self):
 		df = self.__class__.df
 		mask = (df['filename'] == self.filename_abs)
 
@@ -1420,8 +1463,7 @@ class File():
 		
 		# Color query
 		if not self.color_query:
-			if set_data:
-				mainwindow.lwpwidget.set_data()
+			self.clear_caches()
 			return
 		
 		for command in self.color_query.split("\n"):
@@ -1429,10 +1471,9 @@ class File():
 				continue
 			color, query = command.split(";")
 			indices = (df.loc[mask].query(query)).index
-			df.loc[indices, "color"] = color
+			df.loc[indices, "color"] = color		
+		self.clear_caches()
 
-		if set_data:
-			mainwindow.lwpwidget.set_data()
 
 	def toggle_visibility(self):
 		self.is_visible = not self.is_visible
@@ -1452,7 +1493,7 @@ class File():
 		if label:
 			label.setEnabled(self.is_visible)
 
-	def apply_visibility(self, set_data=True):
+	def apply_visibility(self):
 		df = self.__class__.df
 		mask = (df['filename'] == self.filename_abs)
 		
@@ -1462,11 +1503,9 @@ class File():
 			df.loc[mask, 'visible'] = df.loc[mask].eval(self.query)
 		else:
 			df.loc[mask, 'visible'] = False
+		self.clear_caches()
 		
-		if set_data:
-			mainwindow.lwpwidget.set_data()
-		
-	def apply_transformation(self, col, transform, fallback_col, set_data=True):
+	def apply_transformation(self, col, transform, fallback_col):
 		df = self.__class__.df
 		mask = (df['filename'] == self.filename_abs)
 		
@@ -1474,9 +1513,8 @@ class File():
 			df.loc[mask, col] = df.loc[mask, fallback_col]
 		else:
 			df.loc[mask, col] = df.loc[mask].eval(transform)
-		
-		if set_data:
-			mainwindow.lwpwidget.set_data()
+		self.clear_caches()
+
 
 	def apply_xtransformation(self, *args, **kwargs):
 		self.apply_transformation('x', self.xtransformation, 'x0', *args, **kwargs)
@@ -1508,24 +1546,14 @@ class File():
 		
 		del self
 	
-# @Luis: continue here
-# - cache the query results -> for cat query
-# - maybe do so in File class
 class CatFile(File):
 	ids = {}
 	lock = threading.RLock()
-	sortdf_counter = AtomicCounter()
-	decorator = DynamicDecorator()
-	
+	sort_df_counter = AtomicCounter()
+
 	default_color_key = "color_cat"
 	dtypes = {**pyckett.cat_dtypes_from_quanta(N_QNS), **File.additional_dtypes}
 	df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
-	
-	@QThread.threaded_d
-	@status_d
-	@decorator.d
-	def load_file(self, *args, **kwargs):
-		return(super().load_file(*args, **kwargs))
 
 	def load_file_core(self):
 		if self.extension not in config['flag_catformats']:
@@ -1576,24 +1604,19 @@ class CatFile(File):
 		config['series_qns'] = noq
 		notify_info.emit(f'After analysing your cat files the number of QNs was set to {noq}.')
 
+CatFile.sort_df_counter.callback = CatFile.sort_df
+
 class LinFile(File):
 	ids = {}
 	lock = threading.RLock()
-	sortdf_counter = AtomicCounter()
-	decorator = DynamicDecorator()
-	
+	sort_df_counter = AtomicCounter()
+
 	default_color_key = "color_lin"
 	dtypes = {**pyckett.lin_dtypes_from_quanta(N_QNS), **File.additional_dtypes}
 	del dtypes['y0']
 	df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
 	
 	has_y_data = False
-	
-	@QThread.threaded_d
-	@status_d
-	@decorator.d
-	def load_file(self, *args, **kwargs):
-		return(super().load_file(*args, **kwargs))
 
 	def load_file_core(self):
 		if self.extension not in config['flag_linformats']:
@@ -1623,12 +1646,14 @@ class LinFile(File):
 		self.__class__.df[qn_columns] = self.__class__.df[qn_columns].fillna(pyckett.SENTINEL).astype(pyckett.pickett_int)
 		# self.__class__.df = self.__class__.df.dropna()
 
+LinFile.sort_df_counter.callback = LinFile.sort_df
+
+
 class ExpFile(File):
 	ids = {}
 	lock = threading.RLock()
-	sortdf_counter = AtomicCounter()
-	decorator = DynamicDecorator()
-	
+	sort_df_counter = AtomicCounter()
+
 	default_color_key = "color_exp"
 	dtypes = {'x': np.float64, 'y': np.float64, **File.additional_dtypes}
 	df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
@@ -1636,17 +1661,13 @@ class ExpFile(File):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.is_stickspectrum = False
-	
-	@QThread.threaded_d
-	@status_d
-	@decorator.d
-	def load_file(self, *args, **kwargs):
-		return(super().load_file(*args, **kwargs))
 
 	def load_file_core(self):
 		kwargs = config['flag_expformats'].get(self.extension, {})
 		data = exp_to_df(self.filename_abs, **kwargs)
 		return(data)
+
+ExpFile.sort_df_counter.callback = ExpFile.sort_df
 
 class NewAssignments(LinFile):
 	_instance = None
@@ -1855,17 +1876,18 @@ class FileAdditionalSettingsDialog(QDialog):
 		
 		self.apply_all()
 
-	@drawplot_decorator.d
 	def apply_all(self):
 		self.done(0)
-
-		self.update_query()
-		self.update_xtransformation()
-		if self.file.has_y_data:
-			self.update_ytransformation()
-		self.update_color_query()
-		if hasattr(self.file, 'is_stickspectrum'):
-			self.update_stickspectrum()
+		with self.file.sort_df_counter:
+			self.update_query()
+			self.update_xtransformation()
+			if self.file.has_y_data:
+				self.update_ytransformation()
+			self.update_color_query()
+			if hasattr(self.file, 'is_stickspectrum'):
+				self.update_stickspectrum()
+		
+		mainwindow.lwpwidget.set_data()
 		
 
 	def update_query(self, _=None):
@@ -1873,24 +1895,30 @@ class FileAdditionalSettingsDialog(QDialog):
 		query = self.widgets['query']['widget'].toPlainText()
 		file.query = query
 		file.apply_visibility()
+		mainwindow.lwpwidget.set_data()
 		
 	def update_xtransformation(self, _=None):
-		file = self.file
-		xtransformation = self.widgets['xtransformation']['widget'].toPlainText()
-		file.xtransformation = xtransformation
-		file.apply_xtransformation()
+		with self.file.sort_df_counter:
+			file = self.file
+			xtransformation = self.widgets['xtransformation']['widget'].toPlainText()
+			file.xtransformation = xtransformation
+			file.apply_xtransformation()
+			
+		mainwindow.lwpwidget.set_data()
 
 	def update_ytransformation(self, _=None):
 		file = self.file
 		ytransformation = self.widgets['ytransformation']['widget'].toPlainText()
 		file.ytransformation = ytransformation
 		file.apply_ytransformation()
+		mainwindow.lwpwidget.set_data()
 
 	def update_color_query(self, _=None):
 		file = self.file
 		color_query = self.widgets['color_query']['widget'].toPlainText()
 		file.color_query = color_query
 		file.apply_color()
+		mainwindow.lwpwidget.set_data()
 	
 	def update_stickspectrum(self, _=None):
 		file = self.file
@@ -1923,7 +1951,6 @@ class LWPAx():
 		self.annotation = None
 		self.qns = None
 		
-		# @Luis: Maybe register different span selectors for different mouse buttons, via the button=x keyword
 		with matplotlib_lock:
 			self.span =  matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax: self.on_range(xmin, xmax), 'horizontal', useblit=True, button=1)
 		
@@ -2082,8 +2109,8 @@ class LWPAx():
 		if self.qns is not None:
 			qns_dict = self.create_qns_dict()
 			query = ' and '.join([f'({key} == {value})' for key, value in qns_dict.items()])
-			# @Luis: check if we can cache this
-			if query and len(LinFile.get_data().query(query)):
+			
+			if query and LinFile.has_results(query):
 				color = config["color_lin"]
 		
 			noq = config['series_qns']
@@ -2389,7 +2416,6 @@ class LWPWidget(QGroupBox):
 
 	def draw_canvas(self):
 		with matplotlib_lock:
-			# @Luis: Look into these things
 			self.plotcanvas.draw_idle()
 
 	def on_click(self, event):
@@ -3043,7 +3069,6 @@ class LLWP(QApplication):
 		self.update_pyckett_quanta_settings()
 
 		self.initialize_matplotlib_settings()
-		self.initialize_dynamic_decorators_for_file_classes()
 
 		with config:
 			global mainwindow
@@ -3088,19 +3113,6 @@ class LLWP(QApplication):
 		matplotlib.style.use('dark_background' if is_dark_theme() else 'default')
 		matplotlib.rcParams['figure.facecolor'] = '#00000000'
 		matplotlib.rcParams['axes.facecolor'] = '#00000000'
-
-	def initialize_dynamic_decorators_for_file_classes(self):
-		for cls in (ExpFile, CatFile, LinFile):
-			def exit_func(cls=cls):
-				counter_value = cls.sortdf_counter.decrease()
-				if not counter_value:
-					cls.sort_df()
-
-			def init_func(cls=cls):
-				cls.sortdf_counter.increase()
-				
-			cls.decorator.init_func = init_func
-			cls.decorator.exit_func = exit_func
 
 	def update_pyckett_quanta_settings(self):
 		pyckett.QUANTA = config['flag_pyckettquanta']
@@ -3988,7 +4000,7 @@ class ReferenceSelector(QTabWidget):
 				diffs = [np.unique(col) for col in diff_qns.T]
 				qnus, qnls = np.split(np.array(rows_qns[0]), 2)
 
-				conditions, conditions_incr = ['(visible)'], []
+				conditions, conditions_incr = [], []
 				normalizing_value = None
 				for i, qnu, qnl, diff in zip(range(n_qns), qnus, qnls, diffs):
 					if len(diff) != 1:
@@ -4006,13 +4018,8 @@ class ReferenceSelector(QTabWidget):
 				if len(conditions_incr):
 					conditions.append(" == ".join(conditions_incr))
 
-				conditions = " and ".join(conditions)
-				
-				# @Luis:
-				# - write custom cache for cat.query functions -> queries are normalized now
-				cat_df = CatFile.df
-				with CatFile.lock:
-					cat_df = cat_df.query(conditions)
+				conditions = " and ".join(conditions) if conditions else '(visible)'
+				cat_df = CatFile.query_c(conditions)
 
 				# Get the exact predictions from prefiltered dataframe
 				qn_labels = [f'qn{ul}{i+1}' for ul in ('u', 'l') for i in range(n_qns)]
@@ -4734,7 +4741,7 @@ class CloseByLinesWindow(EQDockWidget):
 		
 		self._text_is_frozen = False
 
-		tmp = QShortcut(keys, mainwindow)
+		tmp = QShortcut('Ctrl+Shift+F', mainwindow)
 		tmp.activated.connect(self.toggle_text_is_frozen)
 		tmp.setContext(Qt.ShortcutContext.WidgetShortcut)
 	
@@ -6305,7 +6312,7 @@ def fit_pgopher(xs, ys, peakdirection, fit_xs):
 	xmiddle = np.sum(fit_xs*fit_ys)/np.sum(fit_ys)
 	xuncert = 0
 
-	return(xmiddle, xuncert, fit_xs, fit_ys)
+	return(xmiddle, xuncert, fit_xs, fit_ys + ymin)
 
 def fit_polynom(xs, ys, peakdirection, fit_xs, rank):
 	try:
@@ -6794,6 +6801,7 @@ class ASAPAx(LWPAx):
 	fit_methods = ('Pgopher', 'Polynom', 'MultiPolynom', 'Gauss', 'Lorentz')
 
 	egy_df = None
+	egy_filename = None
 
 	def __init__(self, ax, row_i, col_i):
 		self.ax = ax
@@ -6842,7 +6850,7 @@ class ASAPAx(LWPAx):
 			binwidth = (xrange[1]-xrange[0]) / bins
 
 			if len(xs) > max(bins, nobinning)  and binwidth != 0:
-				df = pd.DataFrame({'x': xs, 'y': ys, 'filename': 0})
+				df = pd.DataFrame({'x': xs, 'y': ys, 'filename': None})
 				df = bin_data(df, binwidth, xrange)
 				xs, ys = df['x'], df['y']
 
@@ -6914,8 +6922,7 @@ class ASAPAx(LWPAx):
 			qnstring = ','.join(map(str, self.qns))
 
 			query = ' and '.join([f'(qnu{i+1} == {qn} and qnl{i+1} == 0)' for i, qn in enumerate(self.qns)])
-			# @Luis: check if we can cache this
-			if query and len(LinFile.get_data().query(query)):
+			if query and LinFile.has_results(query):
 				color = config["color_lin"]
 		else:
 			qnstring = ''
@@ -7082,6 +7089,7 @@ class ASAPAx(LWPAx):
 		
 		egy_df = pyckett.egy_to_df(filename, sort=False)
 		cls.egy_df = egy_df
+		cls.egy_filename = filename
 		
 		basename = os.path.basename(filename)
 
@@ -7191,6 +7199,7 @@ class ASAPWidget(LWPWidget):
 			interp_ys = np.interp(tot_xs, xs-ref_pos, ys, left=1, right=1)		
 
 			# @Luis: Check this
+			# Christian uses the minimal intensity from query as the minimum_intensity
 			if use_weights:
 				power = np.log10(ref_int) - minimum_intensity + 1
 				interp_ys = np.power(np.abs(interp_ys), power)
@@ -7201,6 +7210,8 @@ class ASAPWidget(LWPWidget):
 		if n_correlated_transitions < 2:
 			tot_xs = tot_ys = np.array([])
 			
+		# @Luis: Think about offering options to normalize spectrum here
+
 		return(tot_xs, tot_ys)
 
 
@@ -7412,6 +7423,8 @@ class ASAPDetailViewer(EQDockWidget):
 	default_position = None
 	available_in = ['LASAP',]
 	
+	drawplot = pyqtSignal()
+
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.setWindowTitle("ASAP Detail Viewer")
@@ -7434,8 +7447,12 @@ class ASAPDetailViewer(EQDockWidget):
 		layout.addWidget(self.plot_canvas)
 
 		mainwindow.lwpwidget.peak_fitted.connect(self.update_view)
+		self.drawplot.connect(self.draw_canvas)
 
 	def update_view(self, asap_ax, offset):
+		if not self.isVisible():
+			return
+			
 		for ax in self.fig.get_axes():
 			self.fig.delaxes(ax)
 		
@@ -7453,6 +7470,9 @@ class ASAPDetailViewer(EQDockWidget):
 		gridspec_kw = {"hspace": 0, "wspace": 0}
 		axes = self.fig.subplots(len(entries), gridspec_kw=gridspec_kw, squeeze=False)[::-1, 0]
 
+		annotate_kwargs = {"x": 1, "y": 0.95, "horizontalalignment": "right", "verticalalignment": "top", "color": matplotlib.rcParams['text.color'], 'fontsize': 'small'}
+		qns_labels = [[f'qn{ul}{i+1}' for i in range(config['series_qns'])] for ul in 'ul']
+
 		for ax, (i, row) in zip(axes, entries.iterrows()):
 			ax.xaxis.set_visible(False)
 			ax.axvline(color=config['color_fit'])
@@ -7467,11 +7487,21 @@ class ASAPDetailViewer(EQDockWidget):
 			xs = dataframe['x'] - row['x']
 			ys = dataframe['y']
 
-			ax.plot(xs, ys, color=config['color_exp'])
+			qnus_string = ','.join([f'{row[qn]}' for qn in qns_labels[0]])
+			qnls_string = ','.join([f'{row[qn]}' for qn in qns_labels[1]])
+			qnstring = f'{qnus_string} ← {qnls_string}'
 
-			# @Luis: QN annotation
+			ax.plot(xs, ys, color=config['color_exp'])
+			ax.text(**annotate_kwargs, s=qnstring, transform=ax.transAxes)
+			ax.margins(0, 0.1)
 		
-		axes[0].xaxis.set_visible(True)
+		ax = axes[0]
+		ax.xaxis.set_visible(True)
+		ax.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(3))
+		
+		self.drawplot.emit()
+	
+	def draw_canvas(self):
 		self.plot_canvas.draw_idle()
 
 class ASAPSettingsWindow(ReferenceSeriesWindow):
@@ -7618,8 +7648,8 @@ def start_lasap():
 	LASAP()
 
 if __name__ == '__main__':
-	start_lasap()
-	# start_llwp()
+	# start_lasap()
+	start_llwp()
 	
 
 ##
