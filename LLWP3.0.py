@@ -233,11 +233,11 @@ class Config(dict):
 		'isvisible_controlsrowscols': (True, bool),
 		'isvisible_controlswidth': (True, bool),
 		
-		'color_exp': ('#ff0000', Color),
-		'color_cat': ('#00ff00', Color),
-		'color_lin': ('#0000ff', Color),
-		'color_ref': ('#00ffff', Color),
-		'color_fit': ('#0000ff', Color),
+		'color_exp': ('#ffffff', Color),
+		'color_cat': ('#785ef0', Color),
+		'color_lin': ('#648fff', Color),
+		'color_ref': ('#dc267f', Color),
+		'color_fit': ('#fe6100', Color),
 
 		'flag_expformats': ({}, dict),
 		'flag_catformats': ({}, dict),
@@ -319,6 +319,8 @@ class Config(dict):
 		'asap_resolution': (6e-6, float),
 		'asap_weighted': (True, bool),
 		'asap_catunitconversionfactor': (0, float),
+		'asap_detailviewerwidth': (0, float),
+		'asap_detailviewerfilter': (False, bool),
 	}
 
 	def __init__(self, signal, *args, **kwargs):
@@ -402,11 +404,11 @@ class Config(dict):
 		for key, value in self.items():
 			if key in self.initial_values and self.initial_values[key][1] == Color:
 				if is_dark_theme():
-					if value in ("#000000", ):
+					if matplotlib.colors.to_hex(value) == "#000000":
 						self[key] = "#ffffff"
 						self.messages.append(f"Changed the color of '{key}' from black to white as it is otherwise invisible.")
 				else:
-					if value in ("#ffffff", ):
+					if matplotlib.colors.to_hex(value) == "#ffffff":
 						self[key] = "#000000"
 						self.messages.append(f"Changed the color of '{key}' from white to black as it is otherwise invisible.")
 	
@@ -1038,12 +1040,12 @@ class File():
 		if hasattr(self, 'is_stickspectrum'):
 			self.is_stickspectrum = default_values.get('is_stickspectrum', False)
 
-	def apply_all(self):
-		self.apply_color()
-		self.apply_visibility()
-		self.apply_xtransformation()
+	def apply_all(self, set_data=True):
+		self.apply_color(set_data=set_data)
+		self.apply_visibility(set_data=set_data)
+		self.apply_xtransformation(set_data=set_data)
 		if self.has_y_data:
-			self.apply_ytransformation()
+			self.apply_ytransformation(set_data=set_data)
 
 	def check_file(self):
 		fname = self.filename_abs
@@ -1071,12 +1073,12 @@ class File():
 			mask = df[df['filename'] == self.filename_abs].index
 			self.set_df(pd.concat([self.df.drop(mask), data], ignore_index=True))
 			self.clean_up_data()
-			self.apply_all()
+			self.apply_all(set_data=False)
 
-		df = self.get_df()
-		mask = (df['filename'] == self.filename_abs)
-		xs = df.loc[mask, 'x']
-		self.xmin, self.xmax = xs.min(), xs.max()
+		# df = self.get_df()
+		# mask = (df['filename'] == self.filename_abs)
+		# xs = df.loc[mask, 'x']
+		# self.xmin, self.xmax = xs.min(), xs.max()
 		
 		if not isinstance(self, NewAssignments):
 			notify_info.emit(f"Successfully loaded '{self.filename_abs}'")
@@ -1410,7 +1412,7 @@ class File():
 		if color_picker:
 			color_picker.setStyleSheet(f"background-color: {Color.rgbt_to_trgb(value)}")
 
-	def apply_color(self):
+	def apply_color(self, set_data=True):
 		df = self.__class__.df
 		mask = (df['filename'] == self.filename_abs)
 
@@ -1418,7 +1420,8 @@ class File():
 		
 		# Color query
 		if not self.color_query:
-			mainwindow.lwpwidget.set_data()
+			if set_data:
+				mainwindow.lwpwidget.set_data()
 			return
 		
 		for command in self.color_query.split("\n"):
@@ -1428,7 +1431,8 @@ class File():
 			indices = (df.loc[mask].query(query)).index
 			df.loc[indices, "color"] = color
 
-		mainwindow.lwpwidget.set_data()
+		if set_data:
+			mainwindow.lwpwidget.set_data()
 
 	def toggle_visibility(self):
 		self.is_visible = not self.is_visible
@@ -1448,7 +1452,7 @@ class File():
 		if label:
 			label.setEnabled(self.is_visible)
 
-	def apply_visibility(self):
+	def apply_visibility(self, set_data=True):
 		df = self.__class__.df
 		mask = (df['filename'] == self.filename_abs)
 		
@@ -1459,9 +1463,10 @@ class File():
 		else:
 			df.loc[mask, 'visible'] = False
 		
-		mainwindow.lwpwidget.set_data()
+		if set_data:
+			mainwindow.lwpwidget.set_data()
 		
-	def apply_transformation(self, col, transform, fallback_col):
+	def apply_transformation(self, col, transform, fallback_col, set_data=True):
 		df = self.__class__.df
 		mask = (df['filename'] == self.filename_abs)
 		
@@ -1470,13 +1475,14 @@ class File():
 		else:
 			df.loc[mask, col] = df.loc[mask].eval(transform)
 		
-		mainwindow.lwpwidget.set_data()
+		if set_data:
+			mainwindow.lwpwidget.set_data()
 
-	def apply_xtransformation(self):
-		self.apply_transformation('x', self.xtransformation, 'x0')
+	def apply_xtransformation(self, *args, **kwargs):
+		self.apply_transformation('x', self.xtransformation, 'x0', *args, **kwargs)
 
-	def apply_ytransformation(self):
-		self.apply_transformation('y', self.ytransformation, 'y0')
+	def apply_ytransformation(self, *args, **kwargs):
+		self.apply_transformation('y', self.ytransformation, 'y0', *args, **kwargs)
 
 	def gui_delete(self):
 		self.delete()
@@ -1552,10 +1558,6 @@ class CatFile(File):
 		self.__class__.df.loc[:, qn_columns] = self.__class__.df.loc[:, qn_columns].fillna(pyckett.SENTINEL).astype(pyckett.pickett_int)
 		# self.__class__.df = self.__class__.df.dropna()
 
-	@decorator.d
-	def apply_xtransformation(self, *args, **kwargs):
-		return(super().apply_xtransformation(*args, **kwargs))
-
 	@classmethod
 	def check_series_qns(cls):
 		df = cls.df
@@ -1621,10 +1623,6 @@ class LinFile(File):
 		self.__class__.df[qn_columns] = self.__class__.df[qn_columns].fillna(pyckett.SENTINEL).astype(pyckett.pickett_int)
 		# self.__class__.df = self.__class__.df.dropna()
 
-	@decorator.d
-	def apply_xtransformation(self, *args, **kwargs):
-		return(super().apply_xtransformation(*args, **kwargs))
-
 class ExpFile(File):
 	ids = {}
 	lock = threading.RLock()
@@ -1649,10 +1647,6 @@ class ExpFile(File):
 		kwargs = config['flag_expformats'].get(self.extension, {})
 		data = exp_to_df(self.filename_abs, **kwargs)
 		return(data)
-	
-	@decorator.d
-	def apply_xtransformation(self, *args, **kwargs):
-		return(super().apply_xtransformation(*args, **kwargs))
 
 class NewAssignments(LinFile):
 	_instance = None
@@ -1724,6 +1718,7 @@ class NewAssignments(LinFile):
 		dtypes = pyckett.lin_dtypes_from_quanta(N_QNS)
 		new_rows = pd.DataFrame(rows_dict).astype(dtypes)[dtypes.keys()]
 		new_rows['filename'] = self.filename_abs
+
 		self.new_assignments_df = pd.concat( (self.new_assignments_df, new_rows) )
 		if config['flag_deleteduplicatesinnewassignments']:
 			subset = [f'qn{ul}{i+1}' for ul in 'ul' for i in range(config['series_qns'])]
@@ -1731,6 +1726,7 @@ class NewAssignments(LinFile):
 		self.new_assignments_df = self.new_assignments_df.reset_index(drop=True)
 
 		self.load_file()
+
 		new_assignments_window = NewAssignmentsWindow._instance
 		new_assignments_window.model.update()
 		new_assignments_window.model.resize_columns()
@@ -2614,123 +2610,6 @@ class LWPWidget(QGroupBox):
 		elif action == set_active_action:
 			mainwindow.lwpwidget._active_ax_index = (lwpax.row_i, lwpax.col_i)
 
-
-class MainWindow(QMainWindow):
-	notify_info = pyqtSignal(str)
-	notify_warning = pyqtSignal(str)
-	notify_error = pyqtSignal(str)
-
-	status_counter = AtomicCounter()
-	working = pyqtSignal()
-	waiting = pyqtSignal()
-
-	def __init__(self, app, *args, **kwargs):
-		super().__init__(*args, **kwargs)
-		self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-		self.setWindowTitle(APP_TAG)
-		self.setAcceptDrops(True)
-		Geometry.load_widget_geometry(self)
-		
-		try:
-			# Set LLWP logo as icon
-			possible_folders = [os.path.dirname(os.path.realpath(__file__)), os.getcwd()]
-			for folder in possible_folders:
-				iconpath = os.path.join(folder, "LLWP.svg")
-				if os.path.isfile(iconpath):
-					icon = QIcon(iconpath)
-					break
-			
-			# Make LLWP appear separate from python scripts in taskbar
-			app.setWindowIcon(QIcon(iconpath))
-			import ctypes
-			ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_TAG)
-		except Exception as E:
-			pass
-		
-	def create_gui_components(self):
-		global notify_info, notify_warning, notify_error
-		notify_info = self.notify_info
-		notify_warning = self.notify_warning
-		notify_error = self.notify_error
-
-
-		self.statusbar = StatusBar()
-		self.setStatusBar(self.statusbar)
-
-		self.notificationsbox = NotificationsBox()
-
-		self.lwpwidget = LWPWidget()
-		self.setCentralWidget(self.lwpwidget)
-				
-		NewAssignments.get_instance()
-		
-		for subclass in EQDockWidget.__subclasses__():
-			subclass()
-		dockstate = Geometry.get('__dockstate__')
-		if dockstate:
-			self.restoreState(dockstate)
-		
-		
-		
-		self.menu = Menu(self)
-		self.shortcuts()
-
-	def shortcuts(self):
-		shortcuts_dict = {
-			"w": lambda: WidthDialog.gui_set_width("++"),
-			"s": lambda: WidthDialog.gui_set_width("--"),
-			"a": lambda: OffsetDialog.gui_set_offset("--"),
-			"d": lambda: OffsetDialog.gui_set_offset("++"),
-
-			"Shift+w": lambda: WidthDialog.gui_set_width("+"),
-			"Shift+s": lambda: WidthDialog.gui_set_width("-"),
-			"Shift+a": lambda: OffsetDialog.gui_set_offset("-"),
-			"Shift+d": lambda: OffsetDialog.gui_set_offset("+"),
-
-			"Ctrl+Shift+k": lambda: ConsoleDialog.run_current_command(),
-
-			"Ctrl+Alt+f": lambda: CloseByLinesWindow._instance.toggle_text_is_frozen(),
-
-			"F11": lambda: self.togglefullscreen(),
-		}
-
-
-		for keys, function in shortcuts_dict.items():
-			tmp = QShortcut(keys, self)
-			tmp.activated.connect(function)
-			tmp.setContext(Qt.ShortcutContext.WidgetShortcut)
-
-	def togglefullscreen(self):
-		if self.isFullScreen():
-			self.showNormal()
-		else:
-			self.showFullScreen()
-	
-
-	def dragEnterEvent(self, event):
-		if event.mimeData().hasUrls():
-			event.accept()
-		else:
-			event.ignore()
-
-	def dropEvent(self, event):
-		event.accept()
-		files_by_type = File.sort_files_by_type([url.toLocalFile() for url in event.mimeData().urls()])
-		File.add_multiple_files_by_type(files_by_type)
-
-	def moveEvent(self, *args, **kwargs):
-		Geometry.save_widget_geometry(self)
-		return super().moveEvent(*args, **kwargs)
-
-	def resizeEvent(self, *args, **kwargs):
-		Geometry.save_widget_geometry(self)
-		return super().resizeEvent(*args, **kwargs)
-
-	def closeEvent(self, *args, **kwargs):
-		Geometry.set("__dockstate__", self.saveState())
-		Geometry.save()
-		config.save()
-
 class Menu():
 	def __init__(self, parent, *args, **kwargs):
 		mb = parent.menuBar()
@@ -2866,6 +2745,124 @@ class Menu():
 		
 	def send_mail_to_author(self):
 		webbrowser.open(f"mailto:bonah@ph1.uni-koeln.de?subject={APP_TAG}")
+
+
+class MainWindow(QMainWindow):
+	notify_info = pyqtSignal(str)
+	notify_warning = pyqtSignal(str)
+	notify_error = pyqtSignal(str)
+
+	status_counter = AtomicCounter()
+	working = pyqtSignal()
+	waiting = pyqtSignal()
+
+	mainwidget_class = LWPWidget
+	menu_class = Menu
+
+	def __init__(self, app, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+		self.setWindowTitle(APP_TAG)
+		self.setAcceptDrops(True)
+		Geometry.load_widget_geometry(self)
+		
+		try:
+			# Set LLWP logo as icon
+			possible_folders = [os.path.dirname(os.path.realpath(__file__)), os.getcwd()]
+			for folder in possible_folders:
+				iconpath = os.path.join(folder, "LLWP.svg")
+				if os.path.isfile(iconpath):
+					icon = QIcon(iconpath)
+					break
+			
+			# Make LLWP appear separate from python scripts in taskbar
+			app.setWindowIcon(QIcon(iconpath))
+			import ctypes
+			ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_TAG)
+		except Exception as E:
+			pass
+		
+	def create_gui_components(self):
+		global notify_info, notify_warning, notify_error
+		notify_info = self.notify_info
+		notify_warning = self.notify_warning
+		notify_error = self.notify_error
+
+
+		self.statusbar = StatusBar()
+		self.setStatusBar(self.statusbar)
+
+		self.notificationsbox = NotificationsBox()
+
+		mainwidget_class = self.__class__.mainwidget_class
+		self.lwpwidget = mainwidget_class()
+		self.setCentralWidget(self.lwpwidget)
+				
+		NewAssignments.get_instance()
+		
+		for subclass in get_all_subclasses(EQDockWidget):
+			if APP_TAG in subclass.available_in:
+				subclass()
+		dockstate = Geometry.get('__dockstate__')
+		if dockstate:
+			self.restoreState(dockstate)
+		
+		menu_class = self.__class__.menu_class
+		self.menu = menu_class(self)
+		self.shortcuts()
+
+	def shortcuts(self):
+		shortcuts_dict = {
+			"w": lambda: WidthDialog.gui_set_width("++"),
+			"s": lambda: WidthDialog.gui_set_width("--"),
+			"a": lambda: OffsetDialog.gui_set_offset("--"),
+			"d": lambda: OffsetDialog.gui_set_offset("++"),
+
+			"Shift+w": lambda: WidthDialog.gui_set_width("+"),
+			"Shift+s": lambda: WidthDialog.gui_set_width("-"),
+			"Shift+a": lambda: OffsetDialog.gui_set_offset("-"),
+			"Shift+d": lambda: OffsetDialog.gui_set_offset("+"),
+
+			"Ctrl+Shift+k": lambda: ConsoleDialog.run_current_command(),
+			"F11": lambda: self.togglefullscreen(),
+		}
+
+		for keys, function in shortcuts_dict.items():
+			tmp = QShortcut(keys, self)
+			tmp.activated.connect(function)
+			tmp.setContext(Qt.ShortcutContext.WidgetShortcut)
+
+	def togglefullscreen(self):
+		if self.isFullScreen():
+			self.showNormal()
+		else:
+			self.showFullScreen()
+	
+
+	def dragEnterEvent(self, event):
+		if event.mimeData().hasUrls():
+			event.accept()
+		else:
+			event.ignore()
+
+	def dropEvent(self, event):
+		event.accept()
+		files_by_type = File.sort_files_by_type([url.toLocalFile() for url in event.mimeData().urls()])
+		File.add_multiple_files_by_type(files_by_type)
+
+	def moveEvent(self, *args, **kwargs):
+		Geometry.save_widget_geometry(self)
+		return super().moveEvent(*args, **kwargs)
+
+	def resizeEvent(self, *args, **kwargs):
+		Geometry.save_widget_geometry(self)
+		return super().resizeEvent(*args, **kwargs)
+
+	def closeEvent(self, *args, **kwargs):
+		Geometry.set("__dockstate__", self.saveState())
+		Geometry.save()
+		config.save()
+
 
 class StatusBar(QStatusBar):
 	set_cursor_text = pyqtSignal(str)
@@ -3585,6 +3582,7 @@ class QNsDialog(QDialog):
 class FileWindow(EQDockWidget):
 	fileaddition_requested = pyqtSignal(type, str)
 	default_position = None
+	available_in = ['LLWP', 'LASAP']
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -4195,6 +4193,7 @@ class SeriesSelector(QWidget):
 
 class ReferenceSeriesWindow(EQDockWidget):
 	default_visible = True
+	available_in = ['LLWP']
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -4311,6 +4310,8 @@ class ReferenceSeriesWindow(EQDockWidget):
 		config["series_references"] = tmp
 
 class LogWindow(EQDockWidget):
+	available_in = ['LLWP', 'LASAP']
+
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.setWindowTitle("Log")
@@ -4478,6 +4479,7 @@ class CatTableModel(QAbstractTableModel):
 class NewAssignmentsWindow(EQDockWidget):
 	default_visible = True
 	default_position = 2
+	available_in = ['LLWP', 'LASAP']
 
 	def __init__(self):
 		super().__init__()
@@ -4550,6 +4552,8 @@ class NewAssignmentsWindow(EQDockWidget):
 class ConvolutionWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
+	available_in = ['LLWP',]
+
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -4698,6 +4702,8 @@ class CloseByLinesWindow(EQDockWidget):
 	cursor_changed = pyqtSignal(float, float)
 	default_visible = False
 	default_position = None
+	available_in = ['LLWP',]
+
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -4727,6 +4733,10 @@ class CloseByLinesWindow(EQDockWidget):
 		self.cursor_changed.connect(self.on_cursor_change)
 		
 		self._text_is_frozen = False
+
+		tmp = QShortcut(keys, mainwindow)
+		tmp.activated.connect(self.toggle_text_is_frozen)
+		tmp.setContext(Qt.ShortcutContext.WidgetShortcut)
 	
 	def toggle_text_is_frozen(self):
 		self.text_is_frozen = not self.text_is_frozen
@@ -4793,6 +4803,7 @@ class CloseByLinesWindow(EQDockWidget):
 class ConfigWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
+	available_in = ['LLWP', 'LASAP']
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -4901,6 +4912,7 @@ class ConfigWindow(EQDockWidget):
 class CreditsWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
+	available_in = ['LLWP', 'LASAP']
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -4913,6 +4925,7 @@ class CreditsWindow(EQDockWidget):
 class ResidualsWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
+	available_in = ['LLWP',]
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -5082,6 +5095,7 @@ class ResidualsWindow(EQDockWidget):
 class BlendedLinesWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
+	available_in = ['LLWP',]
 
 	set_indicator_text = pyqtSignal(str)
 	fill_table_requested = pyqtSignal()
@@ -5482,7 +5496,8 @@ class BlendedLinesWindow(EQDockWidget):
 class ReportWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
-	
+	available_in = ['LLWP',]
+
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.setWindowTitle("Report Window")
@@ -5591,7 +5606,8 @@ class ReportWindow(EQDockWidget):
 class SeriesfinderWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
-	
+	available_in = ['LLWP',]
+
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.setWindowTitle("Series Finder")
@@ -5746,6 +5762,7 @@ class SeriesfinderWindow(EQDockWidget):
 class EnergyLevelsWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
+	available_in = ['LLWP',]
 
 	plotting_started = pyqtSignal()
 	plotting_finished = pyqtSignal()
@@ -5902,7 +5919,8 @@ def peak_locked(func):
 class PeakfinderWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
-	
+	available_in = ['LLWP',]
+
 	peakfinding_started = pyqtSignal()
 	peakfinding_finished = pyqtSignal()
 	
@@ -6120,7 +6138,8 @@ def cmd_locked(func):
 class CmdWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
-	
+	available_in = ['LLWP', 'LASAP']
+
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.setWindowTitle("Cmd Window")
@@ -6582,7 +6601,7 @@ def bin_data(dataframe, binwidth, range):
 
 def llwpfile(extension=""):
 	home = os.path.expanduser("~")
-	llwpfolder = os.path.join(home, ".{APP_TAG.lower()}")
+	llwpfolder = os.path.join(home, f".{APP_TAG.lower()}")
 	
 	if not os.path.isdir(llwpfolder):
 		os.mkdir(llwpfolder)
@@ -6639,7 +6658,12 @@ def except_hook(cls, exception, traceback):
 		pass
 
 
-
+def get_all_subclasses(cls):
+    all_subclasses = []
+    for subclass in cls.__subclasses__():
+        all_subclasses.append(subclass)
+        all_subclasses.extend(get_all_subclasses(subclass))
+    return all_subclasses
 
 
 
@@ -6808,6 +6832,23 @@ class ASAPAx(LWPAx):
 			if col_i != config['plot_cols'] - 1:
 				ax.spines['right'].set_visible(False)
 
+	def vals_to_coll(self, xs, ys):
+		if xs is None or ys is None:
+			segs = np.array([])
+		else:
+			xrange = self.xrange
+			bins = config['plot_bins']
+			nobinning = config['plot_skipbinning']
+			binwidth = (xrange[1]-xrange[0]) / bins
+
+			if len(xs) > max(bins, nobinning)  and binwidth != 0:
+				df = pd.DataFrame({'x': xs, 'y': ys, 'filename': 0})
+				df = bin_data(df, binwidth, xrange)
+				xs, ys = df['x'], df['y']
+
+			segs = np.array(((xs[:-1], xs[1:]), (ys[:-1], ys[1:]))).T
+
+		self.exp_coll.set(segments=segs, color=config['color_exp'])
 
 	# @status_d
 	@QThread.threaded_d
@@ -6815,8 +6856,7 @@ class ASAPAx(LWPAx):
 	def update_correlation_plots(self, thread=None):
 		ax = self.ax
 		tot_xs, tot_ys = self.corr_xs, self.corr_ys
-		segs = np.array(((tot_xs[:-1], tot_xs[1:]), (tot_ys[:-1], tot_ys[1:]))).T
-		self.exp_coll.set(segments=segs, color=config['color_exp'])
+		self.vals_to_coll(tot_xs, tot_ys)
 
 		thread_ = self.update()
 		thread_.wait()
@@ -6844,6 +6884,8 @@ class ASAPAx(LWPAx):
 
 			tot_xs = tot_xs[min_index:max_index]
 			tot_ys = tot_ys[min_index:max_index]
+
+		self.vals_to_coll(tot_xs, tot_ys)
 
 		if tot_ys is not None and len(tot_ys):
 			yrange = (np.min(tot_ys), np.max(tot_ys))
@@ -6943,7 +6985,6 @@ class ASAPAx(LWPAx):
 			self.__class__.fit_curve.remove()
 			self.__class__.fit_curve = None
 		
-
 		if onclick:
 			xmiddle = xmin
 			xuncert = 0
@@ -6956,7 +6997,8 @@ class ASAPAx(LWPAx):
 		# Highlight fit in plot
 		self.__class__.fit_vline = self.ax.axvline(x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1)
 
-		# mainwindow.lwpwidget.set_data()
+		# Emit signal for detail viewer
+		mainwindow.lwpwidget.peak_fitted.emit(self, xmiddle)
 
 		# Add predicted energy to offset
 		qns_dict = self.create_qns_dict(complete=True)
@@ -6968,7 +7010,7 @@ class ASAPAx(LWPAx):
 			egy_val = vals[0] if len(vals) else 0
 		
 		if egy_val == 0:
-			notify_warning.emit('No corresponding energy level found! Please check if an energies file is loaded.')
+			notify_warning.emit('No corresponding energy level found! Please check if an energy file is loaded.')
 
 		error = self.fit_determine_uncert(xmiddle, xuncert)
 		xmiddle += egy_val
@@ -6984,8 +7026,10 @@ class ASAPAx(LWPAx):
 
 	def fit_peak(self, xmin, xmax):
 		exp_xs, exp_ys = self.corr_xs, self.corr_ys
-		mask = (exp_xs < xmax) & (exp_xs > xmin)
-		exp_xs, exp_ys = exp_xs[mask], exp_ys[mask]
+		min_index = exp_xs.searchsorted(xmin, side='right')
+		max_index = exp_xs.searchsorted(xmax, side='left')
+
+		exp_xs, exp_ys = exp_xs[min_index:max_index], exp_ys[min_index:max_index]
 		
 		fit_xs = np.linspace(xmin, xmax, config['fit_xpoints'])
 
@@ -7046,7 +7090,6 @@ class ASAPAx(LWPAx):
 		
 		notify_info.emit(f'Successfully loaded the energy file \'{basename}\'.')
 		
-
 class LASAP(LLWP):
 	def get_main_window_class(self):
 		return(LASAPMainWindow)
@@ -7056,6 +7099,7 @@ class LASAP(LLWP):
 
 class ASAPWidget(LWPWidget):
 	_ax_class = ASAPAx
+	peak_fitted = pyqtSignal(ASAPAx, float)
 
 
 	def __init__(self, *args, **kwargs):
@@ -7107,9 +7151,9 @@ class ASAPWidget(LWPWidget):
 		else:
 			entries['use_for_cross_correlation'] = True
 
-		entries['xmins'] = entries['x'] + offset - width/2
-		entries['xmaxs'] = entries['xmins'] + width
-		entries['min_indices'], entries['max_indices'] = ExpFile.xs_to_indices(entries['xmins'], entries['xmaxs'])
+		entries['xmin'] = entries['x'] + offset - width/2
+		entries['xmax'] = entries['xmin'] + width
+		entries['min_index'], entries['max_index'] = ExpFile.xs_to_indices(entries['xmin'], entries['xmax'])
 
 		return(entries, qns, diffs, ul)
 
@@ -7119,7 +7163,7 @@ class ASAPWidget(LWPWidget):
 		ref_xs = transitions['x']
 		ref_ys = transitions['y']
 
-		min_indices, max_indices = transitions['min_indices'], transitions['max_indices']
+		min_indices, max_indices = transitions['min_index'], transitions['max_index']
 
 		xmin, xmax = offset - width/2, offset + width/2
 		tot_xs = np.arange(xmin, xmax + resolution, resolution)
@@ -7204,21 +7248,21 @@ class ASAPWidget(LWPWidget):
 				# Get the specific entries for each ax 
 				for i_row in range(n_rows):
 					row_qns = qns + i_row * diffs
-					cond = ['(use_for_cross_correlation)'] + [f"(qn{ul}{i+1} == {qn})" for i, qn in enumerate(row_qns)]
+					cond = [f"(qn{ul}{i+1} == {qn})" for i, qn in enumerate(row_qns)]
 					condition  = " & ".join(cond)
-					row_entries = entries.query(condition)
+					row_entries_all = entries.query(condition)
+					row_entries = row_entries_all[row_entries_all['use_for_cross_correlation']]
 					
 					corr_xs, corr_ys = self.calc_correlation_plot(row_qns, row_entries, offset, width, resolution)
 					
 					ax = self.lwpaxes[i_row, i_col]
-					
+					ax.entries = row_entries_all
 					ax.corr_xs = corr_xs
 					ax.corr_ys = corr_ys
-					ax.entries = row_entries
 					ax.qns = row_qns
 					threads.append(ax.update_correlation_plots())
 				
-				thread.earlyreturn()
+					thread.earlyreturn()
 
 			# Edge cases of no reference tabs and too few tabs
 			for i_col in range(n_widgets, n_cols):
@@ -7274,56 +7318,6 @@ class ASAPWidget(LWPWidget):
 
 	def contextMenuCanvas(self, event):
 		return
-
-class LASAPMainWindow(MainWindow):
-	def create_gui_components(self):
-		global notify_info, notify_warning, notify_error
-		notify_info = self.notify_info
-		notify_warning = self.notify_warning
-		notify_error = self.notify_error
-
-		self.statusbar = StatusBar()
-		self.setStatusBar(self.statusbar)
-
-		self.notificationsbox = NotificationsBox()
-
-		self.lwpwidget = ASAPWidget()
-		self.setCentralWidget(self.lwpwidget)
-		
-		NewAssignments.get_instance()
-		
-		for subclass in (
-			LogWindow, FileWindow, ConfigWindow, ASAPSettingsWindow,
-			ASAPDetailViewer, CreditsWindow, CmdWindow, NewAssignmentsWindow):
-			subclass()
-		dockstate = Geometry.get('__dockstate__')
-		if dockstate:
-			self.restoreState(dockstate)
-		
-		self.menu = ASAPMenu(self)
-		self.shortcuts()
-	
-	def shortcuts(self):
-		shortcuts_dict = {
-			"w": lambda: WidthDialog.gui_set_width("++"),
-			"s": lambda: WidthDialog.gui_set_width("--"),
-			"a": lambda: OffsetDialog.gui_set_offset("--"),
-			"d": lambda: OffsetDialog.gui_set_offset("++"),
-
-			"Shift+w": lambda: WidthDialog.gui_set_width("+"),
-			"Shift+s": lambda: WidthDialog.gui_set_width("-"),
-			"Shift+a": lambda: OffsetDialog.gui_set_offset("-"),
-			"Shift+d": lambda: OffsetDialog.gui_set_offset("+"),
-
-			"Ctrl+Shift+k": lambda: ConsoleDialog.run_current_command(),
-			"F11": lambda: self.togglefullscreen(),
-		}
-
-
-		for keys, function in shortcuts_dict.items():
-			tmp = QShortcut(keys, self)
-			tmp.activated.connect(function)
-			tmp.setContext(Qt.ShortcutContext.WidgetShortcut)
 
 class ASAPMenu(Menu):
 	def __init__(self, parent, *args, **kwargs):
@@ -7410,14 +7404,79 @@ class ASAPMenu(Menu):
 		newvalue = fitmethods[newindex]
 		config['fit_fitmethod'] = newvalue
 
+class LASAPMainWindow(MainWindow):
+	mainwidget_class = ASAPWidget
+	menu_class = ASAPMenu
 
-# @Luis: Make sure this is not automatically opened for LLWP case
 class ASAPDetailViewer(EQDockWidget):
-	pass
-	# @Luis
+	default_position = None
+	available_in = ['LASAP',]
+	
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle("ASAP Detail Viewer")
+	
+		widget = QGroupBox()
+		layout = QVBoxLayout()
+		self.setWidget(widget)
+		widget.setLayout(layout)
+		
+		tmp_layout = QHBoxLayout()
+		tmp_layout.addWidget(QQ(QLabel, text='Width:'))
+		tmp_layout.addWidget(QQ(QDoubleSpinBox, 'asap_detailviewerwidth'))
+		tmp_layout.addStretch()
+
+		layout.addLayout(tmp_layout)
+		layout.addWidget(QQ(QCheckBox, 'asap_detailviewerfilter', text='Show only transitions used in cross-correlation'))
+
+		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
+		self.plot_canvas = FigureCanvas(self.fig)
+		layout.addWidget(self.plot_canvas)
+
+		mainwindow.lwpwidget.peak_fitted.connect(self.update_view)
+
+	def update_view(self, asap_ax, offset):
+		for ax in self.fig.get_axes():
+			self.fig.delaxes(ax)
+		
+		# Prepare Entries
+		entries = asap_ax.entries.copy()
+
+		if config['asap_detailviewerfilter']:
+			entries = entries[entries['use_for_cross_correlation']].copy()
+
+		width = config['asap_detailviewerwidth'] or config['plot_width']
+		entries['xmin'] = entries['x'] - width/2
+		entries['xmax'] = entries['xmin'] + width
+		entries['min_index'], entries['max_index'] = ExpFile.xs_to_indices(entries['xmin'], entries['xmax'])			
+		
+		gridspec_kw = {"hspace": 0, "wspace": 0}
+		axes = self.fig.subplots(len(entries), gridspec_kw=gridspec_kw, squeeze=False)[::-1, 0]
+
+		for ax, (i, row) in zip(axes, entries.iterrows()):
+			ax.xaxis.set_visible(False)
+			ax.axvline(color=config['color_fit'])
+
+			min_index, max_index = row['min_index'], row['max_index']
+			dataframe = ExpFile.df.iloc[min_index:max_index].copy()
+			dataframe = dataframe[dataframe['visible']]
+			
+			if not len(dataframe):
+				continue
+			
+			xs = dataframe['x'] - row['x']
+			ys = dataframe['y']
+
+			ax.plot(xs, ys, color=config['color_exp'])
+
+			# @Luis: QN annotation
+		
+		axes[0].xaxis.set_visible(True)
+		self.plot_canvas.draw_idle()
 
 class ASAPSettingsWindow(ReferenceSeriesWindow):
 	default_visible = True
+	available_in = ['LASAP',]
 
 	def __init__(self, *args, **kwargs):
 		super(ReferenceSeriesWindow, self).__init__(*args, **kwargs)
@@ -7483,7 +7542,7 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 
 		row_i = 0
 
-		tmp_layout.addWidget(QQ(QLabel, text='Energies File: '), row_i, 0)
+		tmp_layout.addWidget(QQ(QLabel, text='Energy File: '), row_i, 0)
 		self.egy_file_button = QQ(QPushButton, text='Load File', change=lambda x: ASAPAx.load_egy_file())
 		tmp_layout.addWidget(self.egy_file_button, row_i, 1)
 		
@@ -7559,8 +7618,8 @@ def start_lasap():
 	LASAP()
 
 if __name__ == '__main__':
-	# start_lasap()
-	start_llwp()
+	start_lasap()
+	# start_llwp()
 	
 
 ##
