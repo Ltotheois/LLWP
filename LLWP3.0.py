@@ -577,6 +577,7 @@ class PlotWidget(QWidget):
 			convolution_padding = len(kernel_ys) // 2
 			stepwidth = config['convolution_stepwidth']
 
+			xmin, xmax = self.xrange
 			n_xs = (xmax - xmin) // stepwidth + 1
 			con_xs = np.arange(-n_xs, n_xs+1) * stepwidth + (xmax + xmin) / 2
 
