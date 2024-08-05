@@ -272,7 +272,7 @@ class Config(dict):
 		'flag_showmainplotposition': (True, bool),
 		'flag_pyckettquanta': (6, int),
 		'flag_showseriesarrows': (True, bool),
-		'flag_deleteduplicatesinnewassignments': (False, bool),
+		'flag_keeponlylastassignment': (False, bool),
 
 		'commandlinedialog_commands': ([], list),
 		'commandlinedialog_current': (0, int),
@@ -328,6 +328,11 @@ class Config(dict):
 		
 		'cmd_current': (0, int),
 		'cmd_commands': ([], list),
+
+		'assignall_fitwidth': (4, float),
+		'assignall_maxfwhm': (1, float),
+		'assignall_maxdegree': (3, int),
+
 		
 		'asap_query': ('', str),
 		'asap_resolution': (6e-6, float),
@@ -1741,7 +1746,7 @@ class NewAssignments(LinFile):
 		new_rows['filename'] = self.filename_abs
 
 		self.new_assignments_df = pd.concat( (self.new_assignments_df, new_rows) )
-		if config['flag_deleteduplicatesinnewassignments']:
+		if config['flag_keeponlylastassignment']:
 			subset = [f'qn{ul}{i+1}' for ul in 'ul' for i in range(config['series_qns'])]
 			self.new_assignments_df = self.new_assignments_df.drop_duplicates(subset=subset, keep='last', ignore_index=True)
 		self.new_assignments_df = self.new_assignments_df.reset_index(drop=True)
@@ -2188,14 +2193,15 @@ class LWPAx():
 			qns_dict[f'qnl{i+1}'] = qnl
 		return(qns_dict)
 
-	def fit_determine_uncert(self, xmiddle, xuncert):
+	@staticmethod
+	def fit_determine_uncert(ref_pos, xmiddle, xuncert):
 		error_param = config['fit_uncertainty']
 		if error_param > 0:
 			return(error_param)
 		elif error_param >= -1:
-			return( abs(xmiddle - self.ref_position) )
+			return( abs(xmiddle - ref_pos) )
 		elif error_param >= -2:
-			resp, rc = QInputDialog.getText(self, 'Set error', 'Error:')
+			resp, rc = QInputDialog.getText(mainwindow, 'Set error', 'Error:')
 			if rc:
 				try:
 					return(float(resp))
@@ -2227,7 +2233,7 @@ class LWPAx():
 		self.__class__.fit_vline = self.ax.axvline(x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1)
 
 		# Create assignment object
-		new_assignment = {'x': xmiddle, 'error': self.fit_determine_uncert(xmiddle, xuncert), 'xpre': self.ref_position}
+		new_assignment = {'x': xmiddle, 'error': self.fit_determine_uncert(self.ref_position, xmiddle, xuncert), 'xpre': self.ref_position}
 		new_assignment.update(self.create_qns_dict(complete=True))
 		new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
 		
@@ -2254,29 +2260,8 @@ class LWPAx():
 			raise GUIAbortedError('The data could not be fit as there were too few points selected.')
 
 		try:
-			function_to_call = {
-				'Pgopher': fit_pgopher,
-				'Polynom': lambda *args: fit_polynom(*args, config['fit_polynomrank']),
-				'MultiPolynom': lambda *args: fit_polynom_multirank(*args, config['fit_polynommaxrank']),
-			}.get(fitmethod)
-			
-			if not function_to_call:
-				offset = config['fit_offset']
-				profilname, derivative = {
-					'Gauss':					('Gauss', 0),
-					'Lorentz':					('Lorentz', 0),
-					'Voigt':					('Voigt', 0),
-					'Gauss 1st Derivative':		('Gauss', 1),
-					'Lorentz 1st Derivative':	('Lorentz', 1),
-					'Voigt 1st Derivative':		('Voigt', 1),
-					'Gauss 2nd Derivative':		('Gauss', 2),
-					'Lorentz 2nd Derivative':	('Lorentz', 2),
-					'Voigt 2nd Derivative':		('Voigt', 2),
-				}[fitmethod]
-				function_to_call = lambda *args: fit_lineshape(*args, profilname, derivative, offset)
-
-			xmiddle, xuncert, fit_xs, fit_ys = function_to_call(exp_xs, exp_ys, peakdirection, fit_xs)
-
+			fit_function = get_fitfunction(fitmethod, config['fit_offset'])
+			xmiddle, xuncert, fit_xs, fit_ys = fit_function(exp_xs, exp_ys, peakdirection, fit_xs)
 		except Exception as E:
 			self.fitcurve = None
 			self.fitline = None
@@ -3587,6 +3572,201 @@ class QNsDialog(QDialog):
 	def save(self):
 		return(self.result_)
 
+class AssignAllDialog(QDialog):
+	_instance = None
+
+	@classmethod
+	def show_dialog(cls, reference_selector):
+		dialog = cls(reference_selector)
+		dialog.show()
+
+	def __init__(self, reference_selector):
+		super().__init__()
+		self.setModal(False)
+		self.reference_selector = reference_selector
+		
+		self.setWindowTitle("Assign All")
+
+		self.finished.connect(self.on_exit)
+		if self._instance:
+			self._instance.done(0)
+		self.__class__._instance = self
+		
+
+		self.init_gui()
+		self.update_gui()
+
+	def update_gui(self):
+		n_rows = config['plot_rows']
+		n_qns = self.noq = config['series_qns']
+		
+		fit_width = config['assignall_fitwidth']
+		max_fwhm = config['assignall_maxfwhm']
+		max_pol_degree = config['assignall_maxdegree']
+		
+		peakdirection = config['fit_peakdirection']
+		fitmethod = config['fit_fitmethod']
+		offset = config['fit_offset']
+		
+		positions, qns = self.reference_selector.calc_references(n_rows, n_qns)
+		qn_labels = [f'qn{ul}{i+1}' for ul in ('u', 'l') for i in range(n_qns)]
+		
+		# Find already assigned transitions of series
+		offsets = {}
+		for i_row, (ref_pos, row_qns) in enumerate(zip(positions, qns)):
+			query = ' and '.join([f'({label} == {qn})' for qn, label in zip(row_qns.flatten(), qn_labels)])
+			
+			vals = LinFile.query_c(query)['x'].to_numpy()
+			
+			if len(vals) == 0:
+				continue
+			
+			if len(vals) > 1:
+				qnsstring = ','.join(map(str, row_qns[0])) + ' ← ' + ','.join(map(str, row_qns[1]))
+				notify_warning.emit(f'Multiple assignments for transition {qnsstring} found. Did not use it as reference.')
+				continue
+			
+			offsets[i_row] = vals[0] - ref_pos
+		
+		# @Luis: Maybe check here that at least 2 are assigned; Or allow to assign by hand
+		if len(offsets) < 1:
+			msg = 'Please assign at least a single transition of the series (two subsequent would be great).'
+			notify_info.emit(msg)
+			raise GUIAbortedError(msg)
+		
+		
+		# Create new assignments
+		axs = self.fig.subplots(n_rows, sharex=True, gridspec_kw={'hspace': 0, 'wspace': 0})
+		axs = axs[::-1]
+		
+		exp = ExpFile.get_data().copy()
+		
+		self.new_assignments = {}
+		for i_row, (xref, row_qns, ax) in enumerate(zip(positions, qns, axs)):
+			already_assigned = (i_row in offsets)
+			
+			if already_assigned:
+				xpre = xref + offsets[i_row]
+			else:
+				offset_values = np.array([[key, value] for key, value in offsets.items()])
+				degree = min(len(offset_values) - 1, max_pol_degree)
+
+				pred_pol = np.polyfit(*offset_values.T, degree)
+				pred_offset = np.polyval(pred_pol, i_row)
+			
+				xpre = xref + pred_offset
+			
+			xmin, xmax = xpre - fit_width/2, xpre + fit_width/2
+			
+			minindex = exp["x"].searchsorted(xmin, side="left")
+			maxindex = exp["x"].searchsorted(xmax, side="right")
+			
+			df = exp.iloc[minindex: maxindex]
+			exp_xs, exp_ys = df['x'].to_numpy(), df['y'].to_numpy()
+			
+			ax.plot(exp_xs - xref, exp_ys, color=config['color_exp'])
+			ax.xaxis.set_visible(False)
+			ax.yaxis.set_visible(False)
+			ax.margins(y=config['plot_ymargin'])
+			
+			if already_assigned or len(exp_xs) == 0:
+				continue
+			
+			kwargs = {'wmax': max_fwhm}
+			fit_xs = np.linspace(xmin, xmax, 1000)
+			fit_function = get_fitfunction(fitmethod, offset, kwargs=kwargs)
+
+			try:
+				xmiddle, xuncert, fit_xs, fit_ys = fit_function(exp_xs, exp_ys, peakdirection, fit_xs, )
+			except Exception as E:
+				notify_warning.emit(f'Error when trying to fit row {i_row}. Error reads \'{E}\'.')
+				continue
+			
+			offsets[i_row] = xmiddle - xref
+			self.new_assignments[i_row] = (xmiddle, xuncert, fit_xs, fit_ys, row_qns, xref)
+			
+			ax.plot(fit_xs - xref, fit_ys, color=config['color_fit'], lw=2, alpha=0.5)
+			ax.axvline(xmiddle - xref, zorder=10, color=config['color_fit'])
+		
+		ax = axs[-1]
+		ax.xaxis.set_visible(True)
+		ax.margins(x=0)
+		
+		self.fig.canvas.draw_idle()
+
+	def init_gui(self):
+		layout = QVBoxLayout(margin=True)
+		self.setLayout(layout)
+
+		self.fig = matplotlib.figure.Figure(dpi=config['plot_dpi'])
+		self.plot_canvas = FigureCanvas(self.fig)
+		self.mpl_toolbar = NavigationToolbar2QT(self.plot_canvas, self)
+
+		layout.addWidget(self.plot_canvas, 1)
+		layout.addWidget(self.mpl_toolbar)
+
+		grid_layout = QGridLayout()
+		
+		i_row = 0
+
+		grid_layout.addWidget(QQ(QLabel, text='Fit Width: '), i_row, 0)
+		grid_layout.addWidget(QQ(QDoubleSpinBox, 'assignall_fitwidth', range=(0, None)), i_row, 1)
+		
+		i_row += 1
+
+		grid_layout.addWidget(QQ(QLabel, text='Max FWHM: '), i_row, 0)
+		grid_layout.addWidget(QQ(QDoubleSpinBox, 'assignall_maxfwhm', range=(0, None)), i_row, 1)
+
+		i_row += 1
+
+		grid_layout.addWidget(QQ(QLabel, text='Max Pol Degree}: '), i_row, 0)
+		grid_layout.addWidget(QQ(QSpinBox, 'assignall_maxdegree', range=(0, None)), i_row, 1)
+
+		layout.addLayout(grid_layout)
+
+		buttons_layout = QHBoxLayout()
+
+		buttons_layout.addStretch()
+		buttons_layout.addWidget(QQ(QPushButton, text="Assign All", shortcut="Ctrl+Return", change=lambda x: self.assign()))
+		buttons_layout.addWidget(QQ(QPushButton, text="Update", change=lambda x: self.update_gui()))
+		buttons_layout.addWidget(QQ(QPushButton, text="Cancel", change=lambda x: self.close()))
+		buttons_layout.addStretch()
+
+		layout.addLayout(buttons_layout)
+
+	def assign(self):
+		self.done(0)
+
+		xs = []
+		qns = []
+		errors = []
+		for i_row, (xmiddle, xuncert, fit_xs, fit_ys, row_qns, xref) in self.new_assignments.items():
+			xs.append(xmiddle)
+			errors.append(LWPAx.fit_determine_uncert(xref, xmiddle, xuncert))
+			qns.append(row_qns)
+
+		qns = np.array(qns)
+
+		new_assignments = {
+			'x': xs,
+			'error': errors,
+			'weight': 1,
+			'comment': config['fit_comment'],
+			'filename': '__newassignments__',
+		}
+
+		for i in range(self.noq):
+			new_assignments[f'qnu{i+1}'] = qns[:,0,i]
+			new_assignments[f'qnl{i+1}'] = qns[:,1,i]
+		
+		for i in range(self.noq, N_QNS):
+			new_assignments[f'qnu{i+1}'] = pyckett.SENTINEL
+			new_assignments[f'qnl{i+1}'] = pyckett.SENTINEL
+
+		NewAssignments.get_instance().add_rows(new_assignments)
+
+	def on_exit(self):
+		self.__class__._instance = None
 
 ##
 ## Additional Winodws
@@ -3913,11 +4093,10 @@ class ReferenceSelector(QTabWidget):
 			state = self.state['transition']
 			tmp = self.seriesselector_getqns(n_qns)
 			qnus, qnls, diffs = tmp['qnus'], tmp['qnls'], tmp['diff']
-			cat_df = CatFile.df
 
 			# Prefilter df to all transitins belonging to series
 
-			conditions, conditions_incr = ['(visible)'], []
+			conditions, conditions_incr = [], []
 			normalizing_value = None
 			for i, qnu, qnl, diff in zip(range(n_qns), qnus, qnls, diffs):
 				diff = int(diff)
@@ -3938,13 +4117,10 @@ class ReferenceSelector(QTabWidget):
 			if file_to_limit_data_to:
 				conditions.append('(filename == @file_to_limit_data_to)')
 			
-			conditions = " and ".join(conditions)
-			
-			with CatFile.lock:
-				cat_df = cat_df.query(conditions)
+			conditions = " and ".join(conditions)  if conditions else '(visible)'
+			cat_df = CatFile.query_c(conditions)
 
 			# Select the desired transitions
-
 			for i_row in range(n_rows):
 				tmp_qnus, tmp_qnls = qnus + i_row * diffs, qnls + i_row * diffs
 				qns[i_row] = (tmp_qnus, tmp_qnls)
@@ -4025,8 +4201,7 @@ class ReferenceSelector(QTabWidget):
 				qn_labels = [f'qn{ul}{i+1}' for ul in ('u', 'l') for i in range(n_qns)]
 				for i_row, row_qns in enumerate(rows_qns):
 					query = " and ".join([f'({label} == {qn})' for qn, label in zip(row_qns, qn_labels) ])
-					with CatFile.lock:
-						vals = cat_df.query(query)["x"].to_numpy()
+					vals = cat_df.query(query)["x"].to_numpy()
 					val = vals[0] if len(vals) else 0
 					positions[i_row] = val
 					qns[i_row] = np.split(np.array(row_qns), 2)
@@ -4050,6 +4225,7 @@ class ReferenceSelector(QTabWidget):
 		menu = QMenu(self)
 		get_positions_action = menu.addAction('Copy Reference Positions')
 		get_qns_action = menu.addAction('Copy Reference QNs')
+		fit_all_action = menu.addAction('Fit all')
 
 		action = menu.exec(self.mapToGlobal(event.pos()))
 		if action == get_positions_action:
@@ -4069,6 +4245,8 @@ class ReferenceSelector(QTabWidget):
 
 			output_string = '\n'.join(output_string)
 			QApplication.clipboard().setText(output_string)
+		elif action == fit_all_action:
+			AssignAllDialog.show_dialog(self)
 
 class SeriesSelector(QWidget):
 	values_changed = pyqtSignal()
@@ -5251,7 +5429,7 @@ class BlendedLinesWindow(EQDockWidget):
 
 				xs.append((x, *xrange))
 				ys.append((y, amp_min, amp_max))
-				ws.append((wmax/4, 0, wmax))
+				ws.append((0, 0, wmax))
 
 			p0 = []
 			bounds = [[], []]
@@ -5459,7 +5637,7 @@ class BlendedLinesWindow(EQDockWidget):
 			notify_error.emit(message)
 			raise GUIAbortedError(message)
 		
-		new_assignment = {'x': x, 'error': lwpax.fit_determine_uncert(x, error), 'xpre': lwpax.ref_position}
+		new_assignment = {'x': x, 'error': lwpax.fit_determine_uncert(lwpax.ref_position, x, error), 'xpre': lwpax.ref_position}
 		new_assignment.update(lwpax.create_qns_dict(complete=True))
 		new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
 		
@@ -5476,7 +5654,7 @@ class BlendedLinesWindow(EQDockWidget):
 			notify_error.emit(message)
 			raise GUIAbortedError(message)
 		
-		new_assignment = {'x': x, 'error': lwpax.fit_determine_uncert(x, error), 'xpre': lwpax.ref_position}
+		new_assignment = {'x': x, 'error': lwpax.fit_determine_uncert(lwpax.ref_position, x, error), 'xpre': lwpax.ref_position}
 		new_assignment.update(lwpax.create_qns_dict(complete=True))
 		new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
 		
@@ -6363,12 +6541,16 @@ def fit_polynom_multirank(xs, ys, peakdirection, fit_xs, maxrank):
 	xuncert = 0
 	return(xmiddle, xuncert, fit_xs, fit_ys)
 
-def fit_lineshape(xs, ys, peakdirection, fit_xs, profilname, derivative, offset):
+def fit_lineshape(xs, ys, peakdirection, fit_xs, profilname, derivative, offset, **kwargs):
 	xmin, xmax = xs.min(), xs.max()
-	x0, w0 = (xmin + xmax) / 2, (xmax - xmin)
+	x0 = (xmin + xmax) / 2
 	ymin, ymax, ymean, yptp = ys.min(), ys.max(), ys.mean(), np.ptp(ys)
 	y0 = 0
-
+	
+	w0 = kwargs.get('w0', (xmax - xmin) / 10 )
+	wmin = kwargs.get('wmin', 0)
+	wmax = kwargs.get('wmax', (xmax - xmin) )
+	
 	amp_min, amp_max = -3*yptp, 3*yptp
 	if peakdirection < 0:
 		amp_max = 0
@@ -6378,7 +6560,7 @@ def fit_lineshape(xs, ys, peakdirection, fit_xs, profilname, derivative, offset)
 		y0 = yptp
 
 	p0 = [x0, y0, w0] if profilname != 'Voigt' else [x0, y0, w0, w0]
-	bounds = [[xmin, amp_min, 0], [xmax, amp_max, 10*w0]] if profilname != 'Voigt' else [[xmin, amp_min, 0, 0], [xmax, amp_max, 10*w0, 10*w0]]
+	bounds = [[xmin, amp_min, wmin], [xmax, amp_max, wmax]] if profilname != 'Voigt' else [[xmin, amp_min, wmin, wmin], [xmax, amp_max, wmax, wmax]]
 	function = lambda *x: lineshape(profilname, derivative, *x)
 
 	if offset:
@@ -6399,6 +6581,27 @@ def fit_lineshape(xs, ys, peakdirection, fit_xs, profilname, derivative, offset)
 
 	return(xmiddle, xuncert, fit_xs, fit_ys)
 
+def get_fitfunction(fitmethod, offset=False, **kwargs):
+	fit_function = {
+		'Pgopher': fit_pgopher,
+		'Polynom': lambda *args: fit_polynom(*args, config['fit_polynomrank']),
+		'MultiPolynom': lambda *args: fit_polynom_multirank(*args, config['fit_polynommaxrank']),
+	}.get(fitmethod)
+	
+	if not fit_function:
+		profilname, derivative = {
+			'Gauss':					('Gauss', 0),
+			'Lorentz':					('Lorentz', 0),
+			'Voigt':					('Voigt', 0),
+			'Gauss 1st Derivative':		('Gauss', 1),
+			'Lorentz 1st Derivative':	('Lorentz', 1),
+			'Voigt 1st Derivative':		('Voigt', 1),
+			'Gauss 2nd Derivative':		('Gauss', 2),
+			'Lorentz 2nd Derivative':	('Lorentz', 2),
+			'Voigt 2nd Derivative':		('Voigt', 2),
+		}[fitmethod]
+		fit_function = lambda *args, kwargs=kwargs: fit_lineshape(*args, profilname, derivative, offset, **kwargs)
+	return(fit_function)
 
 def addemptyrow_inplace(df, model=None):
 	df.reset_index(drop=True, inplace=True)
@@ -6664,18 +6867,17 @@ def except_hook(cls, exception, traceback):
 	except Exception as E:
 		pass
 
-
 def get_all_subclasses(cls):
-    all_subclasses = []
-    for subclass in cls.__subclasses__():
-        all_subclasses.append(subclass)
-        all_subclasses.extend(get_all_subclasses(subclass))
-    return all_subclasses
+	all_subclasses = []
+	for subclass in cls.__subclasses__():
+		all_subclasses.append(subclass)
+		all_subclasses.extend(get_all_subclasses(subclass))
+	return all_subclasses
 
 
 
 
-#################################################################################
+# ASAP
 class LevelSelector(SeriesSelector):
 	values_changed = pyqtSignal()
 
@@ -6998,7 +7200,7 @@ class ASAPAx(LWPAx):
 		
 		else:
 			# Fit the data
-			xmiddle, xuncert, fit_xs, fit_ys = self.fit_peak(xmin, xmax)			
+			xmiddle, xuncert, fit_xs, fit_ys = self.fit_peak(xmin, xmax)
 			self.__class__.fit_curve = self.ax.plot(fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1)[0]
 		
 		# Highlight fit in plot
@@ -7019,7 +7221,7 @@ class ASAPAx(LWPAx):
 		if egy_val == 0:
 			notify_warning.emit('No corresponding energy level found! Please check if an energy file is loaded.')
 
-		error = self.fit_determine_uncert(xmiddle, xuncert)
+		error = self.fit_determine_uncert(self.ref_position, xmiddle, xuncert)
 		xmiddle += egy_val
 
 		error = min(0.0001, -abs(error))
@@ -7048,28 +7250,8 @@ class ASAPAx(LWPAx):
 			raise GUIAbortedError('The data could not be fit as there were too few points selected.')
 
 		try:
-			function_to_call = {
-				'Pgopher': fit_pgopher,
-				'Polynom': lambda *args: fit_polynom(*args, config['fit_polynomrank']),
-				'MultiPolynom': lambda *args: fit_polynom_multirank(*args, config['fit_polynommaxrank']),
-			}.get(fitmethod)
-			
-			if not function_to_call:
-				offset = config['fit_offset']
-				profilname, derivative = {
-					'Gauss':					('Gauss', 0),
-					'Lorentz':					('Lorentz', 0),
-					'Voigt':					('Voigt', 0),
-					'Gauss 1st Derivative':		('Gauss', 1),
-					'Lorentz 1st Derivative':	('Lorentz', 1),
-					'Voigt 1st Derivative':		('Voigt', 1),
-					'Gauss 2nd Derivative':		('Gauss', 2),
-					'Lorentz 2nd Derivative':	('Lorentz', 2),
-					'Voigt 2nd Derivative':		('Voigt', 2),
-				}[fitmethod]
-				function_to_call = lambda *args: fit_lineshape(*args, profilname, derivative, offset)
-
-			xmiddle, xuncert, fit_xs, fit_ys = function_to_call(exp_xs, exp_ys, peakdirection, fit_xs)
+			fit_function = get_fitfunction(fitmethod, config['fit_offset'])
+			xmiddle, xuncert, fit_xs, fit_ys = fit_function(exp_xs, exp_ys, peakdirection, fit_xs)
 
 		except Exception as E:
 			self.fitcurve = None
@@ -7147,9 +7329,7 @@ class ASAPWidget(LWPWidget):
 			conditions.append(" == ".join(conditions_incr))
 		
 		conditions = " and ".join(conditions)
-		
-		with CatFile.lock:
-			entries = CatFile.df.query(conditions).copy()
+		entries = CatFile.query_c(conditions)
 		
 		if config['asap_catunitconversionfactor']:
 			entries['x'] *= config['asap_catunitconversionfactor']
@@ -7560,7 +7740,7 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 		row_i += 1
 
 		tmp_layout.addWidget(QQ(QLabel, text='Only keep latest results: '), row_i, 0)
-		tmp_layout.addWidget(QQ(QCheckBox, 'flag_deleteduplicatesinnewassignments'), row_i, 1)
+		tmp_layout.addWidget(QQ(QCheckBox, 'flag_keeponlylastassignment'), row_i, 1)
 		
 		tmp_layout.setRowStretch(row_i + 1, 1)
 
@@ -7607,9 +7787,6 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 			self.check_order()
 
 
-#################################################################################
-
-
 
 
 ##
@@ -7650,11 +7827,13 @@ def start_lasap():
 if __name__ == '__main__':
 	# start_lasap()
 	start_llwp()
-	
+
 
 ##
 ## To Do
 ##
+
+# @Luis: Should we also cache the xs to indices functions?
 
 # - Hotkey to change series selector in specific way (+Ka, -Kc)
 # - Auto detect format of .lin file
