@@ -1555,6 +1555,8 @@ class File():
 			self.__class__.df = df.drop(mask)
 			del self.ids[self.filename_abs]
 		
+		self.clear_caches()
+		
 		del self
 	
 class CatFile(File):
@@ -4860,6 +4862,8 @@ class NewAssignmentsWindow(EQDockWidget):
 			df.drop(selected, inplace=True)
 
 		df.reset_index(inplace=True, drop=True)
+		self.clear_caches()
+		
 		self.model.update()
 		self.new_assignments.load_file()
 		mainwindow.lwpwidget.set_data()
@@ -7981,8 +7985,8 @@ def start_lasap():
 	LASAP()
 
 if __name__ == '__main__':
-	start_lasap()
-	# start_llwp()
+	# start_lasap()
+	start_llwp()
 
 
 ##
