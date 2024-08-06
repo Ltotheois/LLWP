@@ -375,7 +375,7 @@ class Config(dict):
 		if not isinstance(keys, (tuple, list)):
 			keys = [keys]
 		for key in keys:
-			# id is only needed for callback tied to widgets -> al here
+			# id is only needed for callback tied to widgets
 			id = 0
 			df = self.callbacks
 			df.loc[len(df), ["id", "key", "function"]] = id, key, function
@@ -990,6 +990,20 @@ class QDialog(QDialog):
 ##
 ## File claasses
 ##
+
+class SpecialFilesHandler():
+	@classmethod
+	def save_files(cls, dict_):
+		return(dict_)
+	
+	@classmethod
+	def load_files(cls, dict_):
+		return(dict_)
+	
+	@classmethod
+	def sort_files_by_type(cls, files):
+		return(files)
+
 class File():
 	ids = {}
 	lock = threading.RLock()
@@ -998,6 +1012,7 @@ class File():
 	has_y_data = True
 
 	yrange = [0, 0]
+	special_file_handler = SpecialFilesHandler()
 
 	additional_dtypes = {
 		'x0': np.float64,
@@ -1157,9 +1172,7 @@ class File():
 			tmp = [instance.to_dict() for instance in subclass.ids.values() if not isinstance(instance, NewAssignments)] 
 			dict_[subclass.__name__] = tmp
 		
-		# @Luis: Refactor this
-		if APP_TAG == 'LASAP' and ASAPAx.egy_filename is not None:
-			dict_['.egy'] = ASAPAx.egy_filename
+		dict_ = cls.special_file_handler.save_files(dict_)
 
 		with open(filename, 'w+') as file:
 			json.dump(dict_, file, indent=4)
@@ -1180,10 +1193,7 @@ class File():
 		with open(filename, 'r') as file:
 			dict_ = json.load(file)
 		
-		# @Luis: Refactor this
-		if APP_TAG == 'LASAP' and '.egy' in dict_:
-			egy_filename = dict_.pop('.egy')
-			ASAPAx.load_egy_file(egy_filename)
+		dict_ = cls.special_file_handler.load_files(dict_)
 
 		label_to_class = {subclass.__name__: subclass for subclass in cls.__subclasses__()}
 		threads = []
@@ -1243,13 +1253,9 @@ class File():
 				cls.yrange = tmp.min(), tmp.max()
 		mainwindow.lwpwidget.set_data()
 
-	@staticmethod
-	def handle_special_file_types(files):
-		return(files)
-
-	@staticmethod
-	def sort_files_by_type(files):
-		files = File.handle_special_file_types(files)
+	@classmethod
+	def sort_files_by_type(cls, files):
+		files = cls.special_file_handler.sort_files_by_type(files)
 		types = config['flag_extensions']
 		files_by_type = {key: [] for key in list(types.keys())}
 
@@ -2837,7 +2843,8 @@ class MainWindow(QMainWindow):
 			"Shift+s": lambda: WidthDialog.gui_set_width("-"),
 			"Shift+a": lambda: OffsetDialog.gui_set_offset("-"),
 			"Shift+d": lambda: OffsetDialog.gui_set_offset("+"),
-
+			
+			"Ctrl+Space": lambda: AssignAllDialog.show_dialog(),
 			"Ctrl+Shift+k": lambda: ConsoleDialog.run_current_command(),
 			"F11": lambda: self.togglefullscreen(),
 		}
@@ -3579,7 +3586,10 @@ class AssignAllDialog(QDialog):
 	_instance = None
 
 	@classmethod
-	def show_dialog(cls, i_col):
+	def show_dialog(cls, i_col=None):
+		if i_col is None:
+			i_col = mainwindow.lwpwidget._active_ax_index[1]
+		
 		dialog = cls(i_col)
 		dialog.show()
 
@@ -3623,13 +3633,13 @@ class AssignAllDialog(QDialog):
 		offsets = {}
 		pred_egy = {}
 		for i_row, qnus in enumerate(qns):
+			if qnus is None:
+				continue
+			
 			eqy_query = ' and '.join([f'(qn{i+1} == {qn})' for i, qn in enumerate(qnus)])
 			egy_offsets = ASAPAx.egy_df.query(eqy_query)['egy'].to_numpy()
 			if len(egy_offsets) == 1:
 				pred_egy[i_row] = egy_offsets[0]
-			
-			if qnus is None:
-				continue
 			
 			query = ' and '.join([f'(qnu{i+1} == {qn}) and (qnl{i+1} == 0)' for i, qn in enumerate(qnus)])
 			vals = LinFile.query_c(query)['x'].to_numpy()
@@ -6998,6 +7008,39 @@ def get_all_subclasses(cls):
 
 
 # ASAP
+class SpecialFilesHandlerASAP():
+	@classmethod
+	def save_files(cls, dict_):
+		if ASAPAx.egy_filename is not None:
+			dict_['.egy'] = ASAPAx.egy_filename
+		return(dict_)
+	
+	@classmethod
+	def load_files(cls, dict_):
+		if '.egy' in dict_:
+			egy_filename = dict_.pop('.egy')
+			ASAPAx.load_egy_file(egy_filename)
+		return(dict_)
+	
+	@classmethod
+	def sort_files_by_type(cls, files):
+		egy_files = []
+		other_files = []
+
+		for file in files:
+			is_egy_file = (os.path.splitext(file)[1] == '.egy')
+
+			if is_egy_file:
+				egy_files.append(file)
+			else:
+				other_files.append(file)
+		
+		if len(egy_files) > 1:
+			notify_warning.emit('Only a single *.egy file can be loaded at the same time.')
+		elif len(egy_files) == 1:
+			ASAPAx.load_egy_file(egy_files[0])
+		return(other_files)
+
 class LevelSelector(SeriesSelector):
 	values_changed = pyqtSignal()
 
@@ -7930,26 +7973,7 @@ def start_llwp():
 	LLWP()
 
 def start_lasap():
-
-	def handle_special_file_types(files):
-		egy_files = []
-		other_files = []
-
-		for file in files:
-			is_egy_file = (os.path.splitext(file)[1] == '.egy')
-
-			if is_egy_file:
-				egy_files.append(file)
-			else:
-				other_files.append(file)
-		
-		if len(egy_files) > 1:
-			notify_warning.emit('Only a single *.egy file can be loaded at the same time.')
-		elif len(egy_files) == 1:
-			ASAPAx.load_egy_file(egy_files[0])
-		return(other_files)
-
-	File.handle_special_file_types = handle_special_file_types
+	File.special_file_handler = SpecialFilesHandlerASAP()
 	AssignAllDialog.update_gui = AssignAllDialog.update_gui_asap
 
 	global APP_TAG
@@ -7965,9 +7989,6 @@ if __name__ == '__main__':
 ## To Do
 ##
 
-# @Luis: Should we also cache the xs to indices functions?
-# @Luis: Shortcut to assign all for currently selected column
-
 # - Hotkey to change series selector in specific way (+Ka, -Kc)
 # - Auto detect format of .lin file
 
@@ -7976,7 +7997,6 @@ if __name__ == '__main__':
 	# - SpectraResolverWindow
 	# - CalibrateSpectrumWindow
 
-# - Think about mechanism to group setting_data calls in beginning/ or just skip drawing and draw once everything is set up
 
 # - Files: allow to open files by glob string -> no annoying stuff with subfolders
 # - Files: maybe also custom transformations -> change some quantum numbers if needed
