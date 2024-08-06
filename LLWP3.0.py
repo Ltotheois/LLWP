@@ -2606,6 +2606,7 @@ class LWPWidget(QGroupBox):
 		get_position_action = menu.addAction('Copy Reference Position')
 		get_qns_action = menu.addAction('Copy QNs')
 		set_active_action = menu.addAction('Make active Ax')
+		fit_all_action = menu.addAction('Fit all')
 
 		action = menu.exec(self.mapToGlobal(event.pos()))
 		if action == get_position_action:
@@ -2620,6 +2621,9 @@ class LWPWidget(QGroupBox):
 			QApplication.clipboard().setText(output_string)
 		elif action == set_active_action:
 			mainwindow.lwpwidget._active_ax_index = (lwpax.row_i, lwpax.col_i)
+		elif action == fit_all_action:
+			i_col = lwpax.col_i
+			AssignAllDialog.show_dialog(i_col)
 
 class Menu():
 	def __init__(self, parent, *args, **kwargs):
@@ -3032,9 +3036,7 @@ class NotificationsBox(QScrollArea):
 
 class LLWP(QApplication):
 	configsignal = pyqtSignal(tuple)
-	
-	def get_main_window_class(self):
-		return(MainWindow)
+	mainwindow_class = MainWindow
 	
 	def __init__(self, *args, **kwargs):
 		sys.excepthook = except_hook
@@ -3057,8 +3059,7 @@ class LLWP(QApplication):
 
 		with config:
 			global mainwindow
-			mainwindow_class = self.get_main_window_class()
-			mainwindow = mainwindow_class(self)
+			mainwindow = self.mainwindow_class(self)
 			mainwindow.create_gui_components()
 
 			if len(sys.argv) > 1:
@@ -3573,17 +3574,19 @@ class QNsDialog(QDialog):
 		return(self.result_)
 
 class AssignAllDialog(QDialog):
+	drawplot = pyqtSignal()
+	
 	_instance = None
 
 	@classmethod
-	def show_dialog(cls, reference_selector):
-		dialog = cls(reference_selector)
+	def show_dialog(cls, i_col):
+		dialog = cls(i_col)
 		dialog.show()
 
-	def __init__(self, reference_selector):
+	def __init__(self, i_col):
 		super().__init__()
 		self.setModal(False)
-		self.reference_selector = reference_selector
+		self.i_col = i_col
 		
 		self.setWindowTitle("Assign All")
 
@@ -3594,9 +3597,10 @@ class AssignAllDialog(QDialog):
 		
 
 		self.init_gui()
+		self.drawplot.connect(self.plot_canvas.draw_idle)
 		self.update_gui()
 
-	def update_gui(self):
+	def update_gui_asap(self):
 		n_rows = config['plot_rows']
 		n_qns = self.noq = config['series_qns']
 		
@@ -3608,7 +3612,124 @@ class AssignAllDialog(QDialog):
 		fitmethod = config['fit_fitmethod']
 		offset = config['fit_offset']
 		
-		positions, qns = self.reference_selector.calc_references(n_rows, n_qns)
+		asap_axes = mainwindow.lwpwidget.lwpaxes[:, self.i_col]
+		qn_labels = [f'qn{ul}{i+1}' for ul in ('u', 'l') for i in range(n_qns)]
+		positions = np.zeros(asap_axes.shape)
+		qns = []
+		for asap_ax in asap_axes:
+			qns.append(asap_ax.qns)
+
+		# Find already assigned transitions of series
+		offsets = {}
+		pred_egy = {}
+		for i_row, qnus in enumerate(qns):
+			eqy_query = ' and '.join([f'(qn{i+1} == {qn})' for i, qn in enumerate(qnus)])
+			egy_offsets = ASAPAx.egy_df.query(eqy_query)['egy'].to_numpy()
+			if len(egy_offsets) == 1:
+				pred_egy[i_row] = egy_offsets[0]
+			
+			if qnus is None:
+				continue
+			
+			query = ' and '.join([f'(qnu{i+1} == {qn}) and (qnl{i+1} == 0)' for i, qn in enumerate(qnus)])
+			vals = LinFile.query_c(query)['x'].to_numpy()
+			
+			if len(vals) == 0:
+				continue
+			
+			if len(vals) > 1:
+				qnsstring = ','.join(map(str, qnus))
+				notify_warning.emit(f'Multiple assignments for level {qnsstring} found. Did not use it as reference.')
+				continue
+			
+			offsets[i_row] = vals[0] - pred_egy.get(i_row, 0)
+		
+		if len(offsets) < 1:
+			msg = 'Please assign at least a single transition of the series (two subsequent would be great).'
+			notify_info.emit(msg)
+			raise GUIAbortedError(msg)
+		
+		# Create new assignments
+		for ax in self.fig.get_axes():
+			self.fig.delaxes(ax)
+		axs = self.fig.subplots(n_rows, sharex=True, gridspec_kw={'hspace': 0, 'wspace': 0})
+		axs = axs[::-1]
+		
+		self.new_assignments = {}
+		for i_row, (xref, qnus, ax) in enumerate(zip(positions, qns, axs)):
+			already_assigned = (i_row in offsets)
+			
+			if already_assigned:
+				xpre = xref + offsets[i_row]
+			else:
+				offset_values = np.array([[key, value] for key, value in offsets.items()])
+				degree = min(len(offset_values) - 1, max_pol_degree)
+
+				pred_pol = np.polyfit(*offset_values.T, degree)
+				pred_offset = np.polyval(pred_pol, i_row)
+			
+				xpre = xref + pred_offset
+			
+			xmin, xmax = xpre - fit_width/2, xpre + fit_width/2
+			
+			asap_ax = asap_axes[i_row]
+			corr_xs, corr_ys = asap_ax.corr_xs, asap_ax.corr_ys
+			
+			if corr_xs is None or corr_ys is None:
+				continue
+			
+			minindex = corr_xs.searchsorted(xmin, side="left")
+			maxindex = corr_xs.searchsorted(xmax, side="right")
+			
+			exp_xs, exp_ys = corr_xs[minindex:maxindex], corr_ys[minindex:maxindex]
+			
+			ax.plot(exp_xs, exp_ys, color=config['color_exp'])
+			ax.xaxis.set_visible(False)
+			ax.yaxis.set_visible(False)
+			ax.margins(y=config['plot_ymargin'])
+			
+			if already_assigned or len(exp_xs) == 0:
+				continue
+			
+			kwargs = {'wmax': max_fwhm}
+			fit_xs = np.linspace(xmin, xmax, 1000)
+			fit_function = get_fitfunction(fitmethod, offset, kwargs=kwargs)
+
+			try:
+				xmiddle, xuncert, fit_xs, fit_ys = fit_function(exp_xs, exp_ys, peakdirection, fit_xs, )
+			except Exception as E:
+				notify_warning.emit(f'Error when trying to fit row {i_row}. Error reads \'{E}\'.')
+				continue
+			
+			offsets[i_row] = xmiddle - xref
+			row_qns = np.array((qnus, np.zeros_like(qnus)))
+			self.new_assignments[i_row] = {'xmiddle': xmiddle, 'xuncert': xuncert, 'row_qns': row_qns, 'xref': xref, 'pred_egy': pred_egy.get(i_row, 0)}
+			
+			ax.plot(fit_xs - xref, fit_ys, color=config['color_fit'], lw=2, alpha=0.5)
+			ax.axvline(xmiddle - xref, zorder=10, color=config['color_fit'])
+		
+		ax = axs[0]
+		ax.xaxis.set_visible(True)
+		ax.margins(x=0)
+		
+		self.drawplot.emit()
+	
+	def update_gui_llwp(self):
+		n_rows = config['plot_rows']
+		n_qns = self.noq = config['series_qns']
+		
+		fit_width = config['assignall_fitwidth']
+		max_fwhm = config['assignall_maxfwhm']
+		max_pol_degree = config['assignall_maxdegree']
+		
+		peakdirection = config['fit_peakdirection']
+		fitmethod = config['fit_fitmethod']
+		offset = config['fit_offset']
+		
+		tab_widget = ReferenceSeriesWindow._instance.tab
+		refwidget = tab_widget.widget(self.i_col)
+		
+		positions, qns = refwidget.calc_references(n_rows, n_qns)
 		qn_labels = [f'qn{ul}{i+1}' for ul in ('u', 'l') for i in range(n_qns)]
 		
 		# Find already assigned transitions of series
@@ -3628,7 +3749,6 @@ class AssignAllDialog(QDialog):
 			
 			offsets[i_row] = vals[0] - ref_pos
 		
-		# @Luis: Maybe check here that at least 2 are assigned; Or allow to assign by hand
 		if len(offsets) < 1:
 			msg = 'Please assign at least a single transition of the series (two subsequent would be great).'
 			notify_info.emit(msg)
@@ -3636,10 +3756,10 @@ class AssignAllDialog(QDialog):
 		
 		
 		# Create new assignments
+		for ax in self.fig.get_axes():
+			self.fig.delaxes(ax)
 		axs = self.fig.subplots(n_rows, sharex=True, gridspec_kw={'hspace': 0, 'wspace': 0})
 		axs = axs[::-1]
-		
-		exp = ExpFile.get_data().copy()
 		
 		self.new_assignments = {}
 		for i_row, (xref, row_qns, ax) in enumerate(zip(positions, qns, axs)):
@@ -3657,11 +3777,7 @@ class AssignAllDialog(QDialog):
 				xpre = xref + pred_offset
 			
 			xmin, xmax = xpre - fit_width/2, xpre + fit_width/2
-			
-			minindex = exp["x"].searchsorted(xmin, side="left")
-			maxindex = exp["x"].searchsorted(xmax, side="right")
-			
-			df = exp.iloc[minindex: maxindex]
+			df = ExpFile.get_data(xrange=(xmin, xmax)).copy()
 			exp_xs, exp_ys = df['x'].to_numpy(), df['y'].to_numpy()
 			
 			ax.plot(exp_xs - xref, exp_ys, color=config['color_exp'])
@@ -3683,16 +3799,19 @@ class AssignAllDialog(QDialog):
 				continue
 			
 			offsets[i_row] = xmiddle - xref
-			self.new_assignments[i_row] = (xmiddle, xuncert, fit_xs, fit_ys, row_qns, xref)
+			self.new_assignments[i_row] = {'xmiddle': xmiddle, 'xuncert': xuncert, 'row_qns': row_qns, 'xref': xref}
 			
 			ax.plot(fit_xs - xref, fit_ys, color=config['color_fit'], lw=2, alpha=0.5)
 			ax.axvline(xmiddle - xref, zorder=10, color=config['color_fit'])
 		
-		ax = axs[-1]
+		ax = axs[0]
 		ax.xaxis.set_visible(True)
 		ax.margins(x=0)
 		
-		self.fig.canvas.draw_idle()
+		self.drawplot.emit()
+
+	def update_gui(self):
+		self.update_gui_llwp()
 
 	def init_gui(self):
 		layout = QVBoxLayout(margin=True)
@@ -3719,7 +3838,7 @@ class AssignAllDialog(QDialog):
 
 		i_row += 1
 
-		grid_layout.addWidget(QQ(QLabel, text='Max Pol Degree}: '), i_row, 0)
+		grid_layout.addWidget(QQ(QLabel, text='Max Pol Degree: '), i_row, 0)
 		grid_layout.addWidget(QQ(QSpinBox, 'assignall_maxdegree', range=(0, None)), i_row, 1)
 
 		layout.addLayout(grid_layout)
@@ -3740,10 +3859,10 @@ class AssignAllDialog(QDialog):
 		xs = []
 		qns = []
 		errors = []
-		for i_row, (xmiddle, xuncert, fit_xs, fit_ys, row_qns, xref) in self.new_assignments.items():
-			xs.append(xmiddle)
-			errors.append(LWPAx.fit_determine_uncert(xref, xmiddle, xuncert))
-			qns.append(row_qns)
+		for i_row, assignment in self.new_assignments.items():
+			xs.append(assignment['xmiddle'] + assignment.get('pred_egy', 0))
+			errors.append(LWPAx.fit_determine_uncert(assignment['xref'], assignment['xmiddle'], assignment['xuncert']))
+			qns.append(assignment['row_qns'])
 
 		qns = np.array(qns)
 
@@ -4246,7 +4365,8 @@ class ReferenceSelector(QTabWidget):
 			output_string = '\n'.join(output_string)
 			QApplication.clipboard().setText(output_string)
 		elif action == fit_all_action:
-			AssignAllDialog.show_dialog(self)
+			i_col = self.parent.tab.indexOf(self)
+			AssignAllDialog.show_dialog(i_col)
 
 class SeriesSelector(QWidget):
 	values_changed = pyqtSignal()
@@ -5393,7 +5513,7 @@ class BlendedLinesWindow(EQDockWidget):
 		xwidth = xmax - xmin
 		xcenter = (xmin + xmax) / 2
 
-		df_exp = ExpFile.get_data(xrange=xrange)
+		df_exp = ExpFile.get_data(xrange=xrange).copy()
 		exp_xs = df_exp["x"].to_numpy()
 		exp_ys = df_exp["y"].to_numpy()
 
@@ -5863,7 +5983,7 @@ class SeriesfinderWindow(EQDockWidget):
 			condition.append(" or ".join(tmp_condition))
 		condition = " and ".join([f"({x})" for x  in condition])
 
-		tmp_cat_df = CatFile.get_data()
+		tmp_cat_df = CatFile.get_data().copy()
 
 		if condition:
 			try:
@@ -5878,7 +5998,7 @@ class SeriesfinderWindow(EQDockWidget):
 		qns_invisible = [f"qn{ul}{n+1}" for ul in ("u", "l") for n in range(noq, N_QNS)]
 
 		if config["seriesfinder_onlyunassigned"]:
-			tmp_lin_df = LinFile.get_data()
+			tmp_lin_df = LinFile.get_data().copy()
 			tmp_lin_df["DROP"] = True
 			tmp_lin_df.drop(columns=["x"]+qns_invisible, inplace=True)
 
@@ -7060,17 +7180,6 @@ class ASAPAx(LWPAx):
 
 		self.exp_coll.set(segments=segs, color=config['color_exp'])
 
-	# @status_d
-	@QThread.threaded_d
-	@drawplot_decorator.d
-	def update_correlation_plots(self, thread=None):
-		ax = self.ax
-		tot_xs, tot_ys = self.corr_xs, self.corr_ys
-		self.vals_to_coll(tot_xs, tot_ys)
-
-		thread_ = self.update()
-		thread_.wait()
-		
 
 	# @status_d
 	@QThread.threaded_d
@@ -7094,7 +7203,7 @@ class ASAPAx(LWPAx):
 
 			tot_xs = tot_xs[min_index:max_index]
 			tot_ys = tot_ys[min_index:max_index]
-
+		
 		self.vals_to_coll(tot_xs, tot_ys)
 
 		if tot_ys is not None and len(tot_ys):
@@ -7103,7 +7212,7 @@ class ASAPAx(LWPAx):
 
 		yrange = (yrange[0]-margin*(yrange[1]-yrange[0]), yrange[1]+margin*(yrange[1]-yrange[0]))
 		if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
-			yrange = (-1,+1)
+			yrange = (-2,+2)
 
 		ax.set_ylim(yrange)
 		self.update_annotation()
@@ -7221,7 +7330,7 @@ class ASAPAx(LWPAx):
 		if egy_val == 0:
 			notify_warning.emit('No corresponding energy level found! Please check if an energy file is loaded.')
 
-		error = self.fit_determine_uncert(self.ref_position, xmiddle, xuncert)
+		error = self.fit_determine_uncert(0, xmiddle, xuncert)
 		xmiddle += egy_val
 
 		error = min(0.0001, -abs(error))
@@ -7279,236 +7388,6 @@ class ASAPAx(LWPAx):
 			ASAPSettingsWindow._instance.egy_file_button.setText(basename)
 		
 		notify_info.emit(f'Successfully loaded the energy file \'{basename}\'.')
-		
-class LASAP(LLWP):
-	def get_main_window_class(self):
-		return(LASAPMainWindow)
-
-	def debug_setup(self):
-		pass
-
-class ASAPWidget(LWPWidget):
-	_ax_class = ASAPAx
-	peak_fitted = pyqtSignal(ASAPAx, float)
-
-
-	def __init__(self, *args, **kwargs):
-		super().__init__(*args, **kwargs)
-		
-		elem = QQ(QLabel, text='    Offset: ', visible=config['isvisible_controlswidth'])
-		config.register("isvisible_controlswidth", lambda elem=elem: elem.setVisible(config["isvisible_controlswidth"]))
-		self.toplayout.addWidget(elem)
-		
-		elem = QQ(QDoubleSpinBox, 'plot_offset', range=(None, None), minWidth=85, visible=config['isvisible_controlswidth'])
-		config.register("isvisible_controlswidth", lambda elem=elem: elem.setVisible(config["isvisible_controlswidth"]))
-		self.toplayout.addWidget(elem)
-
-
-	def prefilter_correlation_plot_entries(self, state, n_rows, n_qns, offset, width):
-		qns = state['qns'][:n_qns]
-		diffs = (state['diff'] if state['use_diff'] else state['incr'])[:n_qns]
-
-		qns = np.array(qns)
-		diffs = np.array(diffs)
-
-		# Prefilter df to all transitins belonging to series
-		conditions, conditions_incr = ['(visible)'], []
-		normalizing_value = None
-		ul = 'u' if state['is_upper_state'] else 'l'
-		
-		for i, qn, diff in zip(range(n_qns), qns, diffs):
-			diff = int(diff)
-			if diff:
-				if normalizing_value is None:
-					normalizing_value = qn // diff
-				conditions_incr.append(f"((qn{ul}{i+1} - {qn-normalizing_value*diff})/{diff})")
-			else:
-				conditions.append(f"(qn{ul}{i+1} == {qn})")
-
-		if len(conditions_incr):
-			conditions.append(" == ".join(conditions_incr))
-		
-		conditions = " and ".join(conditions)
-		entries = CatFile.query_c(conditions)
-		
-		if config['asap_catunitconversionfactor']:
-			entries['x'] *= config['asap_catunitconversionfactor']
-
-		if config['asap_query']:
-			entries['use_for_cross_correlation'] = entries.eval(config['asap_query'])
-		else:
-			entries['use_for_cross_correlation'] = True
-
-		entries['xmin'] = entries['x'] + offset - width/2
-		entries['xmax'] = entries['xmin'] + width
-		entries['min_index'], entries['max_index'] = ExpFile.xs_to_indices(entries['xmin'], entries['xmax'])
-
-		return(entries, qns, diffs, ul)
-
-	def calc_correlation_plot(self, row_qns, row_entries, offset, width, resolution):
-		transitions = row_entries[row_entries['use_for_cross_correlation']]
-
-		ref_xs = transitions['x']
-		ref_ys = transitions['y']
-
-		min_indices, max_indices = transitions['min_index'], transitions['max_index']
-
-		xmin, xmax = offset - width/2, offset + width/2
-		tot_xs = np.arange(xmin, xmax + resolution, resolution)
-		tot_ys = np.ones_like(tot_xs)
-
-		exp_len = len(ExpFile.df)
-		n_correlated_transitions = 0
-		use_weights = config['asap_weighted']
-
-		minimum_intensity = np.log10(ref_ys.min())
-
-		for min_index, max_index, ref_pos, ref_int in zip(min_indices, max_indices, ref_xs, ref_ys):
-			min_index = max(0, min_index-1)
-			max_index = min(exp_len, max_index+1)
-
-			dataframe = ExpFile.df.iloc[min_index:max_index].copy()
-			dataframe = dataframe[dataframe['visible']]
-
-			if not len(dataframe):
-				continue
-			
-			xs = dataframe['x']
-			ys = dataframe['y']
-
-			interp_ys = np.interp(tot_xs, xs-ref_pos, ys, left=1, right=1)		
-
-			# @Luis: Check this
-			# Christian uses the minimal intensity from query as the minimum_intensity
-			if use_weights:
-				power = np.log10(ref_int) - minimum_intensity + 1
-				interp_ys = np.power(np.abs(interp_ys), power)
-				
-			tot_ys *= interp_ys
-			n_correlated_transitions += 1
-
-		if n_correlated_transitions < 2:
-			tot_xs = tot_ys = np.array([])
-			
-		# @Luis: Think about offering options to normalize spectrum here
-
-		return(tot_xs, tot_ys)
-
-
-	@QThread.threaded_d
-	@status_d
-	@drawplot_decorator.d
-	def calc_correlation_plots(self, thread=None):
-		if not hasattr(ASAPSettingsWindow, '_instance'):
-			return
-		if not hasattr(ASAPSettingsWindow._instance, 'tab'):
-			return
-
-		n_rows = config['plot_rows']
-		n_cols = config['plot_cols']
-		n_qns = config['series_qns']
-
-		thread.earlyreturn()
-
-		# Calculate positions and qns for each column
-		tab_widget = ASAPSettingsWindow._instance.tab
-		n_widgets = tab_widget.count()
-
-		offset = config['plot_offset']
-		width = config['plot_width']
-		resolution = config['asap_resolution']
-
-		threads = []
-		with matplotlib_lock:
-			if self.lwpaxes.shape != (n_rows, n_cols):
-				notify_error.emit('Shape of LWPAxes is out of sync with requested values.')
-				return
-
-			for i_col in range(n_widgets):
-				thread.earlyreturn()
-				if i_col > n_cols:
-					continue
-
-				refwidget = tab_widget.widget(i_col)
-				state = refwidget.state
-				
-				entries, qns, diffs, ul = self.prefilter_correlation_plot_entries(state, n_rows, n_qns, offset, width)
-				
-				thread.earlyreturn()
-
-				# Get the specific entries for each ax 
-				for i_row in range(n_rows):
-					row_qns = qns + i_row * diffs
-					cond = [f"(qn{ul}{i+1} == {qn})" for i, qn in enumerate(row_qns)]
-					condition  = " & ".join(cond)
-					row_entries_all = entries.query(condition)
-					row_entries = row_entries_all[row_entries_all['use_for_cross_correlation']]
-					
-					corr_xs, corr_ys = self.calc_correlation_plot(row_qns, row_entries, offset, width, resolution)
-					
-					ax = self.lwpaxes[i_row, i_col]
-					ax.entries = row_entries_all
-					ax.corr_xs = corr_xs
-					ax.corr_ys = corr_ys
-					ax.qns = row_qns
-					threads.append(ax.update_correlation_plots())
-				
-					thread.earlyreturn()
-
-			# Edge cases of no reference tabs and too few tabs
-			for i_col in range(n_widgets, n_cols):
-				for i_row in range(n_rows):
-					ax = self.lwpaxes[i_row, i_col]
-					ax.entries = None
-					ax.qns = None
-					ax.corr_xs = ax.corr_ys = np.array([])
-					threads.append(ax.update_correlation_plots())
-
-			thread.earlyreturn()
-
-			for thread_ in threads:
-				thread_.wait()
-	
-	@QThread.threaded_d
-	@status_d
-	@drawplot_decorator.d
-	def set_data(self, thread=None):
-		n_rows = config['plot_rows']
-		n_cols = config['plot_cols']
-
-		threads = []
-		for asap_ax in self.lwpaxes.flatten():
-			threads.append(asap_ax.update())
-
-		for thread_ in threads:
-				thread_.wait()
-	
-	def on_hover(self, event):
-		x = event.xdata
-		y = event.ydata
-
-		if not all([x, y, event.inaxes]):
-			text_cursor = ""
-		else:
-			if config['flag_showmainplotposition']:
-				text_cursor = f"  ({x=:{config['flag_xformatfloat']}}, {y=:{config['flag_xformatfloat']}})  "
-			else:
-				text_cursor = ""
-		mainwindow.statusbar.position_label.setText(text_cursor)
-	
-	def on_click(self, event):
-		super().on_click(event)
-
-		ax = event.inaxes
-		x = event.xdata
-		is_ctrl_pressed = (QApplication.keyboardModifiers() == Qt.KeyboardModifier.ControlModifier)
-
-		if ax and x and is_ctrl_pressed:
-			asap_ax = self.lwpaxes[self.__class__._active_ax_index]
-			asap_ax.fit_data(x, x, onclick=True)
-
-	def contextMenuCanvas(self, event):
-		return
 
 class ASAPMenu(Menu):
 	def __init__(self, parent, *args, **kwargs):
@@ -7595,9 +7474,261 @@ class ASAPMenu(Menu):
 		newvalue = fitmethods[newindex]
 		config['fit_fitmethod'] = newvalue
 
+class ASAPWidget(LWPWidget):
+	_ax_class = ASAPAx
+	peak_fitted = pyqtSignal(ASAPAx, float)
+
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		
+		elem = QQ(QLabel, text='    Offset: ', visible=config['isvisible_controlswidth'])
+		config.register("isvisible_controlswidth", lambda elem=elem: elem.setVisible(config["isvisible_controlswidth"]))
+		self.toplayout.addWidget(elem)
+		
+		elem = QQ(QDoubleSpinBox, 'plot_offset', range=(None, None), minWidth=85, visible=config['isvisible_controlswidth'])
+		config.register("isvisible_controlswidth", lambda elem=elem: elem.setVisible(config["isvisible_controlswidth"]))
+		self.toplayout.addWidget(elem)
+
+
+	def prefilter_correlation_plot_entries(self, state, n_rows, n_qns, offset, width):
+		qns = state['qns'][:n_qns]
+		diffs = (state['diff'] if state['use_diff'] else state['incr'])[:n_qns]
+
+		qns = np.array(qns)
+		diffs = np.array(diffs)
+
+		# Prefilter df to all transitins belonging to series
+		conditions, conditions_incr = ['(visible)'], []
+		normalizing_value = None
+		ul = 'u' if state['is_upper_state'] else 'l'
+		
+		for i, qn, diff in zip(range(n_qns), qns, diffs):
+			diff = int(diff)
+			if diff:
+				if normalizing_value is None:
+					normalizing_value = qn // diff
+				conditions_incr.append(f"((qn{ul}{i+1} - {qn-normalizing_value*diff})/{diff})")
+			else:
+				conditions.append(f"(qn{ul}{i+1} == {qn})")
+
+		if len(conditions_incr):
+			conditions.append(" == ".join(conditions_incr))
+		
+		conditions = " and ".join(conditions)
+		entries = CatFile.query_c(conditions).copy()
+		
+		if config['asap_catunitconversionfactor']:
+			entries['x'] *= config['asap_catunitconversionfactor']
+
+		if config['asap_query']:
+			entries['use_for_cross_correlation'] = entries.eval(config['asap_query'])
+		else:
+			entries['use_for_cross_correlation'] = True
+
+		entries['xmin'] = entries['x'] + offset - width/2
+		entries['xmax'] = entries['xmin'] + width
+		entries['min_index'], entries['max_index'] = ExpFile.xs_to_indices(entries['xmin'], entries['xmax'])
+
+		return(entries, qns, diffs, ul)
+
+	def calc_correlation_plot(self, row_qns, row_entries, offset, width, resolution):
+		transitions = row_entries[row_entries['use_for_cross_correlation']]
+
+		ref_xs = transitions['x']
+		ref_ys = transitions['y']
+
+		min_indices, max_indices = transitions['min_index'], transitions['max_index']
+
+		xmin, xmax = offset - width/2, offset + width/2
+		tot_xs = np.arange(xmin, xmax + resolution, resolution)
+		tot_ys = np.ones_like(tot_xs)
+
+		exp_len = len(ExpFile.df)
+		n_correlated_transitions = 0
+		use_weights = config['asap_weighted']
+
+		minimum_intensity = np.log10(ref_ys.min())
+
+		for min_index, max_index, ref_pos, ref_int in zip(min_indices, max_indices, ref_xs, ref_ys):
+			min_index = max(0, min_index-1)
+			max_index = min(exp_len, max_index+1)
+
+			dataframe = ExpFile.df.iloc[min_index:max_index].copy()
+			dataframe = dataframe[dataframe['visible']]
+
+			if not len(dataframe):
+				continue
+			
+			xs = dataframe['x']
+			ys = dataframe['y']
+
+			interp_ys = np.interp(tot_xs, xs-ref_pos, ys, left=1, right=1)
+
+			# @Luis: Check this
+			# Christian uses the minimal intensity from query as the minimum_intensity
+			if use_weights:
+				power = np.log10(ref_int) - minimum_intensity + 1
+				interp_ys = np.power(np.abs(interp_ys), power)
+				
+			tot_ys *= interp_ys
+			n_correlated_transitions += 1
+
+		if n_correlated_transitions < 2:
+			tot_xs = tot_ys = np.array([])
+			
+		# @Luis: Think about offering options to normalize spectrum here
+
+		return(tot_xs, tot_ys)
+
+
+	@QThread.threaded_d
+	@status_d
+	@drawplot_decorator.d
+	def calc_correlation_plots(self, thread=None):
+		if not hasattr(ASAPSettingsWindow, '_instance'):
+			return
+		if not hasattr(ASAPSettingsWindow._instance, 'tab'):
+			return
+
+		n_rows = config['plot_rows']
+		n_cols = config['plot_cols']
+		n_qns = config['series_qns']
+
+		thread.earlyreturn()
+
+		# Calculate positions and qns for each column
+		tab_widget = ASAPSettingsWindow._instance.tab
+		n_widgets = tab_widget.count()
+
+		offset = config['plot_offset']
+		width = config['plot_width']
+		resolution = config['asap_resolution']
+
+		threads = []
+		with matplotlib_lock:
+			if self.lwpaxes.shape != (n_rows, n_cols):
+				notify_error.emit('Shape of LWPAxes is out of sync with requested values.')
+				return
+
+			for i_col in range(n_widgets):
+				thread.earlyreturn()
+				if i_col > n_cols:
+					continue
+
+				refwidget = tab_widget.widget(i_col)
+				state = refwidget.state
+				
+				entries, qns, diffs, ul = self.prefilter_correlation_plot_entries(state, n_rows, n_qns, offset, width)
+				
+				thread.earlyreturn()
+
+				# Get the specific entries for each ax 
+				for i_row in range(n_rows):
+					row_qns = qns + i_row * diffs
+					cond = [f"(qn{ul}{i+1} == {qn})" for i, qn in enumerate(row_qns)]
+					condition  = " & ".join(cond)
+					row_entries_all = entries.query(condition)
+					row_entries = row_entries_all[row_entries_all['use_for_cross_correlation']]
+
+					corr_xs, corr_ys = self.calc_correlation_plot(row_qns, row_entries, offset, width, resolution)
+					
+					ax = self.lwpaxes[i_row, i_col]
+					ax.entries = row_entries_all
+					ax.corr_xs = corr_xs
+					ax.corr_ys = corr_ys
+					ax.qns = row_qns
+					threads.append(ax.update())
+					
+					thread.earlyreturn()
+
+			# Edge cases of no reference tabs and too few tabs
+			for i_col in range(n_widgets, n_cols):
+				for i_row in range(n_rows):
+					ax = self.lwpaxes[i_row, i_col]
+					ax.entries = None
+					ax.qns = None
+					ax.corr_xs = ax.corr_ys = np.array([])
+					threads.append(ax.update())
+
+			thread.earlyreturn()
+
+			for thread_ in threads:
+				thread_.wait()
+	
+	@QThread.threaded_d
+	@status_d
+	@drawplot_decorator.d
+	def set_data(self, thread=None):
+		n_rows = config['plot_rows']
+		n_cols = config['plot_cols']
+
+		threads = []
+		for asap_ax in self.lwpaxes.flatten():
+			threads.append(asap_ax.update())
+
+		for thread_ in threads:
+				thread_.wait()
+	
+	def on_hover(self, event):
+		x = event.xdata
+		y = event.ydata
+
+		if not all([x, y, event.inaxes]):
+			text_cursor = ""
+		else:
+			if config['flag_showmainplotposition']:
+				text_cursor = f"  ({x=:{config['flag_xformatfloat']}}, {y=:{config['flag_xformatfloat']}})  "
+			else:
+				text_cursor = ""
+		mainwindow.statusbar.position_label.setText(text_cursor)
+	
+	def on_click(self, event):
+		super().on_click(event)
+
+		ax = event.inaxes
+		x = event.xdata
+		is_ctrl_pressed = (QApplication.keyboardModifiers() == Qt.KeyboardModifier.ControlModifier)
+
+		if ax and x and is_ctrl_pressed:
+			asap_ax = self.lwpaxes[self.__class__._active_ax_index]
+			asap_ax.fit_data(x, x, onclick=True)
+
+	def contextMenuCanvas(self, event):
+		x, y = event.x(), event.y()
+		geometry = self.plotcanvas.geometry()
+		width, height = geometry.width(), geometry.height()
+		x_rel, y_rel = x/width, 1 - y/height
+
+		for lwpax in self.lwpaxes.flatten():
+			xmin, ymin, width, height = lwpax.ax.get_position().bounds
+			if xmin <= x_rel <= xmin + width and ymin <= y_rel <= ymin+height:
+				break
+		else: # Clicked outside of ax
+			return
+
+		menu = QMenu(self)
+		set_active_action = menu.addAction('Make active Ax')
+		fit_all_action = menu.addAction('Fit all')
+
+		action = menu.exec(self.mapToGlobal(event.pos()))
+		if action == set_active_action:
+			mainwindow.lwpwidget._active_ax_index = (lwpax.row_i, lwpax.col_i)
+		elif action == fit_all_action:
+			i_col = lwpax.col_i
+			AssignAllDialog.show_dialog(i_col)
+
 class LASAPMainWindow(MainWindow):
 	mainwidget_class = ASAPWidget
 	menu_class = ASAPMenu
+
+class LASAP(LLWP):
+	mainwindow_class = LASAPMainWindow
+	
+	def debug_setup(self):
+		pass
+
+
 
 class ASAPDetailViewer(EQDockWidget):
 	default_position = None
@@ -7643,8 +7774,8 @@ class ASAPDetailViewer(EQDockWidget):
 			entries = entries[entries['use_for_cross_correlation']].copy()
 
 		width = config['asap_detailviewerwidth'] or config['plot_width']
-		entries['xmin'] = entries['x'] - width/2
-		entries['xmax'] = entries['xmin'] + width
+		entries['xmin'] = entries['x'] - width/2 + offset
+		entries['xmax'] = entries['x'] + width/2 + offset
 		entries['min_index'], entries['max_index'] = ExpFile.xs_to_indices(entries['xmin'], entries['xmax'])			
 		
 		gridspec_kw = {"hspace": 0, "wspace": 0}
@@ -7655,7 +7786,7 @@ class ASAPDetailViewer(EQDockWidget):
 
 		for ax, (i, row) in zip(axes, entries.iterrows()):
 			ax.xaxis.set_visible(False)
-			ax.axvline(color=config['color_fit'])
+			ax.axvline(offset, color=config['color_fit'])
 
 			min_index, max_index = row['min_index'], row['max_index']
 			dataframe = ExpFile.df.iloc[min_index:max_index].copy()
@@ -7819,14 +7950,15 @@ def start_lasap():
 		return(other_files)
 
 	File.handle_special_file_types = handle_special_file_types
+	AssignAllDialog.update_gui = AssignAllDialog.update_gui_asap
 
 	global APP_TAG
 	APP_TAG = 'LASAP'
 	LASAP()
 
 if __name__ == '__main__':
-	# start_lasap()
-	start_llwp()
+	start_lasap()
+	# start_llwp()
 
 
 ##
@@ -7834,6 +7966,7 @@ if __name__ == '__main__':
 ##
 
 # @Luis: Should we also cache the xs to indices functions?
+# @Luis: Shortcut to assign all for currently selected column
 
 # - Hotkey to change series selector in specific way (+Ka, -Kc)
 # - Auto detect format of .lin file
