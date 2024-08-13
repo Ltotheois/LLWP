@@ -1107,7 +1107,9 @@ class File():
 			
 			with self.lock:
 				df = self.get_df()
-				self.set_df(pd.concat([df[df['filename'] != self.filename_abs], data], ignore_index=True))
+				# Important to explicitly convert filename to category again; Otherwise it will be an object which makes masking 
+				# a factor of 1000 slower
+				self.set_df(pd.concat([df[df['filename'] != self.filename_abs], data], ignore_index=True).astype({'filename': 'category'}))
 				self.clean_up_data()
 				self.apply_all()
 
@@ -1121,7 +1123,8 @@ class File():
 			if not isinstance(self, NewAssignments):
 				notify_info.emit(f"Successfully loaded '{self.filename_abs}'")
 	
-	def clean_up_data(self):
+	@classmethod
+	def clean_up_data(cls):
 		pass
 	
 	@classmethod
@@ -1280,11 +1283,65 @@ class File():
 
 	@classmethod
 	@QThread.threaded_d
-	def add_multiple(cls, files, thread=None):
-		files = [cls(file, load_manually=True) for file in files]
-		file_threads = [file.load_file() for file in files]
-		for file_thread in file_threads:
-			file_thread.wait()
+	@status_d
+	def add_multiple(cls, filepaths, thread=None):
+		if not filepaths:
+			return
+		
+		with cls.sort_df_counter:
+			files = [cls(file, load_manually=True) for file in filepaths]
+			dataframes = []
+			filenames = []
+			exceptions = {}
+			
+			for file in files:
+				try:
+					dataframes.append(file.load_file_core())
+					filenames.append(file.filename_abs)
+				except Exception as E:
+					raise E
+					exceptions[file.filename_abs] = str(E)
+			
+			data = pd.concat(dataframes)
+			data['x0'] = data['x']
+			if cls.has_y_data:
+				data['y0'] = data['y']
+			data['color'] = default_color = config[cls.default_color_key]
+			data['visible'] = True
+
+			
+			with cls.lock:
+				df = cls.get_df()
+				# Important to explicitly convert filename to category again; Otherwise it will be an object which makes masking 
+				# a factor of 1000 slower
+				cls.set_df(pd.concat([df[~df['filename'].isin(filenames)], data], ignore_index=True).astype({'filename': 'category'}))
+				cls.clean_up_data()
+				
+				# Apply color
+				colors = [file.color for file in files]
+				color_queries = [file.color_query for file in files]
+				
+				for file in files:
+					if not (file.color == default_color and not file.color_query):
+						file.apply_color()
+					
+					if not (file.is_visible and not file.query):
+						file.apply_visibility()
+					
+					if file.xtransformation:
+						file.apply_xtransformation()
+					
+					if file.has_y_data and file.ytransformation:
+						file.apply_ytransformation()
+
+			cls.clear_caches()
+		
+		if len(exceptions) == 0:
+			notify_info.emit(f"Successfully loaded all files.")
+		else:
+			error_string = '\n'.join(f'{file}: {error}' for file, error in exceptions.items())
+			notify_warning.emit(f"There were errors when loading the requested files:\n{error_string}")
+
 
 	@staticmethod
 	def add_files_dialog():
@@ -1416,6 +1473,7 @@ class File():
 		
 		self.color = color
 		self.apply_color()
+		mainwindow.lwpwidget.set_data()
 
 	def gui_toggle_visbility(self, _):
 		self.toggle_visibility()
@@ -1435,6 +1493,16 @@ class File():
 	def reset_all(cls):
 		for file in cls.ids.values():
 			file.set_default_values()
+		
+		df = cls.df
+		df['color'] = config[cls.default_color_key]
+		df['visible'] = True
+		df['x'] = df['x0']
+		if cls.has_y_data:
+			df['y'] = df['y0']
+				
+		mainwindow.lwpwidget.set_data()
+
 	
 	@classmethod
 	def delete_all(cls):
@@ -1450,6 +1518,17 @@ class File():
 
 		for file in cls.ids.values():
 			file.is_visible = visibility
+
+		if visibility:
+			for file in cls.ids.values():
+				file.apply_visibility()
+		else:
+			df = cls.get_df()
+			df['visible'] = False
+			cls.set_df(df)
+		
+		mainwindow.lwpwidget.set_data()
+
 
 	@property
 	def color(self):
@@ -1482,7 +1561,7 @@ class File():
 				continue
 			color, query = command.split(";")
 			indices = (df.loc[mask].query(query)).index
-			df.loc[indices, "color"] = color		
+			df.loc[indices, "color"] = color
 		self.clear_caches()
 
 
@@ -1507,7 +1586,7 @@ class File():
 	def apply_visibility(self):
 		df = self.__class__.df
 		mask = (df['filename'] == self.filename_abs)
-		
+
 		if self.is_visible and not self.query:
 			df.loc[mask, 'visible'] = True
 		elif self.is_visible and self.query:
@@ -1571,13 +1650,12 @@ class CatFile(File):
 	def load_file_core(self):
 		if self.extension not in config['flag_catformats']:
 			data = pyckett.cat_to_df(self.filename_abs, sort=False)
-			data['filename'] = data['filename'].astype('category')
 		else:
 			kwargs = config['flag_catformats'][self.extension].copy()
 			y_is_log = format.pop('y_is_log', False)
 
 			data = pd.read_fwf(self.filename_abs, **kwargs)
-			data['filename'] = pd.Series(self.filename_abs, index=data.index, dtype='category')
+			data['filename'] = self.filename_abs
 
 			if y_is_log:
 				data['y'] = 10 ** data['y']
@@ -1594,9 +1672,10 @@ class CatFile(File):
 
 		return(data)
 
-	def clean_up_data(self):
+	@classmethod
+	def clean_up_data(cls):
 		qn_columns = pyckett.qnlabels_from_quanta(N_QNS)
-		self.__class__.df.loc[:, qn_columns] = self.__class__.df.loc[:, qn_columns].fillna(pyckett.SENTINEL).astype(pyckett.pickett_int)
+		cls.df.loc[:, qn_columns] = cls.df.loc[:, qn_columns].fillna(pyckett.SENTINEL).astype(pyckett.pickett_int)
 		# self.__class__.df = self.__class__.df.dropna()
 
 	@classmethod
@@ -1634,12 +1713,11 @@ class LinFile(File):
 	def load_file_core(self):
 		if self.extension not in config['flag_linformats']:
 			data = pyckett.lin_to_df(self.filename_abs, sort=False)
-			data['filename'] = data['filename'].astype('category')
 		else:
 			kwargs = config['flag_linformats'][self.extension].copy()
 
 			data = pd.read_fwf(self.filename_abs, **kwargs)
-			data['filename'] = pd.Series(self.filename_abs, index=data.index, dtype='category')
+			data['filename'] = self.filename_abs
 
 			for column in self.dtypes.keys():
 				if column.startswith('qn'):
@@ -1654,9 +1732,10 @@ class LinFile(File):
 
 		return(data)
 	
-	def clean_up_data(self):
+	@classmethod
+	def clean_up_data(cls):
 		qn_columns = pyckett.qnlabels_from_quanta(N_QNS)
-		self.__class__.df[qn_columns] = self.__class__.df[qn_columns].fillna(pyckett.SENTINEL).astype(pyckett.pickett_int)
+		cls.df.loc[:, qn_columns] = cls.df.loc[:, qn_columns].fillna(pyckett.SENTINEL).astype(pyckett.pickett_int)
 		# self.__class__.df = self.__class__.df.dropna()
 
 LinFile.sort_df_counter.callback = LinFile.sort_df
@@ -3873,7 +3952,7 @@ class AssignAllDialog(QDialog):
 		errors = []
 		for i_row, assignment in self.new_assignments.items():
 			xs.append(assignment['xmiddle'] + assignment.get('pred_egy', 0))
-			errors.append(LWPAx.fit_determine_uncert(assignment['xref'], assignment['xmiddle'], assignment['xuncert']))
+			errors.append(LWPWidget._ax_class.fit_determine_uncert(assignment['xref'], assignment['xmiddle'], assignment['xuncert']))
 			qns.append(assignment['row_qns'])
 
 		qns = np.array(qns)
@@ -3977,9 +4056,7 @@ class FileWindow(EQDockWidget):
 			event.ignore()
 
 	def dropEvent(self, event):
-		event.accept()
-		files_by_type = File.sort_files_by_type([url.toLocalFile() for url in event.mimeData().urls()])
-		File.add_multiple_files_by_type(files_by_type)
+		mainwindow.dropEvent(event)
 
 class ReferenceSelector(QTabWidget):
 	methods = ('Transition', 'List', 'Expression')
@@ -4862,7 +4939,6 @@ class NewAssignmentsWindow(EQDockWidget):
 			df.drop(selected, inplace=True)
 
 		df.reset_index(inplace=True, drop=True)
-		self.clear_caches()
 		
 		self.model.update()
 		self.new_assignments.load_file()
@@ -5055,7 +5131,7 @@ class CloseByLinesWindow(EQDockWidget):
 
 		tmp = QShortcut('Ctrl+Shift+F', mainwindow)
 		tmp.activated.connect(self.toggle_text_is_frozen)
-		tmp.setContext(Qt.ShortcutContext.WidgetShortcut)
+		tmp.setContext(Qt.ShortcutContext.ApplicationShortcut)
 	
 	def toggle_text_is_frozen(self):
 		self.text_is_frozen = not self.text_is_frozen
@@ -6973,7 +7049,7 @@ def exp_to_df(fname, n_bytes=4096, **kwargs):
 
 	data = pd.read_csv(fname, **kwargs)
 	data = data.dropna()
-	data['filename'] = pd.Series(fname, index=data.index, dtype='category')
+	data['filename'] = fname
 
 	return(data)
 
@@ -7380,8 +7456,6 @@ class ASAPAx(LWPAx):
 		error = self.fit_determine_uncert(0, xmiddle, xuncert)
 		xmiddle += egy_val
 
-		error = min(0.0001, -abs(error))
-
 		# Create assignment object
 		new_assignment = {'x': xmiddle, 'error': error, 'xpre': 0}
 		new_assignment.update(qns_dict)
@@ -7436,6 +7510,12 @@ class ASAPAx(LWPAx):
 		
 		notify_info.emit(f'Successfully loaded the energy file \'{basename}\'.')
 
+	@staticmethod
+	def fit_determine_uncert(*args, **kwargs):
+		error = super().fit_determine_uncert(*args, **kwargs)
+		return(-abs(error))
+
+		
 class ASAPMenu(Menu):
 	def __init__(self, parent, *args, **kwargs):
 		mb = parent.menuBar()
@@ -7993,16 +8073,49 @@ if __name__ == '__main__':
 ## To Do
 ##
 
-# - Hotkey to change series selector in specific way (+Ka, -Kc)
 # - Auto detect format of .lin file
-
 # - Which of these modules should be kept?
 	# - EnergyLevelsTrendWindow
 	# - SpectraResolverWindow
 	# - CalibrateSpectrumWindow
 
 
-# - Files: allow to open files by glob string -> no annoying stuff with subfolders
-# - Files: maybe also custom transformations -> change some quantum numbers if needed
 
-# - maybe build something like a command palette
+### Some Tricks and Tips
+
+
+## Open multiple files via glob string:
+
+# import glob
+# files = glob.glob(globstring)
+# File.add_multiple_files_by_type(files)
+
+
+## Hotkey to change series selector in specific way (increase Ka, decrease Kc)
+
+# def tmp_function(change_value):
+    # tab_widget = ReferenceSeriesWindow._instance.tab
+    # refwidget = tab_widget.widget(config['series_currenttab'])
+    # refwidget.setCurrentIndex(0)
+    # seriesselector = refwidget.series_selector
+
+    # noq = config['series_qns']
+    # current_state = seriesselector.state
+    # qnus = current_state['qnus'][:noq]
+    # qnls = current_state['qnls'][:noq]
+    
+    # qnus[1] += change_value
+    # qnus[2] -= change_value
+
+    # qnls[1] += change_value
+    # qnls[2] -= change_value
+    
+    # current_state['qnus'][:noq] = qnus
+    # current_state['qnls'][:noq] = qnls
+    # seriesselector.set_state()
+
+# QShortcut('Ctrl+Y', mainwindow).activated.connect(lambda tmp_function=tmp_function: tmp_function(1))
+# QShortcut('Ctrl+Shift+Y', mainwindow).activated.connect(lambda tmp_function=tmp_function: tmp_function(-1))
+
+
+
