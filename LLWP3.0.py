@@ -1044,9 +1044,6 @@ class File():
 		self.dirname_abs, self.basename = os.path.split(filename)
 		self.extension = os.path.splitext(filename)[1]
 		
-		self.filename_rel = os.path.relpath(filename, start=llwpfile())
-		self.dirname_rel = os.path.dirname(self.filename_rel)
-
 		self.ids[self.filename_abs] = self
 
 		self.gui_widgets = {}
@@ -1773,7 +1770,7 @@ class NewAssignments(LinFile):
 		self.new_assignments_df = pd.DataFrame(columns=dtypes.keys()).astype(dtypes)
 		self.filename_abs = filename
 		self.basename = "New Assignments"
-		self.dirname_abs = self.extension = self.filename_rel = self.dirname_rel = None
+		self.dirname_abs = self.extension = None
 		
 		self.ids[self.filename_abs] = self
 		self.gui_widgets = {}
@@ -2280,8 +2277,8 @@ class LWPAx():
 			qns_dict[f'qnl{i+1}'] = qnl
 		return(qns_dict)
 
-	@staticmethod
-	def fit_determine_uncert(ref_pos, xmiddle, xuncert):
+	@classmethod
+	def fit_determine_uncert(cls, ref_pos, xmiddle, xuncert):
 		error_param = config['fit_uncertainty']
 		if error_param > 0:
 			return(error_param)
@@ -7510,8 +7507,8 @@ class ASAPAx(LWPAx):
 		
 		notify_info.emit(f'Successfully loaded the energy file \'{basename}\'.')
 
-	@staticmethod
-	def fit_determine_uncert(*args, **kwargs):
+	@classmethod
+	def fit_determine_uncert(cls, *args, **kwargs):
 		error = super().fit_determine_uncert(*args, **kwargs)
 		return(-abs(error))
 
@@ -8073,15 +8070,16 @@ if __name__ == '__main__':
 ## To Do
 ##
 
-# - Auto detect format of .lin file
+# - Auto detect format of .lin file (-> function in pyckett to check if current setting is reasonable for the file)
 # - Which of these modules should be kept?
 	# - EnergyLevelsTrendWindow
 	# - SpectraResolverWindow
 	# - CalibrateSpectrumWindow
 
 
-
-### Some Tricks and Tips
+##
+## Some Tricks and Tips
+##
 
 
 ## Open multiple files via glob string:
@@ -8116,6 +8114,4 @@ if __name__ == '__main__':
 
 # QShortcut('Ctrl+Y', mainwindow).activated.connect(lambda tmp_function=tmp_function: tmp_function(1))
 # QShortcut('Ctrl+Shift+Y', mainwindow).activated.connect(lambda tmp_function=tmp_function: tmp_function(-1))
-
-
 
