@@ -914,24 +914,30 @@ class FigureCanvas(FigureCanvas):
 		self.setStyleSheet(f'background-color: {background}')
 		self.draw_idle()
 
-class EQDockWidgetMeta(type(QDockWidget)):
-	def __call__(cls, *args, **kwargs):
-		if hasattr(cls, '_instance'):
-			cls._instance.show()
-			cls._instance.raise_()
-			cls._instance.activateWindow()
-			return(cls._instance)
-		
-		obj = cls.__new__(cls, *args, **kwargs)
-		cls._instance = obj
-		cls.__init__(obj, *args, **kwargs)
-		
-		return(obj)
 
-class EQDockWidget(QDockWidget, metaclass=EQDockWidgetMeta):
+# class EQDockWidgetMeta(type(QDockWidget)):
+	# def __call__(cls, *args, **kwargs):
+		# if hasattr(cls, '_instance'):
+			# cls._instance.show()
+			# cls._instance.raise_()
+			# cls._instance.activateWindow()
+			# return(cls._instance)
+		
+		# obj = cls.__new__(cls, *args, **kwargs)
+		# cls._instance = obj
+		# cls.__init__(obj, *args, **kwargs)
+		
+		# return(obj)
+
+# class EQDockWidget(QDockWidget, metaclass=EQDockWidgetMeta):
+	# default_position = 2
+	# default_visible = False
+
+
+class EQDockWidget(QDockWidget):
 	default_position = 2
 	default_visible = False
-	
+
 	def __init__(self, *args, **kwargs):
 		super().__init__(mainwindow, *args, **kwargs)
 		Geometry.load_widget_geometry(self)
@@ -950,7 +956,7 @@ class EQDockWidget(QDockWidget, metaclass=EQDockWidgetMeta):
 		tmp = QShortcut("Esc", self)
 		tmp.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
 		tmp.activated.connect(self.close)
-		
+		self.__class__.instance = self
 
 	def moveEvent(self, *args, **kwargs):
 		Geometry.save_widget_geometry(self)
@@ -1055,8 +1061,8 @@ class File():
 		if not load_manually:
 			self.load_file()
 		
-		if hasattr(FileWindow, '_instance'):
-			FileWindow._instance.fileaddition_requested.emit(self.__class__, self.filename_abs)
+		if hasattr(FileWindow, 'instance'):
+			FileWindow.instance.fileaddition_requested.emit(self.__class__, self.filename_abs)
 		self.is_initialized = True
 
 	def set_default_values(self, default_values={}):
@@ -1781,8 +1787,8 @@ class NewAssignments(LinFile):
 		if not load_manually:
 			self.load_file()
 		
-		if hasattr(FileWindow, '_instance'):
-			FileWindow._instance.fileaddition_requested.emit(self.LinFile, self.filename_abs)
+		if hasattr(FileWindow, 'instance'):
+			FileWindow.instance.fileaddition_requested.emit(self.LinFile, self.filename_abs)
 
 	def check_file(self):
 		return
@@ -1837,7 +1843,7 @@ class NewAssignments(LinFile):
 
 		self.load_file()
 
-		new_assignments_window = NewAssignmentsWindow._instance
+		new_assignments_window = NewAssignmentsWindow.instance
 		new_assignments_window.model.update()
 		new_assignments_window.model.resize_columns()
 		new_assignments_window.scroll_bottom()
@@ -2357,7 +2363,7 @@ class LWPAx():
 	def check_blends(self, new_assignment):
 		if not config['series_blendwidth']:
 			return(False)
-		reference_states = ReferenceSeriesWindow._instance.get_state()
+		reference_states = ReferenceSeriesWindow.instance.get_state()
 		if self.col_i > len(reference_states):
 			return(False)
 		reference_state = reference_states[self.col_i]
@@ -2506,7 +2512,7 @@ class LWPWidget(QGroupBox):
 			else:
 				text_cursor = ""
 
-			CloseByLinesWindow._instance.cursor_changed.emit(x, y)
+			CloseByLinesWindow.instance.cursor_changed.emit(x, y)
 		mainwindow.statusbar.position_label.setText(text_cursor)
 
 	def wheelEvent(self,event):
@@ -2558,10 +2564,10 @@ class LWPWidget(QGroupBox):
 	@status_d
 	@drawplot_decorator.d
 	def set_data(self, thread=None):
-		if not hasattr(ReferenceSeriesWindow, '_instance'):
+		if not hasattr(ReferenceSeriesWindow, 'instance'):
 			return
 		
-		if not hasattr(ReferenceSeriesWindow._instance, 'tab'):
+		if not hasattr(ReferenceSeriesWindow.instance, 'tab'):
 			return
 
 		n_rows = config['plot_rows']
@@ -2577,7 +2583,7 @@ class LWPWidget(QGroupBox):
 		thread.earlyreturn()
 
 		# Calculate positions and qns for each column
-		tab_widget = ReferenceSeriesWindow._instance.tab
+		tab_widget = ReferenceSeriesWindow.instance.tab
 		n_widgets = tab_widget.count()
 
 		for i_col in range(n_widgets):
@@ -2721,12 +2727,12 @@ class Menu():
 			self.top_menus[label] = menu
 		
 
-		toggleaction_files = FileWindow._instance.toggleViewAction()
+		toggleaction_files = FileWindow.instance.toggleViewAction()
 		toggleaction_files.setText('Edit Files')
-		toggleaction_convolution = ConvolutionWindow._instance.toggleViewAction()
+		toggleaction_convolution = ConvolutionWindow.instance.toggleViewAction()
 		toggleaction_convolution.setText('Sticks to Lineshape')
 		toggleaction_convolution.setToolTip('Choose a function to create a spectrum from stick data')
-		toggleaction_credits = CreditsWindow._instance.toggleViewAction()
+		toggleaction_credits = CreditsWindow.instance.toggleViewAction()
 		toggleaction_credits.setText("Credits and License")
 		toggleaction_credits.setToolTip("See the Credits and License")
 
@@ -2770,24 +2776,24 @@ class Menu():
 				toggleaction_convolution,
 			),
 			'View': (
-				ConfigWindow._instance.toggleViewAction(),
+				ConfigWindow.instance.toggleViewAction(),
 				None,
-				ReferenceSeriesWindow._instance.toggleViewAction(),
-				NewAssignmentsWindow._instance.toggleViewAction(),
-				CloseByLinesWindow._instance.toggleViewAction(),
-				LogWindow._instance.toggleViewAction(),
+				ReferenceSeriesWindow.instance.toggleViewAction(),
+				NewAssignmentsWindow.instance.toggleViewAction(),
+				CloseByLinesWindow.instance.toggleViewAction(),
+				LogWindow.instance.toggleViewAction(),
 				None,
 				QQ(QAction, parent=parent, text='Open Console', shortcut='CTRL+K', change= lambda _: ConsoleDialog.show_dialog()),
 				None,
 			),
 			'Modules': (
-				ResidualsWindow._instance.toggleViewAction(),
-				BlendedLinesWindow._instance.toggleViewAction(),
-				ReportWindow._instance.toggleViewAction(),
-				SeriesfinderWindow._instance.toggleViewAction(),
-				PeakfinderWindow._instance.toggleViewAction(),
-				EnergyLevelsWindow._instance.toggleViewAction(),
-				CmdWindow._instance.toggleViewAction(),
+				ResidualsWindow.instance.toggleViewAction(),
+				BlendedLinesWindow.instance.toggleViewAction(),
+				ReportWindow.instance.toggleViewAction(),
+				SeriesfinderWindow.instance.toggleViewAction(),
+				PeakfinderWindow.instance.toggleViewAction(),
+				EnergyLevelsWindow.instance.toggleViewAction(),
+				CmdWindow.instance.toggleViewAction(),
 				
 			),
 			'Info': (
@@ -3814,7 +3820,7 @@ class AssignAllDialog(QDialog):
 		fitmethod = config['fit_fitmethod']
 		offset = config['fit_offset']
 		
-		tab_widget = ReferenceSeriesWindow._instance.tab
+		tab_widget = ReferenceSeriesWindow.instance.tab
 		refwidget = tab_widget.widget(self.i_col)
 		
 		positions, qns = refwidget.calc_references(n_rows, n_qns)
@@ -5467,7 +5473,7 @@ class ResidualsWindow(EQDockWidget):
 			self.fig.canvas.draw_idle()
 
 			if click and noq:
-				tab_widget = ReferenceSeriesWindow._instance.tab
+				tab_widget = ReferenceSeriesWindow.instance.tab
 				refwidget = tab_widget.widget(config['series_currenttab'])
 				refwidget.setCurrentIndex(0)
 				seriesselector = refwidget.series_selector
@@ -6134,7 +6140,7 @@ class SeriesfinderWindow(EQDockWidget):
 		qnus = [int(row[f"qnu{i+1}"]) for i in range(self.noq)]
 		qnls = [int(row[f"qnl{i+1}"]) for i in range(self.noq)]
 		
-		tab_widget = ReferenceSeriesWindow._instance.tab
+		tab_widget = ReferenceSeriesWindow.instance.tab
 		refwidget = tab_widget.widget(config['series_currenttab'])
 		refwidget.setCurrentIndex(0)
 		seriesselector = refwidget.series_selector
@@ -7502,8 +7508,8 @@ class ASAPAx(LWPAx):
 		
 		basename = os.path.basename(filename)
 
-		if hasattr(ASAPSettingsWindow, '_instance'):
-			ASAPSettingsWindow._instance.egy_file_button.setText(basename)
+		if hasattr(ASAPSettingsWindow, 'instance'):
+			ASAPSettingsWindow.instance.egy_file_button.setText(basename)
 		
 		notify_info.emit(f'Successfully loaded the energy file \'{basename}\'.')
 
@@ -7525,9 +7531,9 @@ class ASAPMenu(Menu):
 			self.top_menus[label] = menu
 		
 
-		toggleaction_files = FileWindow._instance.toggleViewAction()
+		toggleaction_files = FileWindow.instance.toggleViewAction()
 		toggleaction_files.setText('Edit Files')
-		toggleaction_credits = CreditsWindow._instance.toggleViewAction()
+		toggleaction_credits = CreditsWindow.instance.toggleViewAction()
 		toggleaction_credits.setText("Credits and License")
 		toggleaction_credits.setToolTip("See the Credits and License")
 
@@ -7563,13 +7569,13 @@ class ASAPMenu(Menu):
 				QQ(QAction, parent=parent, text="Change Fit Color", tooltip="Change the color of the fitfunction", change=lambda _: self.change_fitcolor()),
 			),
 			'View': (
-				ConfigWindow._instance.toggleViewAction(),
+				ConfigWindow.instance.toggleViewAction(),
 				None,
-				ASAPSettingsWindow._instance.toggleViewAction(),
-				ASAPDetailViewer._instance.toggleViewAction(),
-				NewAssignmentsWindow._instance.toggleViewAction(),
-				LogWindow._instance.toggleViewAction(),
-				CmdWindow._instance.toggleViewAction(),
+				ASAPSettingsWindow.instance.toggleViewAction(),
+				ASAPDetailViewer.instance.toggleViewAction(),
+				NewAssignmentsWindow.instance.toggleViewAction(),
+				LogWindow.instance.toggleViewAction(),
+				CmdWindow.instance.toggleViewAction(),
 
 				None,
 				QQ(QAction, parent=parent, text='Open Console', shortcut='CTRL+K', change= lambda _: ConsoleDialog.show_dialog()),
@@ -7710,9 +7716,9 @@ class ASAPWidget(LWPWidget):
 	@status_d
 	@drawplot_decorator.d
 	def calc_correlation_plots(self, thread=None):
-		if not hasattr(ASAPSettingsWindow, '_instance'):
+		if not hasattr(ASAPSettingsWindow, 'instance'):
 			return
-		if not hasattr(ASAPSettingsWindow._instance, 'tab'):
+		if not hasattr(ASAPSettingsWindow.instance, 'tab'):
 			return
 
 		n_rows = config['plot_rows']
@@ -7722,7 +7728,7 @@ class ASAPWidget(LWPWidget):
 		thread.earlyreturn()
 
 		# Calculate positions and qns for each column
-		tab_widget = ASAPSettingsWindow._instance.tab
+		tab_widget = ASAPSettingsWindow.instance.tab
 		n_widgets = tab_widget.count()
 
 		offset = config['plot_offset']
@@ -8092,7 +8098,7 @@ if __name__ == '__main__':
 ## Hotkey to change series selector in specific way (increase Ka, decrease Kc)
 
 # def tmp_function(change_value):
-    # tab_widget = ReferenceSeriesWindow._instance.tab
+    # tab_widget = ReferenceSeriesWindow.instance.tab
     # refwidget = tab_widget.widget(config['series_currenttab'])
     # refwidget.setCurrentIndex(0)
     # seriesselector = refwidget.series_selector
