@@ -7578,7 +7578,7 @@ class ASAPMenu(Menu):
 		mb = parent.menuBar()
 		
 		# Create top level menus
-		top_menu_labels = ("Files", "View", "Fit", "Modules", "Info")
+		top_menu_labels = ("Files", "View", "Fit", "Info")
 		self.top_menus = {}
 		for label in top_menu_labels:
 			menu = mb.addMenu(f'{label}')
