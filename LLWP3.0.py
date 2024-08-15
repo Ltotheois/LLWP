@@ -1862,13 +1862,17 @@ class NewAssignments(LinFile):
 		append = config['flag_appendonsave']
 		format = config['flag_saveformat']
 		
-		options = {"options": QFileDialog.Option.DontConfirmOverwrite} if append else {}
-		savepath, extension = QFileDialog.getSaveFileName(None, 'Save file', '', **options)
+		# Mac does not support DontConfirmOverwrite -> Suppress warning by using openFileDialog
+		if sys.platform == 'darwin' and append:
+			savepath, extension = QFileDialog.getOpenFileName(None, 'Save file', '')
+		else:
+			options = {"options": QFileDialog.Option.DontConfirmOverwrite} if append else {}
+			savepath, extension = QFileDialog.getSaveFileName(None, 'Save file', '', **options)
 		if not savepath:
 			return
 
 		self.save(savepath, append, format)
-		notify_info.emit(f"The {len(self.new_assignments_df)} new assignments were saved to the file {savepath}.")
+		notify_info.emit(f"The {len(self.new_assignments_df)} new assignments were saved to the file \'{savepath}\'.")
 
 	def save_backup(self):
 		savepath = llwpfile('.lin')
@@ -4237,23 +4241,22 @@ class ReferenceSelector(QTabWidget):
 			self.spinbox_startat.setValue(0)
 
 		else:
-			fnames = QFileDialog.getOpenFileNames(self, 'Open Positions List(s)',)[0]
-			if len(fnames)==0:
+			fname, _ = QFileDialog.getOpenFileName(self, 'Open Positions List',)
+			if not fname:
 				return
 			xs = []
-			for fname in fnames:
-				with open(fname, "r", encoding="utf-8") as file:
-					for line in file:
-						line = line.strip()
-						if line == "" or line.startswith("#"):
-							continue
+			with open(fname, "r", encoding="utf-8") as file:
+				for line in file:
+					line = line.strip()
+					if line == "" or line.startswith("#"):
+						continue
 
-						tmp = re.split(r'; |, |\s', line)
-						for x in tmp:
-							try:
-								xs.append(float(x))
-							except ValueError:
-								notify_warning.emit(f"Could not convert the string '{x}' to a numerical value.")
+					tmp = re.split(r'; |, |\s', line)
+					for x in tmp:
+						try:
+							xs.append(float(x))
+						except ValueError:
+							notify_warning.emit(f"Could not convert the string '{x}' to a numerical value.")
 
 			self.state["list"].update({
 				"qns":		None,
