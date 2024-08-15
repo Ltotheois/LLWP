@@ -2430,7 +2430,9 @@ class LWPWidget(QGroupBox):
 		self.plotcanvas.setMinimumWidth(200)
 		
 		self.drawplot.connect(self.draw_canvas)
-		config.register(('plot_width', 'plot_widthexpression', 'plot_offset', 'plot_offsetexpression', 'plot_offsetisrelative', "series_annotate_xs", "plot_annotate", "plot_bins", "flag_automatic_draw"), lambda: self.set_data())
+		keys = ('plot_width', 'plot_widthexpression', 'plot_offset', 'plot_offsetexpression', 'plot_offsetisrelative', 'plot_bins',
+				'plot_yscale', 'plot_yscale_min', 'plot_yscale_max', 'plot_expcat_factor', 'plot_expcat_exponent')
+		config.register(keys, lambda: self.set_data())
 
 		self.mpltoolbar = NavigationToolbar2QT(self.plotcanvas, self)
 		self.mpltoolbar.setVisible(config["isvisible_matplotlibtoolbar"])
@@ -2776,6 +2778,8 @@ class Menu():
 				None,
 				QQ(QAction, parent=parent, text="Set Width", shortcut="Ctrl+W", change=lambda _: WidthDialog.show_dialog()),
 				QQ(QAction, parent=parent, text="Set Offset", shortcut="Ctrl+G", change=lambda _: OffsetDialog.show_dialog()),
+				None,
+				ScalingWindow.instance.toggleViewAction(),
 				None,
 				toggleaction_convolution,
 			),
@@ -4064,6 +4068,53 @@ class FileWindow(EQDockWidget):
 
 	def dropEvent(self, event):
 		mainwindow.dropEvent(event)
+
+class ScalingWindow(EQDockWidget):
+	default_visible = False
+	default_position = 2
+	available_in = ['LLWP']
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle('Scaling Window')
+		
+		mainwidget = QWidget()
+		self.setWidget(mainwidget)
+		mainlayout = QGridLayout(margin=True)
+		mainwidget.setLayout(mainlayout)
+
+		checkbox_scale = QQ(QComboBox, "plot_yscale", options=("Per Plot", "Global", "Custom"))
+		spinbox_scalemin = QQ(QDoubleSpinBox, "plot_yscale_min", range=(None, None), minWidth=120)
+		spinbox_scalemax = QQ(QDoubleSpinBox, "plot_yscale_max", range=(None, None), minWidth=120)
+		spinbox_scalecatfac = QQ(QDoubleSpinBox, "plot_expcat_factor", range=(0, None), minWidth=120)
+		spinbox_scalecatexp = QQ(QSpinBox, "plot_expcat_exponent", range=(None, None), prefix="*10^", minWidth=120)
+
+		scaleMinLabel = QLabel("y-min:  ")
+		scaleMaxLabel = QLabel("y-max:  ")
+		scaleCatLabel = QLabel("y-Exp/y-Cat:  ")
+
+		checkbox_scale.currentTextChanged.connect(lambda x: [
+			spinbox_scalecatfac.setVisible(x!="Per Plot"),
+			spinbox_scalecatexp.setVisible(x!="Per Plot"),
+			spinbox_scalemin.setVisible(x=="Custom"),
+			spinbox_scalemax.setVisible(x=="Custom"),
+			scaleMaxLabel.setVisible(x=="Custom"),
+			scaleMinLabel.setVisible(x=="Custom"),
+			scaleCatLabel.setVisible(x!="Per Plot"),
+		])
+		checkbox_scale.currentTextChanged.emit(config["plot_yscale"])
+
+		mainlayout.addWidget(QLabel("y-scale:  "), 0, 0)
+		mainlayout.addWidget(checkbox_scale, 0, 1)
+		mainlayout.addWidget(scaleCatLabel, 1, 0)
+		mainlayout.addWidget(spinbox_scalecatfac, 1, 1)
+		mainlayout.addWidget(spinbox_scalecatexp, 1, 2, 1, 2)
+		mainlayout.addWidget(scaleMinLabel, 2, 0)
+		mainlayout.addWidget(spinbox_scalemin, 2, 1)
+		mainlayout.addWidget(scaleMaxLabel, 2, 2)
+		mainlayout.addWidget(spinbox_scalemax, 2, 3)
+		mainlayout.setColumnStretch(7, 10)
+		mainlayout.setRowStretch(3, 1)
 
 class ReferenceSelector(QTabWidget):
 	methods = ('Transition', 'List', 'Expression')
