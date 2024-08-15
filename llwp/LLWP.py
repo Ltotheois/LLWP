@@ -2805,7 +2805,8 @@ class Menu():
 				
 			),
 			'Info': (
-				QQ(QAction, parent=parent, text="Send Mail to Author", tooltip="Send a mail to the developer", change=lambda x: self.send_mail_to_author()),
+				QQ(QAction, parent=parent, text="Open LLWP folder", change=lambda x: webbrowser.open(f'file:///{llwpfile()}'), tooltip="Open the folder containing the config, ...", ),
+				QQ(QAction, parent=parent, text="Send Mail to Author", change=lambda x: self.send_mail_to_author(), tooltip="Send a mail to the developer"),
 				toggleaction_credits,
 			)
 			
@@ -7636,6 +7637,7 @@ class ASAPMenu(Menu):
 				None,
 			),
 			'Info': (
+				QQ(QAction, parent=parent, text="Open LASAP folder", change=lambda x: webbrowser.open(f'file:///{llwpfile()}'), tooltip="Open the folder containing the config, ...", ),
 				QQ(QAction, parent=parent, text="Send Mail to Author", tooltip="Send a mail to the developer", change=lambda x: self.send_mail_to_author()),
 				toggleaction_credits,
 			)
