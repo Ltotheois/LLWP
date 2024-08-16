@@ -1862,12 +1862,12 @@ class NewAssignments(LinFile):
 		append = config['flag_appendonsave']
 		format = config['flag_saveformat']
 		
-		# Mac does not support DontConfirmOverwrite -> Suppress warning by using openFileDialog
-		if sys.platform == 'darwin' and append:
-			savepath, extension = QFileDialog.getOpenFileName(None, 'Save file', '')
+	
+		if sys.platform == 'darwin':
+			options = {"options": QFileDialog.Option.DontConfirmOverwrite | QFileDialog.Option.DontUseNativeDialog} if append else {"options": QFileDialog.Option.DontUseNativeDialog}
 		else:
 			options = {"options": QFileDialog.Option.DontConfirmOverwrite} if append else {}
-			savepath, extension = QFileDialog.getSaveFileName(None, 'Save file', '', **options)
+		savepath, extension = QFileDialog.getSaveFileName(None, 'Save file', '', **options)
 		if not savepath:
 			return
 
@@ -2735,13 +2735,41 @@ class Menu():
 
 		toggleaction_files = FileWindow.instance.toggleViewAction()
 		toggleaction_files.setText('Edit Files')
+		toggleaction_files.setShortcut('Shift+1')
+
+		toggleaction_config = ConfigWindow.instance.toggleViewAction()
+		toggleaction_config.setShortcut('Shift+0')
+
 		toggleaction_convolution = ConvolutionWindow.instance.toggleViewAction()
 		toggleaction_convolution.setText('Sticks to Lineshape')
 		toggleaction_convolution.setToolTip('Choose a function to create a spectrum from stick data')
+
 		toggleaction_credits = CreditsWindow.instance.toggleViewAction()
 		toggleaction_credits.setText("Credits and License")
 		toggleaction_credits.setToolTip("See the Credits and License")
 
+		view_actions = [		
+			ReferenceSeriesWindow.instance.toggleViewAction(),
+			NewAssignmentsWindow.instance.toggleViewAction(),
+			CloseByLinesWindow.instance.toggleViewAction(),
+			LogWindow.instance.toggleViewAction(),
+		]
+		
+		for i, view_action in enumerate(view_actions):
+			view_action.setShortcut(f'Shift+{i+2}')
+
+		modules_actions = [
+			ResidualsWindow.instance.toggleViewAction(),
+			BlendedLinesWindow.instance.toggleViewAction(),
+			ReportWindow.instance.toggleViewAction(),
+			SeriesfinderWindow.instance.toggleViewAction(),
+			PeakfinderWindow.instance.toggleViewAction(),
+			EnergyLevelsWindow.instance.toggleViewAction(),
+			CmdWindow.instance.toggleViewAction(),
+		]
+
+		for i, modules_action in enumerate(modules_actions):
+			modules_action.setShortcut(f'Ctrl+{i+1}')
 
 		fitfunction_menu = QMenu("Choose Fit Function", parent=parent)
 		self.fitfunction_actions = {}
@@ -2756,8 +2784,8 @@ class Menu():
 
 		actions = {
 			'Files': (
-				QQ(QAction, parent=parent, text="Add Files", change=File.add_files_dialog, tooltip="Add Files"),
-				QQ(QAction, parent=parent, text='Reread All Files', change=lambda _: File.reread_all(), tooltip="Reread all Exp, Cat and Lin files"),
+				QQ(QAction, parent=parent, text="Add Files", change=File.add_files_dialog, shortcut='Ctrl+O', tooltip="Add any kind of Files"),
+				QQ(QAction, parent=parent, text='Reread All Files', change=lambda _: File.reread_all(), shortcut='Ctrl+R', tooltip="Reread all Exp, Cat and Lin files"),
 				None,
 				toggleaction_files,
 				None,
@@ -2780,30 +2808,17 @@ class Menu():
 				QQ(QAction, parent=parent, text="Set Offset", shortcut="Ctrl+G", change=lambda _: OffsetDialog.show_dialog()),
 				None,
 				ScalingWindow.instance.toggleViewAction(),
-				None,
 				toggleaction_convolution,
 			),
 			'View': (
-				ConfigWindow.instance.toggleViewAction(),
+				toggleaction_config,
 				None,
-				ReferenceSeriesWindow.instance.toggleViewAction(),
-				NewAssignmentsWindow.instance.toggleViewAction(),
-				CloseByLinesWindow.instance.toggleViewAction(),
-				LogWindow.instance.toggleViewAction(),
+				*view_actions,
 				None,
 				QQ(QAction, parent=parent, text='Open Console', shortcut='CTRL+K', change= lambda _: ConsoleDialog.show_dialog()),
 				None,
 			),
-			'Modules': (
-				ResidualsWindow.instance.toggleViewAction(),
-				BlendedLinesWindow.instance.toggleViewAction(),
-				ReportWindow.instance.toggleViewAction(),
-				SeriesfinderWindow.instance.toggleViewAction(),
-				PeakfinderWindow.instance.toggleViewAction(),
-				EnergyLevelsWindow.instance.toggleViewAction(),
-				CmdWindow.instance.toggleViewAction(),
-				
-			),
+			'Modules': modules_actions,
 			'Info': (
 				QQ(QAction, parent=parent, text="Open LLWP folder", change=lambda x: webbrowser.open(f'file:///{llwpfile()}'), tooltip="Open the folder containing the config, ...", ),
 				QQ(QAction, parent=parent, text="Send Mail to Author", change=lambda x: self.send_mail_to_author(), tooltip="Send a mail to the developer"),
@@ -2937,6 +2952,7 @@ class MainWindow(QMainWindow):
 			"Shift+a": lambda: OffsetDialog.gui_set_offset("-"),
 			"Shift+d": lambda: OffsetDialog.gui_set_offset("+"),
 			
+			"Ctrl+S": lambda: NewAssignments.get_instance().save_gui(),
 			"Ctrl+Space": lambda: AssignAllDialog.show_dialog(),
 			"Ctrl+Shift+k": lambda: ConsoleDialog.run_current_command(),
 			"F11": lambda: self.togglefullscreen(),
@@ -7588,9 +7604,26 @@ class ASAPMenu(Menu):
 
 		toggleaction_files = FileWindow.instance.toggleViewAction()
 		toggleaction_files.setText('Edit Files')
+		toggleaction_files.setShortcut('Shift+1')
+
+		toggleaction_config = ConfigWindow.instance.toggleViewAction()
+		toggleaction_config.setShortcut('Shift+0')
+
 		toggleaction_credits = CreditsWindow.instance.toggleViewAction()
 		toggleaction_credits.setText("Credits and License")
 		toggleaction_credits.setToolTip("See the Credits and License")
+
+
+		view_actions = [
+			ASAPSettingsWindow.instance.toggleViewAction(),
+			NewAssignmentsWindow.instance.toggleViewAction(),
+			ASAPDetailViewer.instance.toggleViewAction(),
+			LogWindow.instance.toggleViewAction(),
+			CmdWindow.instance.toggleViewAction(),
+		]
+		
+		for i, view_action in enumerate(view_actions):
+			view_action.setShortcut(f'Shift+{i+2}')
 
 
 		fitfunction_menu = QMenu("Choose Fit Function", parent=parent)
@@ -7606,8 +7639,8 @@ class ASAPMenu(Menu):
 
 		actions = {
 			'Files': (
-				QQ(QAction, parent=parent, text="Add Files", change=File.add_files_dialog, tooltip="Add Files"),
-				QQ(QAction, parent=parent, text='Reread All Files', change=lambda _: File.reread_all(), tooltip="Reread all Exp, Cat and Lin files"),
+				QQ(QAction, parent=parent, text="Add Files", change=File.add_files_dialog, shortcut='Ctrl+O', tooltip="Add any kind of Files"),
+				QQ(QAction, parent=parent, text='Reread All Files', change=lambda _: File.reread_all(), shortcut='Ctrl+R', tooltip="Reread all Exp, Cat and Lin files"),
 				None,
 				toggleaction_files,
 				None,
@@ -7624,14 +7657,9 @@ class ASAPMenu(Menu):
 				QQ(QAction, parent=parent, text="Change Fit Color", tooltip="Change the color of the fitfunction", change=lambda _: self.change_fitcolor()),
 			),
 			'View': (
-				ConfigWindow.instance.toggleViewAction(),
+				toggleaction_config,
 				None,
-				ASAPSettingsWindow.instance.toggleViewAction(),
-				ASAPDetailViewer.instance.toggleViewAction(),
-				NewAssignmentsWindow.instance.toggleViewAction(),
-				LogWindow.instance.toggleViewAction(),
-				CmdWindow.instance.toggleViewAction(),
-
+				*view_actions,
 				None,
 				QQ(QAction, parent=parent, text='Open Console', shortcut='CTRL+K', change= lambda _: ConsoleDialog.show_dialog()),
 				None,
