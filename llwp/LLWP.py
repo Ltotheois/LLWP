@@ -7082,6 +7082,12 @@ def QQ(widgetclass, config_key=None, **kwargs):
 	return widget
 
 def bin_data(dataframe, binwidth, range):
+	# It is not verified that the data to be binned is
+	#  - from the same file (-> group by files)
+	#  - is equidistant due to filters or different files being merged
+	#    (-> bins can have different number of points)
+	# Otherwise a much faster algorithm could be implemented
+
 	## The old version (commented out) is significantly slower than the new version.
 	## Tested with cyclopentadiene spectrum around 200 GHz
 
@@ -7098,9 +7104,7 @@ def bin_data(dataframe, binwidth, range):
 	#  100000000 |   668.12 |   191.47 
 
 	# length = len(dataframe)
-	
 	# dataframe.loc[:,"bin"] = (dataframe.loc[:,"x"]-range[0]) // binwidth
-
 	# # For assignments (lin_df) as they do not have an intensity
 	# if "y" not in dataframe:
 	# 	dataframe = dataframe.loc[dataframe.drop_duplicates(("bin", "filename"), keep="last").sort_values(["x"]).index]
@@ -7394,7 +7398,7 @@ class ASAPAx(LWPAx):
 			nobinning = config['plot_skipbinning']
 			binwidth = (xrange[1]-xrange[0]) / bins
 
-			if len(xs) > max(bins, nobinning)  and binwidth != 0:
+			if len(xs) > max(bins, nobinning) and binwidth != 0:
 				df = pd.DataFrame({'x': xs, 'y': ys, 'filename': None})
 				df = bin_data(df, binwidth, xrange)
 				xs, ys = df['x'], df['y']
