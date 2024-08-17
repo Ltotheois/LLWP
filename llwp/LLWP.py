@@ -7082,16 +7082,42 @@ def QQ(widgetclass, config_key=None, **kwargs):
 	return widget
 
 def bin_data(dataframe, binwidth, range):
-	length = len(dataframe)
+	## The old version (commented out) is significantly slower than the new version.
+	## Tested with cyclopentadiene spectrum around 200 GHz
+
+	# Width [MHz]| Old [ms] | New [ms] 
+	# -----------|----------|----------
+	#          1 |     1.73 |     1.42 
+	# 		  10 |     1.07 |     1.08 
+	# 	     100 |     1.14 |     1.01 
+	# 	    1000 |     2.64 |     1.67 
+	#      10000 |    18.35 |     7.38 
+	#     100000 |   160.05 |    53.30 
+	#    1000000 |   569.59 |   163.29 
+	#   10000000 |   618.89 |   171.58 
+	#  100000000 |   668.12 |   191.47 
+
+	# length = len(dataframe)
 	
+	# dataframe.loc[:,"bin"] = (dataframe.loc[:,"x"]-range[0]) // binwidth
+
+	# # For assignments (lin_df) as they do not have an intensity
+	# if "y" not in dataframe:
+	# 	dataframe = dataframe.loc[dataframe.drop_duplicates(("bin", "filename"), keep="last").sort_values(["x"]).index]
+	# else:
+	# 	dataframe = dataframe.loc[dataframe.sort_values("y").drop_duplicates(("bin", "filename"), keep="last").sort_values(["x"]).index]
+	# return(dataframe)
+
+	length = len(dataframe)
 	dataframe.loc[:,"bin"] = (dataframe.loc[:,"x"]-range[0]) // binwidth
 
-	# For assignments (lin_df) as they do not have an intensity
 	if "y" not in dataframe:
-		dataframe = dataframe.loc[dataframe.drop_duplicates(("bin", "filename"), keep="last").sort_values(["x"]).index]
+		index_ = dataframe.groupby(['bin', 'filename'], observed=True)['x'].idxmax()
 	else:
-		dataframe = dataframe.loc[dataframe.sort_values("y").drop_duplicates(("bin", "filename"), keep="last").sort_values(["x"]).index]
+		index_ = dataframe.groupby(['bin', 'filename'], observed=True)['y'].idxmax()
+	dataframe = dataframe.loc[index_]
 	return(dataframe)
+
 
 def llwpfile(extension=""):
 	home = os.path.expanduser("~")
