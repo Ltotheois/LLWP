@@ -539,8 +539,8 @@ class PlotWidget(QWidget):
 
 		self.ax = self.fig.subplots()
 
-		self.exp_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_exp"])
-		self.cat_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_cat"])
+		self.exp_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_exp"], capstyle='round')
+		self.cat_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_cat"], capstyle='round')
 		self.lin_coll = self.ax.scatter([], [], color=config['color_ref'], marker="*", zorder=100)
 		self.ax.add_collection(self.exp_coll)
 		self.ax.add_collection(self.cat_coll)
@@ -2053,8 +2053,8 @@ class LWPAx():
 		with matplotlib_lock:
 			self.span =  matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax: self.on_range(xmin, xmax), 'horizontal', useblit=True, button=1)
 		
-		self.exp_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_exp"])
-		self.cat_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_cat"])
+		self.exp_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_exp"], capstyle='round')
+		self.cat_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_cat"], capstyle='round')
 		self.lin_coll = ax.scatter([], [], color=config['color_ref'], marker="*", zorder=100)
 
 		with matplotlib_lock:
@@ -7369,7 +7369,7 @@ class ASAPAx(LWPAx):
 		with matplotlib_lock:
 			self.span =  matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax: self.on_range(xmin, xmax), 'horizontal', useblit=True, button=1)
 		
-		self.exp_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_exp"])
+		self.exp_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_exp"], capstyle='round')
 
 		with matplotlib_lock:
 			ax.add_collection(self.exp_coll)
