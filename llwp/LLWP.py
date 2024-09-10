@@ -2377,6 +2377,8 @@ class LWPAx():
 		
 		if reference_state['method'] == 'Transition':
 			file_to_limit_data_to = reference_state['transition'].get('file')
+		else:
+			file_to_limit_data_to = False
 		
 		blendwidth = config['series_blendwidth']
 		xpre = new_assignment['xpre']
@@ -3911,6 +3913,9 @@ class AssignAllDialog(QDialog):
 			fit_xs = np.linspace(xmin, xmax, 1000)
 			fit_function = get_fitfunction(fitmethod, offset, kwargs=kwargs)
 
+			# @Luis: We would need a way to check here if the fit is sensible
+			# We could implement this as kwarg in fit_* functions -> specify how to check
+			# If not sensible, plot as dashed line, mark as weird in new_assignments
 			try:
 				xmiddle, xuncert, fit_xs, fit_ys = fit_function(exp_xs, exp_ys, peakdirection, fit_xs, )
 			except Exception as E:
@@ -3923,6 +3928,9 @@ class AssignAllDialog(QDialog):
 			ax.plot(fit_xs - xref, fit_ys, color=config['color_fit'], lw=2, alpha=0.5)
 			ax.axvline(xmiddle - xref, zorder=10, color=config['color_fit'])
 		
+		# @Luis: Check here for outliers and immediately remove them from being added
+		# Check the residuals from trendfit -> Outliers are probably wrong
+
 		ax = axs[0]
 		ax.xaxis.set_visible(True)
 		ax.margins(x=0)
@@ -4377,7 +4385,6 @@ class ReferenceSelector(QTabWidget):
 			qnus, qnls, diffs = tmp['qnus'], tmp['qnls'], tmp['diff']
 
 			# Prefilter df to all transitins belonging to series
-
 			conditions, conditions_incr = [], []
 			normalizing_value = None
 			for i, qnu, qnl, diff in zip(range(n_qns), qnus, qnls, diffs):
@@ -4397,7 +4404,7 @@ class ReferenceSelector(QTabWidget):
 			# Add condition for limiting to specific file
 			file_to_limit_data_to = state.get('file')
 			if file_to_limit_data_to:
-				conditions.append('(filename == @file_to_limit_data_to)')
+				conditions.append(f'(filename == "{file_to_limit_data_to}")')
 			
 			conditions = " and ".join(conditions)  if conditions else '(visible)'
 			cat_df = CatFile.query_c(conditions)
