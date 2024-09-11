@@ -2795,7 +2795,8 @@ class Menu():
 				None,
 				QQ(QAction, parent=parent, text="Save Files as Project", change=lambda _: File.save_files_gui(), tooltip="Save all loaded files and their parameters as a project."),
 				QQ(QAction, parent=parent, text="Load Project", change=lambda _: File.load_files_gui(), tooltip="Load a project."),
-
+				None,
+				QQ(QAction, parent=parent, text="Quit", change=mainwindow.close),
 			),
 			'Fit': (
 				fitfunction_menu,
@@ -7685,7 +7686,8 @@ class ASAPMenu(Menu):
 				None,
 				QQ(QAction, parent=parent, text="Save Files as Project", change=lambda _: File.save_files_gui(), tooltip="Save all loaded files and their parameters as a project."),
 				QQ(QAction, parent=parent, text="Load Project", change=lambda _: File.load_files_gui(), tooltip="Load a project."),
-
+				None,
+				QQ(QAction, parent=parent, text="Quit", change=mainwindow.close),
 			),
 			'Fit': (
 				fitfunction_menu,
