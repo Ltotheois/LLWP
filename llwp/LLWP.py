@@ -3757,8 +3757,7 @@ class AssignAllDialog(QDialog):
 			if len(egy_offsets) == 1:
 				pred_egy[i_row] = egy_offsets[0]
 			
-			# @Luis: Also allow to use lower levels here
-			# Probably also check that rest of program supports lower level as target state
+			# We have to get the energy levels here as the upper levels, as this is how they are defined in the *lin format
 			query = ' and '.join([f'(qnu{i+1} == {qn}) and (qnl{i+1} == 0)' for i, qn in enumerate(qnus)])
 			vals = LinFile.query_c(query)['x'].to_numpy()
 			
@@ -3769,7 +3768,7 @@ class AssignAllDialog(QDialog):
 				qnsstring = ','.join(map(str, qnus))
 				notify_warning.emit(f'Multiple assignments for level {qnsstring} found. Did not use it as reference.')
 				continue
-			
+
 			offsets[i_row] = vals[0] - pred_egy.get(i_row, 0)
 		
 		if len(offsets) < 1:
@@ -3927,9 +3926,6 @@ class AssignAllDialog(QDialog):
 			fit_xs = np.linspace(xmin, xmax, 1000)
 			fit_function = get_fitfunction(fitmethod, offset, kwargs=kwargs)
 
-			# @Luis: We would need a way to check here if the fit is sensible
-			# We could implement this as kwarg in fit_* functions -> specify how to check
-			# If not sensible, plot as dashed line, mark as weird in new_assignments
 			try:
 				xmiddle, xuncert, fit_xs, fit_ys = fit_function(exp_xs, exp_ys, peakdirection, fit_xs, )
 			except Exception as E:
@@ -3941,9 +3937,6 @@ class AssignAllDialog(QDialog):
 			
 			ax.plot(fit_xs - xref, fit_ys, color=config['color_fit'], lw=2, alpha=0.5)
 			ax.axvline(xmiddle - xref, zorder=10, color=config['color_fit'])
-		
-		# @Luis: Check here for outliers and immediately remove them from being added
-		# Check the residuals from trendfit -> Outliers are probably wrong
 
 		ax = axs[0]
 		ax.xaxis.set_visible(True)
