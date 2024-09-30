@@ -3709,6 +3709,7 @@ class AssignAllDialog(QDialog):
 		super().__init__()
 		self.setModal(False)
 		self.i_col = i_col
+		self.axes_to_skip = set()
 		
 		self.setWindowTitle("Assign All")
 
@@ -3722,7 +3723,10 @@ class AssignAllDialog(QDialog):
 		self.drawplot.connect(self.plot_canvas.draw_idle)
 		self.update_gui()
 
-	def update_gui_asap(self):
+	def update_gui_asap(self, reset_axes_to_skip=True):
+		if reset_axes_to_skip:
+			self.axes_to_skip = set()
+		
 		n_rows = config['plot_rows']
 		n_qns = self.noq = config['series_qns']
 		
@@ -3753,6 +3757,8 @@ class AssignAllDialog(QDialog):
 			if len(egy_offsets) == 1:
 				pred_egy[i_row] = egy_offsets[0]
 			
+			# @Luis: Also allow to use lower levels here
+			# Probably also check that rest of program supports lower level as target state
 			query = ' and '.join([f'(qnu{i+1} == {qn}) and (qnl{i+1} == 0)' for i, qn in enumerate(qnus)])
 			vals = LinFile.query_c(query)['x'].to_numpy()
 			
@@ -3775,14 +3781,16 @@ class AssignAllDialog(QDialog):
 		for ax in self.fig.get_axes():
 			self.fig.delaxes(ax)
 		axs = self.fig.subplots(n_rows, sharex=True, gridspec_kw={'hspace': 0, 'wspace': 0})
-		axs = axs[::-1]
+		self.axs = axs = axs[::-1]
 		
 		self.new_assignments = {}
 		for i_row, (xref, qnus, ax) in enumerate(zip(positions, qns, axs)):
 			already_assigned = (i_row in offsets)
+			user_flagged_to_skip = (i_row in self.axes_to_skip)
 			
 			if already_assigned:
 				xpre = xref + offsets[i_row]
+				ax.scatter(offsets[i_row], 0, color=config['color_ref'], marker="*", zorder=100)
 			else:
 				offset_values = np.array([[key, value] for key, value in offsets.items()])
 				degree = min(len(offset_values) - 1, max_pol_degree)
@@ -3810,10 +3818,10 @@ class AssignAllDialog(QDialog):
 			ax.yaxis.set_visible(False)
 			ax.margins(y=config['plot_ymargin'])
 			
-			if already_assigned or len(exp_xs) == 0:
+			if already_assigned or user_flagged_to_skip or len(exp_xs) == 0:
 				continue
 			
-			kwargs = {'wmax': max_fwhm}
+			kwargs = {'wmax': max_fwhm, 'xs_weight_factor': 0}
 			fit_xs = np.linspace(xmin, xmax, 1000)
 			fit_function = get_fitfunction(fitmethod, offset, kwargs=kwargs)
 
@@ -3836,7 +3844,10 @@ class AssignAllDialog(QDialog):
 		
 		self.drawplot.emit()
 	
-	def update_gui_llwp(self):
+	def update_gui_llwp(self, reset_axes_to_skip=True):
+		if reset_axes_to_skip:
+			self.axes_to_skip = set()
+		
 		n_rows = config['plot_rows']
 		n_qns = self.noq = config['series_qns']
 		
@@ -3881,14 +3892,16 @@ class AssignAllDialog(QDialog):
 		for ax in self.fig.get_axes():
 			self.fig.delaxes(ax)
 		axs = self.fig.subplots(n_rows, sharex=True, gridspec_kw={'hspace': 0, 'wspace': 0})
-		axs = axs[::-1]
+		self.axs = axs = axs[::-1]
 		
 		self.new_assignments = {}
 		for i_row, (xref, row_qns, ax) in enumerate(zip(positions, qns, axs)):
 			already_assigned = (i_row in offsets)
+			user_flagged_to_skip = (i_row in self.axes_to_skip)
 			
 			if already_assigned:
 				xpre = xref + offsets[i_row]
+				ax.scatter(offsets[i_row], 0, color=config['color_ref'], marker="*", zorder=100)
 			else:
 				offset_values = np.array([[key, value] for key, value in offsets.items()])
 				degree = min(len(offset_values) - 1, max_pol_degree)
@@ -3907,10 +3920,10 @@ class AssignAllDialog(QDialog):
 			ax.yaxis.set_visible(False)
 			ax.margins(y=config['plot_ymargin'])
 			
-			if already_assigned or len(exp_xs) == 0:
+			if already_assigned or user_flagged_to_skip or len(exp_xs) == 0:
 				continue
 			
-			kwargs = {'wmax': max_fwhm}
+			kwargs = {'wmax': max_fwhm, 'xs_weight_factor': 0}
 			fit_xs = np.linspace(xmin, xmax, 1000)
 			fit_function = get_fitfunction(fitmethod, offset, kwargs=kwargs)
 
@@ -3938,14 +3951,16 @@ class AssignAllDialog(QDialog):
 		
 		self.drawplot.emit()
 
-	def update_gui(self):
-		self.update_gui_llwp()
+	def update_gui(self, *args, **kwargs):
+		self.update_gui_llwp(*args, **kwargs)
 
 	def init_gui(self):
 		layout = QVBoxLayout(margin=True)
 		self.setLayout(layout)
 
 		self.fig = matplotlib.figure.Figure(dpi=config['plot_dpi'])
+		cid = self.fig.canvas.mpl_connect('button_press_event', self.on_click)
+
 		self.plot_canvas = FigureCanvas(self.fig)
 		self.mpl_toolbar = NavigationToolbar2QT(self.plot_canvas, self)
 
@@ -4011,6 +4026,21 @@ class AssignAllDialog(QDialog):
 			new_assignments[f'qnl{i+1}'] = pyckett.SENTINEL
 
 		NewAssignments.get_instance().add_rows(new_assignments)
+
+	def on_click(self, event):
+		clicked_axis = event.inaxes
+		
+		if not clicked_axis:
+			return
+		
+		for i, ax in enumerate(self.axs):
+			if ax == event.inaxes:
+				if i in self.axes_to_skip:
+					self.axes_to_skip.remove(i)
+				else:
+					self.axes_to_skip.add(i)
+				self.update_gui(reset_axes_to_skip=False)
+				return
 
 	def on_exit(self):
 		self.__class__._instance = None
@@ -6836,8 +6866,11 @@ def fit_polynom_multirank(xs, ys, peakdirection, fit_xs, maxrank):
 def fit_lineshape(xs, ys, peakdirection, fit_xs, profilname, derivative, offset, **kwargs):
 	xmin, xmax = xs.min(), xs.max()
 	x0 = (xmin + xmax) / 2
-	ys_weighted = ys * np.exp(- np.abs(np.abs(xs - x0) / (xmax - xmin) ) * 4)
-	x0 = xs[np.argmax(ys_weighted)] if peakdirection >= 0 else xs[np.argmin(ys_weighted)]
+	
+	xs_weight_factor = kwargs.get('xs_weight_factor', 4)
+	if xs_weight_factor:
+		ys_weighted = ys * np.exp(- np.abs(np.abs(xs - x0) / (xmax - xmin) ) * xs_weight_factor)
+		x0 = xs[np.argmax(ys_weighted)] if peakdirection >= 0 else xs[np.argmin(ys_weighted)]
 	
 	ymin, ymax, ymean, yptp = ys.min(), ys.max(), ys.mean(), np.ptp(ys)
 	y0 = 0
@@ -7125,11 +7158,12 @@ def bin_data(dataframe, binwidth, range):
 
 	length = len(dataframe)
 	dataframe.loc[:,"bin"] = (dataframe.loc[:,"x"]-range[0]) // binwidth
-
+	
 	if "y" not in dataframe:
 		index_ = dataframe.groupby(['bin', 'filename'], observed=True)['x'].idxmax()
 	else:
 		index_ = dataframe.groupby(['bin', 'filename'], observed=True)['y'].idxmax()
+	
 	dataframe = dataframe.loc[index_]
 	return(dataframe)
 
@@ -7410,7 +7444,7 @@ class ASAPAx(LWPAx):
 			binwidth = (xrange[1]-xrange[0]) / bins
 
 			if len(xs) > max(bins, nobinning) and binwidth != 0:
-				df = pd.DataFrame({'x': xs, 'y': ys, 'filename': None})
+				df = pd.DataFrame({'x': xs, 'y': ys, 'filename': 0})
 				df = bin_data(df, binwidth, xrange)
 				xs, ys = df['x'], df['y']
 
