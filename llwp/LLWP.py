@@ -980,7 +980,7 @@ class EQDockWidget(QDockWidget):
 
 class QDialog(QDialog):
 	def __init__(self, *args, **kwargs):
-		super().__init__()
+		super().__init__(mainwindow)
 		Geometry.load_widget_geometry(self)
 		QShortcut("Esc", self).activated.connect(lambda: self.done(0))
 
@@ -3694,7 +3694,6 @@ class QNsDialog(QDialog):
 
 class AssignAllDialog(QDialog):
 	drawplot = pyqtSignal()
-	
 	_instance = None
 
 	@classmethod
