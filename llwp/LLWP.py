@@ -2318,7 +2318,7 @@ class LWPAx():
 			self.__class__.fit_curve = None
 		
 		# Fit the data
-		xmiddle, xuncert, fit_xs, fit_ys = self.fit_peak(xmin, xmax)			
+		xmiddle, xuncert, fit_xs, fit_ys = self.fit_peak(xmin, xmax)
 		if config['fit_copytoclipboard']:
 			QApplication.clipboard().setText(str(xmiddle))
 
@@ -6836,6 +6836,9 @@ def fit_polynom_multirank(xs, ys, peakdirection, fit_xs, maxrank):
 def fit_lineshape(xs, ys, peakdirection, fit_xs, profilname, derivative, offset, **kwargs):
 	xmin, xmax = xs.min(), xs.max()
 	x0 = (xmin + xmax) / 2
+	ys_weighted = ys * np.exp(- np.abs(np.abs(xs - x0) / (xmax - xmin) ) * 4)
+	x0 = xs[np.argmax(ys_weighted)] if peakdirection >= 0 else xs[np.argmin(ys_weighted)]
+	
 	ymin, ymax, ymean, yptp = ys.min(), ys.max(), ys.mean(), np.ptp(ys)
 	y0 = 0
 	
