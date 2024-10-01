@@ -340,6 +340,7 @@ class Config(dict):
 		'asap_catunitconversionfactor': (0, float),
 		'asap_detailviewerwidth': (0, float),
 		'asap_detailviewerfilter': (False, bool),
+		'asap_assigntransitions': (True, bool),
 	}
 
 	def __init__(self, signal, *args, **kwargs):
@@ -7398,6 +7399,7 @@ class ASAPAx(LWPAx):
 		self.annotation = None
 		self.qns = None
 		self.entries = None
+		self.is_upper_state = True
 
 		self.corr_xs = None
 		self.corr_ys = None
@@ -7444,7 +7446,6 @@ class ASAPAx(LWPAx):
 
 		self.exp_coll.set(segments=segs, color=config['color_exp'])
 
-
 	# @status_d
 	@QThread.threaded_d
 	@drawplot_decorator.d
@@ -7461,6 +7462,7 @@ class ASAPAx(LWPAx):
 		tot_xs = self.corr_xs
 		tot_ys = self.corr_ys
 
+
 		if tot_xs is not None and len(tot_xs):
 			min_index = tot_xs.searchsorted(self.xrange[0], side='right')
 			max_index = tot_xs.searchsorted(self.xrange[1], side='left')
@@ -7468,18 +7470,23 @@ class ASAPAx(LWPAx):
 			tot_xs = tot_xs[min_index:max_index]
 			tot_ys = tot_ys[min_index:max_index]
 		
+		
 		self.vals_to_coll(tot_xs, tot_ys)
 
 		if tot_ys is not None and len(tot_ys):
 			yrange = (np.min(tot_ys), np.max(tot_ys))
 		margin = config['plot_ymargin']
 
+		
+
 		yrange = (yrange[0]-margin*(yrange[1]-yrange[0]), yrange[1]+margin*(yrange[1]-yrange[0]))
 		if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
 			yrange = (-2,+2)
 
 		ax.set_ylim(yrange)
+		
 		self.update_annotation()
+		
 
 	def update_annotation(self):
 		fstring = config['plot_annotationfstring']
@@ -7595,14 +7602,47 @@ class ASAPAx(LWPAx):
 			notify_warning.emit('No corresponding energy level found! Please check if an energy file is loaded.')
 
 		error = self.fit_determine_uncert(0, xmiddle, xuncert)
-		xmiddle += egy_val
+		
+		if self.is_upper_state:
+			xenergy = xmiddle + egy_val
+		else:
+			xenergy = xmiddle - egy_val
 
 		# Create assignment object
-		new_assignment = {'x': xmiddle, 'error': error, 'xpre': 0}
+		new_assignment = {'x': xenergy, 'error': error, 'xpre': 0}
 		new_assignment.update(qns_dict)
 		new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
 		
-		NewAssignments.get_instance().add_row(new_assignment)
+		if not config['asap_assigntransitions']:
+			NewAssignments.get_instance().add_row(new_assignment)
+		
+		else:
+			# Entries are already in energy units -> same error as energy level is appropriate
+			entries = self.entries.query('(use_for_cross_correlation)').copy()
+			entries['x'] += xmiddle
+			noq = config['series_qns']
+			energy_assignment_df = pd.DataFrame(new_assignment, index=[0])
+			entries = pd.concat( (energy_assignment_df, entries) )
+			
+			new_assignments = {
+				'xpre': 0,
+				'x': entries['x'],
+				'weight': 1,
+				'error': error,
+				'comment': config['fit_comment'],
+				'filename': '__newassignments__',
+			}
+
+			for i in range(noq):
+				new_assignments[f'qnu{i+1}'] = entries[f'qnu{i+1}']
+				new_assignments[f'qnl{i+1}'] = entries[f'qnl{i+1}']
+			
+			for i in range(noq, N_QNS):
+				new_assignments[f'qnu{i+1}'] = pyckett.SENTINEL
+				new_assignments[f'qnl{i+1}'] = pyckett.SENTINEL
+
+			NewAssignments.get_instance().add_rows(new_assignments)
+		
 
 	def fit_peak(self, xmin, xmax):
 		exp_xs, exp_ys = self.corr_xs, self.corr_ys
@@ -7920,6 +7960,7 @@ class ASAPWidget(LWPWidget):
 					ax.corr_xs = corr_xs
 					ax.corr_ys = corr_ys
 					ax.qns = row_qns
+					ax.is_upper_state = state['is_upper_state']
 					threads.append(ax.update())
 					
 					thread.earlyreturn()
