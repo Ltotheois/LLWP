@@ -517,7 +517,7 @@ class PlotWidget(QWidget):
 		self.parent = parent
 		self.gui()
 		self.from_current_plot()
-		self.span_selector = matplotlib.widgets.SpanSelector(self.ax, self.on_range, 'horizontal', useblit=True)
+		self.span_selector = matplotlib.widgets.SpanSelector(self.ax, self.on_range, 'horizontal', useblit=True, button=3)
 		self.shortcuts()
 
 	def gui(self):
@@ -733,6 +733,10 @@ class PlotWidget(QWidget):
 			tmp.activated.connect(function)
 
 	def on_range(self, xmin, xmax):
+		xmin_ax, xmax_ax = self.xrange
+		if xmax == xmin or xmax > xmax_ax or xmin < xmin_ax:
+			return
+		
 		self.xrange = (xmin, xmax)
 		self.update_plot()
 
@@ -5677,7 +5681,7 @@ class BlendedLinesWindow(EQDockWidget):
 		self.table.setMinimumHeight(50)
 		layout.addWidget(self.table, 1)
 
-		self.cid = self.plot_widget.plot_canvas.mpl_connect("button_press_event", lambda event: self.add_peak(event.xdata, event.ydata))
+		self.cid = self.plot_widget.plot_canvas.mpl_connect("button_press_event", lambda event: self.add_peak(event))
 		self.fill_table_requested.connect(self.fill_table)
 		self.plot_widget.from_current_plot()
 
@@ -5837,8 +5841,10 @@ class BlendedLinesWindow(EQDockWidget):
 		self.set_indicator_text.emit("Ready")
 		plot_widget.update_plot_requested.emit()
 	
-	def add_peak(self, x, y):
-		if not (x and y):
+	def add_peak(self, event):
+		x, y = event.xdata, event.ydata
+		is_left_mouse_button = (event.button == 1)
+		if not (x and y and is_left_mouse_button):
 			return
 		x = np.float64(x)
 		y = np.float64(y)
