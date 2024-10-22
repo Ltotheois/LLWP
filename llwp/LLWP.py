@@ -3865,6 +3865,9 @@ class AssignAllDialog(QDialog):
 		tab_widget = ReferenceSeriesWindow.instance.tab
 		refwidget = tab_widget.widget(self.i_col)
 		
+		# @Luis: Improve for transitions case to do all available predictions 
+		# Think about going giving here calc_references 100 instead of n_rows
+		# Then throw out all positions that are zero
 		positions, qns = refwidget.calc_references(n_rows, n_qns)
 		qn_labels = [f'qn{ul}{i+1}' for ul in ('u', 'l') for i in range(n_qns)]
 		
@@ -4305,6 +4308,8 @@ class ReferenceSelector(QTabWidget):
 			itemshort = os.path.split(item)[-1]
 
 		self.state['transition']['file'] = item
+		self.series_selector.state['file'] = item
+		
 		self.activefilebutton.setText(itemshort)
 		self.changed()
 
@@ -4432,7 +4437,8 @@ class ReferenceSelector(QTabWidget):
 			# Add condition for limiting to specific file
 			file_to_limit_data_to = state.get('file')
 			if file_to_limit_data_to:
-				conditions.append(f'(filename == "{file_to_limit_data_to}")')
+				filepath = file_to_limit_data_to.replace('\\', '\\\\')
+				conditions.append(f'(filename == "{filepath}")')
 			
 			conditions = " and ".join(conditions)  if conditions else '(visible)'
 			cat_df = CatFile.query_c(conditions)
