@@ -3499,7 +3499,7 @@ class WidthDialog(QDialog):
 		self.layout = QFormLayout()
 		self.setLayout(self.layout)
 
-		self.input_width_value = QQ(QDoubleSpinBox, value=config['plot_width'], range=(0, None))
+		self.input_width_value = QQ(QDoubleSpinBoxFullPrec, value=config['plot_width'], range=(0, None))
 		self.layout.addRow('Width: ', self.input_width_value)
 
 		expression = config['plot_widthexpression']
@@ -3563,7 +3563,7 @@ class OffsetDialog(QDialog):
 		self.layout = QFormLayout()
 		self.setLayout(self.layout)
 
-		self.input_offset_value = QQ(QDoubleSpinBox, value=config['plot_offset'], range=(None, None))
+		self.input_offset_value = QQ(QDoubleSpinBoxFullPrec, value=config['plot_offset'], range=(None, None))
 		self.layout.addRow('Offset: ', self.input_offset_value)
 
 		is_relative = config['plot_offsetisrelative']
