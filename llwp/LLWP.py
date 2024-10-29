@@ -2866,7 +2866,7 @@ class Menu():
 		config['color_fit'] = color
 	
 	def plot_number(self):
-		resp, rc = QInputDialog.getText(self, 'How many plots do you want: ', 'Number:')
+		resp, rc = QInputDialog.getText(mainwindow, 'How many plots do you want: ', 'Number:')
 		if not rc:
 			return
 		resp = resp.split("x")
