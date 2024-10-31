@@ -5034,7 +5034,7 @@ class NewAssignmentsWindow(EQDockWidget):
 		tooltip_append = "Append to file if checked or overwrite content if unchecked"
 		tooltip_uncert = "Positive Values are absolute Values, -1 for obs-calc, -2 for dialog, -3 for StdDev from Fit"
 
-		new_assignments = self.new_assignments= NewAssignments.get_instance()
+		new_assignments = self.new_assignments = NewAssignments.get_instance()
 
 		widgets = self.widgets = {
 			'save': QQ(QToolButton, text='Save', change=lambda x: new_assignments.save_gui()),
@@ -5616,23 +5616,68 @@ class ResidualsWindow(EQDockWidget):
 				self.annot.set_visible(False)
 			self.fig.canvas.draw_idle()
 
+			# clicked and transition(s) under cursor
 			if click and noq:
-				tab_widget = ReferenceSeriesWindow.instance.tab
-				refwidget = tab_widget.widget(config['series_currenttab'])
-				refwidget.setCurrentIndex(0)
-				seriesselector = refwidget.series_selector
+				action_to_perform = 'showinplot'
 				
-				current_state = seriesselector.state
-				current_state['qnus'][:noq] = qnus
-				current_state['qnls'][:noq] = qnls
-				config['series_qns'] = noq
+				is_right_click = (event.button ==3)
+				if is_right_click:
+					menu = QMenu()
+					showinplot_action = menu.addAction('Show in plot')
+					deletefromfile_action = menu.addAction('Delete from file')
+					
+					action = menu.exec(QCursor.pos())
+					if action == showinplot_action:
+						action_to_perform = 'showinplot'
+					elif action == deletefromfile_action:
+						action_to_perform = 'deletefromfile'
 
-				seriesselector.set_state()
+				if action_to_perform == 'showinplot':
+					tab_widget = ReferenceSeriesWindow.instance.tab
+					refwidget = tab_widget.widget(config['series_currenttab'])
+					refwidget.setCurrentIndex(0)
+					seriesselector = refwidget.series_selector
+					
+					current_state = seriesselector.state
+					current_state['qnus'][:noq] = qnus
+					current_state['qnls'][:noq] = qnls
+					config['series_qns'] = noq
 
-				mainwindow.lwpwidget.set_data()
-				mainwindow.show()
-				mainwindow.raise_()
-				mainwindow.activateWindow()
+					seriesselector.set_state()
+
+					mainwindow.lwpwidget.set_data()
+					mainwindow.show()
+					mainwindow.raise_()
+					mainwindow.activateWindow()
+				elif action_to_perform == 'deletefromfile':
+					unique_lin_fnames = tmp_transitions['filename_lin'].unique()
+					for lin_fname in unique_lin_fnames:
+						if lin_fname == "__newassignments__":
+							new_assignments = NewAssignments.get_instance()
+							lin = new_assignments.get_new_assignments_df().copy()
+						else:
+							lin = pyckett.lin_to_df(lin_fname, sort=False)
+						
+						transitions_to_delete = tmp_transitions.query('filename_lin == @lin_fname')
+						columns = {x: x.replace('_lin', '').replace('_x', '') for x in transitions_to_delete.columns if (x.endswith('_lin') or x.endswith('_x'))}
+						transitions_to_delete = transitions_to_delete.rename(columns=columns)
+						transitions_to_delete = transitions_to_delete[list(pyckett.lin_dtypes.keys())]
+
+						lin = pd.merge(lin, transitions_to_delete, how='left', indicator=True)
+						lin = lin[lin['_merge'] == 'left_only']
+						lin = lin.drop('_merge', axis='columns').reset_index(drop=True)
+
+						if lin_fname == '__newassignments__':
+							new_assignments.new_assignments_df = lin
+							new_assignments.load_file()
+
+							new_assignments_window = NewAssignmentsWindow.instance
+							new_assignments_window.model.update()
+							new_assignments_window.model.resize_columns()
+						else:
+							with open(lin_fname, 'w+') as file:
+								file.write(pyckett.df_to_lin(lin))
+
 
 class BlendedLinesWindow(EQDockWidget):
 	default_visible = False
