@@ -273,6 +273,7 @@ class Config(dict):
 		'flag_pyckettquanta': (6, int),
 		'flag_showseriesarrows': (True, bool),
 		'flag_keeponlylastassignment': (False, bool),
+		'flag_autoreloadfiles': (True, bool),
 
 		'commandlinedialog_commands': ([], list),
 		'commandlinedialog_current': (0, int),
@@ -1032,6 +1033,31 @@ class File():
 		'visible': bool,
 		'filename': 'category',
 	}
+	files_watcher = QFileSystemWatcher()
+	files_watcher.fileChanged.connect(lambda x: File.autoreload_file(x))
+
+	@classmethod
+	def autoreload_file(cls, filename):
+		if not config['flag_autoreloadfiles']:
+			return
+
+		sorted_files = cls.sort_files_by_type([filename])
+		for filetype, files in sorted_files.items():
+			if not files:
+				continue
+
+			class_ = {'exp': ExpFile, 'cat': CatFile, 'lin': LinFile}.get(filetype)
+			if not class_:
+				return
+
+			file = class_.ids.get(filename)
+			if not file:
+				return
+			
+			if os.path.getsize(filename) == 0:
+				return
+			
+			file.load_file()
 
 	def __new__(cls, filename, *args, load_manually=False, **kwargs):
 		if cls == NewAssignments:
@@ -1055,6 +1081,9 @@ class File():
 		self.dirname_abs, self.basename = os.path.split(filename)
 		self.extension = os.path.splitext(filename)[1]
 		
+		if self.filename_abs not in self.files_watcher.files():
+			self.files_watcher.addPath(self.filename_abs)
+
 		self.ids[self.filename_abs] = self
 
 		self.gui_widgets = {}
@@ -1095,7 +1124,7 @@ class File():
 			raise CustomError(f"The file {fname} could not be found. Please check the file.")
 		
 		if os.path.getsize(fname) == 0:
-			notify_warning.emit(f"<span style='color:#eda711;'>WARNING</span>: The file {fname} is empty and was therefore skipped.")
+			notify_warning.emit(f"The file {fname} is empty and was therefore skipped.")
 			raise CustomError(f"The file {fname} is empty and was therefore skipped.")
 	
 	@QThread.threaded_d
@@ -1625,6 +1654,9 @@ class File():
 		mainwindow.lwpwidget.set_data()
 
 	def delete(self):
+		# Delete from Filewatcher
+		resp = self.files_watcher.removePath(self.filename_abs)
+
 		# Delete row from files window
 		for widget in self.gui_widgets.values():
 			widget.setParent(None)
@@ -1643,7 +1675,6 @@ class File():
 			del self.ids[self.filename_abs]
 		
 		self.clear_caches()
-		
 		del self
 	
 class CatFile(File):
@@ -2793,6 +2824,7 @@ class Menu():
 			'Files': (
 				QQ(QAction, parent=parent, text="Add Files", change=File.add_files_dialog, shortcut='Ctrl+O', tooltip="Add any kind of Files"),
 				QQ(QAction, parent=parent, text='Reread All Files', change=lambda _: File.reread_all(), shortcut='Ctrl+R', tooltip="Reread all Exp, Cat and Lin files"),
+				QQ(QAction, 'flag_autoreloadfiles', checkable=True, parent=parent, text='Auto Reload Files', tooltip="Automatically reload files on change"),
 				None,
 				toggleaction_files,
 				None,
@@ -5511,7 +5543,7 @@ class ResidualsWindow(EQDockWidget):
 			thread = self.plot_residuals_core()
 			thread.wait()
 		except Exception as E:
-			notify_warning.emit("<span style='color:#eda711;'>WARNING</span>: There was an error in your Residuals window input")
+			notify_warning.emit("There was an error in your Residuals window input")
 		finally:
 			self.fig.canvas.draw_idle()
 			self.update_button.setDisabled(False)
