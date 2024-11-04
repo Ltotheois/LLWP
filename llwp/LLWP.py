@@ -312,6 +312,7 @@ class Config(dict):
 		'seriesfinder_atype': (True, bool),
 		'seriesfinder_btype': (True, bool),
 		'seriesfinder_ctype': (True, bool),
+		'seriesfinder_xtype': (True, bool),
 		'seriesfinder_onlyunassigned': (True, bool),
 		
 		'peakfinder_peakcolor': ("#4287f5", Color),
@@ -6220,6 +6221,7 @@ class SeriesfinderWindow(EQDockWidget):
 		rightLayout.addWidget(QQ(QCheckBox, "seriesfinder_atype", text="a-type"))
 		rightLayout.addWidget(QQ(QCheckBox, "seriesfinder_btype", text="b-type"))
 		rightLayout.addWidget(QQ(QCheckBox, "seriesfinder_ctype", text="c-type"))
+		rightLayout.addWidget(QQ(QCheckBox, "seriesfinder_xtype", text="x-type"))
 		rightLayout.addStretch(1)
 
 		leftLayout.addWidget(QQ(QLabel, text="Start Frequency: "), 1, 0)
@@ -6263,6 +6265,8 @@ class SeriesfinderWindow(EQDockWidget):
 			tmp_condition.append(f"(abs(qnu2-qnl2) % 2 == 1 and abs(qnu3-qnl3) % 2 == 1)")
 		if config["seriesfinder_ctype"]:
 			tmp_condition.append(f"(abs(qnu2-qnl2) % 2 == 1 and abs(qnu3-qnl3) % 2 == 0)")
+		if config["seriesfinder_xtype"]:
+			tmp_condition.append(f"(abs(qnu2-qnl2) % 2 == 0 and abs(qnu3-qnl3) % 2 == 0)")
 		if tmp_condition:
 			condition.append(" or ".join(tmp_condition))
 		condition = " and ".join([f"({x})" for x  in condition])
