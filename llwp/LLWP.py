@@ -5832,7 +5832,7 @@ class BlendedLinesWindow(EQDockWidget):
 
 				xs.append((x, *xrange))
 				ys.append((y, amp_min, amp_max))
-				ws.append((0, 0, wmax))
+				ws.append((wmax/10, 0, wmax))
 
 			p0 = []
 			bounds = [[], []]
@@ -7853,7 +7853,6 @@ class ASAPMenu(Menu):
 			),
 			'Fit': (
 				fitfunction_menu,
-				QQ(QAction, parent=parent, text="Change Function", shortcut="Ctrl+F", tooltip="Cycle through the available fit-functions", change=lambda _: self.next_fitmethod()),
 				None,
 				QQ(QAction, parent=parent, text="Change Fit Color", tooltip="Change the color of the fitfunction", change=lambda _: self.change_fitcolor()),
 			),
