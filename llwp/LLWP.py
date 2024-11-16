@@ -2816,7 +2816,7 @@ class Menu():
 		current_method = config['fit_fitmethod']
 		for method in LWPAx.fit_methods:
 			is_checked = (method == current_method)
-			callback = lambda _, method=method: self.set_fitmethod(method)
+			callback = lambda _, method=method: self.set_fitmethod_gui(method)
 			self.fitfunction_actions[method] = QQ(QAction, parent=parent, text=f"{method}", change=callback, checkable=True, value=is_checked)
 			fitfunction_menu.addAction(self.fitfunction_actions[method])
 		config.register('fit_fitmethod', self.on_fitfunction_changed)
@@ -2838,7 +2838,6 @@ class Menu():
 			),
 			'Fit': (
 				fitfunction_menu,
-				QQ(QAction, parent=parent, text="Change Function", shortcut="Ctrl+F", tooltip="Cycle through the available fit-functions", change=lambda _: self.next_fitmethod()),
 				None,
 				QQ(QAction, parent=parent, text="Change Fit Color", tooltip="Change the color of the fitfunction", change=lambda _: self.change_fitcolor()),
 			),
@@ -2876,18 +2875,14 @@ class Menu():
 					menu.addAction(widget)
 				else:
 					menu.addMenu(widget)
-		
-	def next_fitmethod(self):
-		fitmethods = LWPAx.fit_methods
-		newindex = fitmethods.index( config['fit_fitmethod'] ) + 1
-		newindex = newindex % len(fitmethods)
-		newvalue = fitmethods[newindex]
-		config['fit_fitmethod'] = newvalue
 
-	def set_fitmethod(self, method):
-		config['fit_fitmethod'] = method
+	def set_fitmethod_gui(self, method):
+		if method == config['fit_fitmethod']:
+			self.on_fitfunction_changed()
+		else:
+			config['fit_fitmethod'] = method
 
-	def on_fitfunction_changed(self, nextfunction=False):
+	def on_fitfunction_changed(self):
 		value = config["fit_fitmethod"]
 		for fitfunction, action in self.fitfunction_actions.items():
 			action.setChecked(fitfunction == value)
@@ -7832,7 +7827,7 @@ class ASAPMenu(Menu):
 		current_method = config['fit_fitmethod']
 		for method in ASAPAx.fit_methods:
 			is_checked = (method == current_method)
-			callback = lambda _, method=method: self.set_fitmethod(method)
+			callback = lambda _, method=method: self.set_fitmethod_gui(method)
 			self.fitfunction_actions[method] = QQ(QAction, parent=parent, text=f"{method}", change=callback, checkable=True, value=is_checked)
 			fitfunction_menu.addAction(self.fitfunction_actions[method])
 		config.register('fit_fitmethod', self.on_fitfunction_changed)
@@ -7880,13 +7875,6 @@ class ASAPMenu(Menu):
 					menu.addAction(widget)
 				else:
 					menu.addMenu(widget)
-		
-	def next_fitmethod(self):
-		fitmethods = ASAPAx.fit_methods
-		newindex = fitmethods.index( config['fit_fitmethod'] ) + 1
-		newindex = newindex % len(fitmethods)
-		newvalue = fitmethods[newindex]
-		config['fit_fitmethod'] = newvalue
 
 class ASAPWidget(LWPWidget):
 	_ax_class = ASAPAx
