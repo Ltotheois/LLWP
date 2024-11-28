@@ -1882,7 +1882,7 @@ class NewAssignments(LinFile):
 
 		new_assignments_window = NewAssignmentsWindow.instance
 		new_assignments_window.model.update()
-		new_assignments_window.model.resize_columns()
+		# new_assignments_window.model.resize_columns()
 		new_assignments_window.scroll_bottom()
 
 	@classmethod
@@ -3230,6 +3230,19 @@ class LLWP(QApplication):
 	
 	# Used to automatically reproduce behavior when testing
 	def debug_setup(self):
+		####
+		## Load lin file into new assignments
+		# lin = pyckett.lin_to_df(lin_file_path, sort=False)
+		# for i in range(7, 11):
+			# lin[f'qnu{i}'] = pyckett.SENTINEL
+			# lin[f'qnl{i}'] = pyckett.SENTINEL
+		# NewAssignments.get_instance().add_rows(lin.to_dict())
+		
+		# # Add various files
+		# files = [path, to_file]
+		# files_by_type = File.sort_files_by_type(files)
+		# File.add_multiple_files_by_type(files_by_type)
+		#####
 		pass
 
 	def run_init_commands(self):
@@ -5669,7 +5682,7 @@ class ResidualsWindow(EQDockWidget):
 
 							new_assignments_window = NewAssignmentsWindow.instance
 							new_assignments_window.model.update()
-							new_assignments_window.model.resize_columns()
+							# new_assignments_window.model.resize_columns()
 						else:
 							with open(lin_fname, 'w+') as file:
 								file.write(pyckett.df_to_lin(lin))
