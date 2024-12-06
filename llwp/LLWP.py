@@ -228,6 +228,7 @@ class Config(dict):
 		'series_currenttab': (0, int),
 		'series_references': ([], list),
 		'series_blendwidth': (0, float),
+		'series_blendquery': ('', str),
 		'series_qns': (4, int),
 		'series_blendminrelratio': (0, float),
 
@@ -334,7 +335,6 @@ class Config(dict):
 		'assignall_fitwidth': (4, float),
 		'assignall_maxfwhm': (1, float),
 		'assignall_maxdegree': (3, int),
-
 		
 		'asap_query': ('', str),
 		'asap_resolution': (6e-6, float),
@@ -2435,9 +2435,36 @@ class LWPAx():
 		
 			min_y_value = y_at_xpre * config['series_blendminrelratio']
 			entries = entries.query('y >= @min_y_value')
-			
+		
 		if len(entries) < 2:
 			return(False)
+		
+		# Find blended transitions to automatically assign
+		# If all transitions match the query, all transitions are assigned without showing a blend window
+		blendquery = config['series_blendquery'] 
+		if blendquery:
+			noq = config['series_qns']
+			auto_assign = entries.eval(blendquery, local_dict=new_assignment)
+			if all(auto_assign):
+				max_predicted = entries['y'].max()
+				new_assignments = {
+					'x': new_assignment['x'],
+					'weight': entries['y']/max_predicted,
+					'error': new_assignment['error'],
+					'comment': config['fit_comment'],
+					'filename': '__newassignments__',
+				}
+
+				for i in range(noq):
+					new_assignments[f'qnu{i+1}'] = entries[f'qnu{i+1}']
+					new_assignments[f'qnl{i+1}'] = entries[f'qnl{i+1}']
+				
+				for i in range(noq, N_QNS):
+					new_assignments[f'qnu{i+1}'] = pyckett.SENTINEL
+					new_assignments[f'qnl{i+1}'] = pyckett.SENTINEL
+
+				NewAssignments.get_instance().add_rows(new_assignments)
+				return(True)
 		
 		# After guard clauses we want to show the dialog
 		mainwindow.lwpwidget.drawplot.emit()
@@ -3827,7 +3854,7 @@ class AssignAllDialog(QDialog):
 		axs = self.fig.subplots(n_rows, sharex=True, gridspec_kw={'hspace': 0, 'wspace': 0})
 		self.axs = axs = axs[::-1]
 		
-		self.new_assignments = {}
+		self.new_assignments = []
 		for i_row, (xref, qnus, ax) in enumerate(zip(positions, qns, axs)):
 			already_assigned = (i_row in offsets)
 			user_flagged_to_skip = (i_row in self.axes_to_skip)
@@ -3877,7 +3904,7 @@ class AssignAllDialog(QDialog):
 			
 			offsets[i_row] = xmiddle - xref
 			row_qns = np.array((qnus, np.zeros_like(qnus)))
-			self.new_assignments[i_row] = {'xmiddle': xmiddle, 'xuncert': xuncert, 'row_qns': row_qns, 'xref': xref, 'pred_egy': pred_egy.get(i_row, 0)}
+			self.new_assignments.append({'xmiddle': xmiddle, 'xuncert': xuncert, 'row_qns': row_qns, 'xref': xref, 'pred_egy': pred_egy.get(i_row, 0)})
 			
 			ax.plot(fit_xs - xref, fit_ys, color=config['color_fit'], lw=2, alpha=0.5)
 			ax.axvline(xmiddle - xref, zorder=10, color=config['color_fit'])
@@ -3941,7 +3968,7 @@ class AssignAllDialog(QDialog):
 		axs = self.fig.subplots(n_rows, sharex=True, gridspec_kw={'hspace': 0, 'wspace': 0})
 		self.axs = axs = axs[::-1]
 		
-		self.new_assignments = {}
+		self.new_assignments = []
 		for i_row, (xref, row_qns, ax) in enumerate(zip(positions, qns, axs)):
 			already_assigned = (i_row in offsets)
 			user_flagged_to_skip = (i_row in self.axes_to_skip)
@@ -3981,7 +4008,31 @@ class AssignAllDialog(QDialog):
 				continue
 			
 			offsets[i_row] = xmiddle - xref
-			self.new_assignments[i_row] = {'xmiddle': xmiddle, 'xuncert': xuncert, 'row_qns': row_qns, 'xref': xref}
+
+			# Find blended transitions to assign
+			check_blends = refwidget.state['check_blends']
+			blendwidth = config['series_blendwidth']
+			blendquery = config['series_blendquery'] 
+			if blendwidth and blendquery and check_blends:
+				qns_shape = row_qns.shape
+				row_qns_dict = {f'qn{ul}{i+1}': qn for qns, ul in zip(row_qns, 'ul') for i, qn in enumerate(qns)}
+				for i in range(qns_shape[1], N_QNS):
+					row_qns_dict[f'qnu{i+1}'] = pyckett.SENTINEL
+					row_qns_dict[f'qnl{i+1}'] = pyckett.SENTINEL
+
+				xmin, xmax = xref - blendwidth, xref + blendwidth
+				entries = CatFile.get_data(xrange=(xmin, xmax)).copy()
+
+				entries = entries.query(blendquery, local_dict=row_qns_dict)
+
+				for i, entry in entries.iterrows():
+					tmp_qns = [[entry[f'qn{ul}{i+1}'] for i in range(qns_shape[1])] for ul in 'ul']
+					tmp_xref = entry['x']
+					self.new_assignments.append({'xmiddle': xmiddle, 'xuncert': xuncert, 'row_qns': tmp_qns, 'xref': tmp_xref})
+
+			# Otherwise only assign predicted transition
+			else:
+				self.new_assignments.append({'xmiddle': xmiddle, 'xuncert': xuncert, 'row_qns': row_qns, 'xref': xref})
 			
 			ax.plot(fit_xs - xref, fit_ys, color=config['color_fit'], lw=2, alpha=0.5)
 			ax.axvline(xmiddle - xref, zorder=10, color=config['color_fit'])
@@ -4043,7 +4094,7 @@ class AssignAllDialog(QDialog):
 		xs = []
 		qns = []
 		errors = []
-		for i_row, assignment in self.new_assignments.items():
+		for assignment in self.new_assignments:
 			xs.append(assignment['xmiddle'] + assignment.get('pred_egy', 0))
 			errors.append(LWPWidget._ax_class.fit_determine_uncert(assignment['xref'], assignment['xmiddle'], assignment['xuncert']))
 			qns.append(assignment['row_qns'])
