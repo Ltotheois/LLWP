@@ -333,6 +333,7 @@ class Config(dict):
 		'cmd_commands': ([], list),
 
 		'assignall_fitwidth': (4, float),
+		'assignall_plotwidth': (4, float),
 		'assignall_maxfwhm': (1, float),
 		'assignall_maxdegree': (3, int),
 		
@@ -2768,6 +2769,7 @@ class LWPWidget(QGroupBox):
 		get_position_action = menu.addAction('Copy Reference Position')
 		get_qns_action = menu.addAction('Copy QNs')
 		set_active_action = menu.addAction('Make active Ax')
+		open_blend_action = menu.addAction('Open in Blended Lines')
 		fit_all_action = menu.addAction('Fit all')
 
 		action = menu.exec(self.mapToGlobal(event.pos()))
@@ -2786,6 +2788,12 @@ class LWPWidget(QGroupBox):
 		elif action == fit_all_action:
 			i_col = lwpax.col_i
 			AssignAllDialog.show_dialog(i_col)
+		elif action == open_blend_action:
+			mainwindow.lwpwidget._active_ax_index = (lwpax.row_i, lwpax.col_i)
+			window = BlendedLinesWindow.instance
+			window.show()
+			window.raise_()
+			window.activateWindow()
 
 class Menu():
 	def __init__(self, parent, *args, **kwargs):
@@ -3803,6 +3811,7 @@ class AssignAllDialog(QDialog):
 		n_qns = self.noq = config['series_qns']
 		
 		fit_width = config['assignall_fitwidth']
+		plot_width = config['assignall_plotwidth']
 		max_fwhm = config['assignall_maxfwhm']
 		max_pol_degree = config['assignall_maxdegree']
 		
@@ -3872,19 +3881,21 @@ class AssignAllDialog(QDialog):
 				xpre = xref + pred_offset
 			
 			xmin, xmax = xpre - fit_width/2, xpre + fit_width/2
-			
+			xmin_plot, xmax_plot = xpre - plot_width/2, xpre + plot_width/2
+
 			asap_ax = asap_axes[i_row]
 			corr_xs, corr_ys = asap_ax.corr_xs, asap_ax.corr_ys
 			
 			if corr_xs is None or corr_ys is None:
 				continue
 			
-			minindex = corr_xs.searchsorted(xmin, side="left")
-			maxindex = corr_xs.searchsorted(xmax, side="right")
+			minindex, minindex_plot = corr_xs.searchsorted((xmin, xmin_plot), side="left")
+			maxindex, maxindex_plot = corr_xs.searchsorted((xmax, xmax_plot), side="right")
 			
 			exp_xs, exp_ys = corr_xs[minindex:maxindex], corr_ys[minindex:maxindex]
-			
-			ax.plot(exp_xs, exp_ys, color=config['color_exp'])
+			exp_xs_plot, exp_ys_plot = corr_xs[minindex_plot:maxindex_plot], corr_ys[minindex_plot:maxindex_plot]
+
+			ax.plot(exp_xs_plot, exp_ys_plot, color=config['color_exp'])
 			ax.xaxis.set_visible(False)
 			ax.yaxis.set_visible(False)
 			ax.margins(y=config['plot_ymargin'])
@@ -3923,6 +3934,7 @@ class AssignAllDialog(QDialog):
 		n_qns = self.noq = config['series_qns']
 		
 		fit_width = config['assignall_fitwidth']
+		plot_width = config['assignall_plotwidth']
 		max_fwhm = config['assignall_maxfwhm']
 		max_pol_degree = config['assignall_maxdegree']
 		
@@ -3933,9 +3945,10 @@ class AssignAllDialog(QDialog):
 		tab_widget = ReferenceSeriesWindow.instance.tab
 		refwidget = tab_widget.widget(self.i_col)
 		
-		# @Luis: Improve for transitions case to do all available predictions 
-		# Think about going giving here calc_references 100 instead of n_rows
-		# Then throw out all positions that are zero
+		# @Luis: If we wanted to fit all transitions of a series, we would do it here
+		# - give infinite number of n_rows to calc_references, throw out everything with zero
+		# - problem is: user will not check the assignments anymore
+		# - current decision: users have to actually look at lineshapes for fitting them all
 		positions, qns = refwidget.calc_references(n_rows, n_qns)
 		qn_labels = [f'qn{ul}{i+1}' for ul in ('u', 'l') for i in range(n_qns)]
 		
@@ -3986,10 +3999,14 @@ class AssignAllDialog(QDialog):
 				xpre = xref + pred_offset
 			
 			xmin, xmax = xpre - fit_width/2, xpre + fit_width/2
-			df = ExpFile.get_data(xrange=(xmin, xmax)).copy()
-			exp_xs, exp_ys = df['x'].to_numpy(), df['y'].to_numpy()
+			xmin_plot, xmax_plot = xpre - plot_width/2, xpre + plot_width/2
 			
-			ax.plot(exp_xs - xref, exp_ys, color=config['color_exp'])
+			df = ExpFile.get_data(xrange=(xmin, xmax)).copy()
+			df_plot = ExpFile.get_data(xrange=(xmin_plot, xmax_plot)).copy()
+			exp_xs, exp_ys = df['x'].to_numpy(), df['y'].to_numpy()
+			exp_xs_plot, exp_ys_plot = df_plot['x'].to_numpy(), df_plot['y'].to_numpy()
+			
+			ax.plot(exp_xs_plot - xref, exp_ys_plot, color=config['color_exp'])
 			ax.xaxis.set_visible(False)
 			ax.yaxis.set_visible(False)
 			ax.margins(y=config['plot_ymargin'])
@@ -4068,6 +4085,11 @@ class AssignAllDialog(QDialog):
 		
 		i_row += 1
 
+		grid_layout.addWidget(QQ(QLabel, text='Plot Width: '), i_row, 0)
+		grid_layout.addWidget(QQ(QDoubleSpinBox, 'assignall_plotwidth', range=(0, None)), i_row, 1)
+
+		i_row += 1
+
 		grid_layout.addWidget(QQ(QLabel, text='Max FWHM: '), i_row, 0)
 		grid_layout.addWidget(QQ(QDoubleSpinBox, 'assignall_maxfwhm', range=(0, None)), i_row, 1)
 
@@ -4143,7 +4165,7 @@ class AssignAllDialog(QDialog):
 class FileWindow(EQDockWidget):
 	fileaddition_requested = pyqtSignal(type, str)
 	default_position = None
-	available_in = ['LLWP', 'LASAP']
+	available_in = ['LLWP', 'ASAP']
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -4911,7 +4933,7 @@ class ReferenceSeriesWindow(EQDockWidget):
 		config["series_references"] = tmp
 
 class LogWindow(EQDockWidget):
-	available_in = ['LLWP', 'LASAP']
+	available_in = ['LLWP', 'ASAP']
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -5080,7 +5102,7 @@ class CatTableModel(QAbstractTableModel):
 class NewAssignmentsWindow(EQDockWidget):
 	default_visible = True
 	default_position = 2
-	available_in = ['LLWP', 'LASAP']
+	available_in = ['LLWP', 'ASAP']
 
 	def __init__(self):
 		super().__init__()
@@ -5405,7 +5427,7 @@ class CloseByLinesWindow(EQDockWidget):
 class ConfigWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
-	available_in = ['LLWP', 'LASAP']
+	available_in = ['LLWP', 'ASAP']
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -5514,7 +5536,7 @@ class ConfigWindow(EQDockWidget):
 class CreditsWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
-	available_in = ['LLWP', 'LASAP']
+	available_in = ['LLWP', 'ASAP']
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -6790,7 +6812,7 @@ def cmd_locked(func):
 class CmdWindow(EQDockWidget):
 	default_visible = False
 	default_position = None
-	available_in = ['LLWP', 'LASAP']
+	available_in = ['LLWP', 'ASAP']
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -7924,7 +7946,7 @@ class ASAPMenu(Menu):
 				None,
 			),
 			'Info': (
-				QQ(QAction, parent=parent, text="Open LASAP folder", change=lambda x: webbrowser.open(f'file:///{llwpfile()}'), tooltip="Open the folder containing the config, ...", ),
+				QQ(QAction, parent=parent, text="Open ASAP folder", change=lambda x: webbrowser.open(f'file:///{llwpfile()}'), tooltip="Open the folder containing the config, ...", ),
 				QQ(QAction, parent=parent, text="Send Mail to Author", tooltip="Send a mail to the developer", change=lambda x: self.send_mail_to_author()),
 				toggleaction_credits,
 			)
@@ -8185,12 +8207,12 @@ class ASAPWidget(LWPWidget):
 			i_col = lwpax.col_i
 			AssignAllDialog.show_dialog(i_col)
 
-class LASAPMainWindow(MainWindow):
+class ASAPMainWindow(MainWindow):
 	mainwidget_class = ASAPWidget
 	menu_class = ASAPMenu
 
-class LASAP(LLWP):
-	mainwindow_class = LASAPMainWindow
+class ASAP(LLWP):
+	mainwindow_class = ASAPMainWindow
 	
 	def debug_setup(self):
 		pass
@@ -8199,7 +8221,7 @@ class LASAP(LLWP):
 
 class ASAPDetailViewer(EQDockWidget):
 	default_position = None
-	available_in = ['LASAP',]
+	available_in = ['ASAP',]
 	
 	drawplot = pyqtSignal()
 
@@ -8284,7 +8306,7 @@ class ASAPDetailViewer(EQDockWidget):
 
 class ASAPSettingsWindow(ReferenceSeriesWindow):
 	default_visible = True
-	available_in = ['LASAP',]
+	available_in = ['ASAP',]
 
 	def __init__(self, *args, **kwargs):
 		super(ReferenceSeriesWindow, self).__init__(*args, **kwargs)
@@ -8368,8 +8390,9 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 		tmp_layout = QVBoxLayout(margin=True)
 		filter_widget.setLayout(tmp_layout)
 		
-		tmp_layout.addWidget(QQ(QLabel, text='Filter for transitions: '))
-		tmp_layout.addWidget(QQ(QPlainTextEdit, 'asap_query'))
+		placeholder = 'Expression to filter the transitions used in the cross-correlation plot'
+		tmp_layout.addWidget(QQ(QLabel, text='Transitions filter: '))
+		tmp_layout.addWidget(QQ(QPlainTextEdit, 'asap_query', placeholder=placeholder))
 
 		tmp_layout.addStretch()
 
@@ -8396,16 +8419,16 @@ def start_llwp():
 	APP_TAG = 'LLWP'
 	LLWP()
 
-def start_lasap():
+def start_asap():
 	File.special_file_handler = SpecialFilesHandlerASAP()
 	AssignAllDialog.update_gui = AssignAllDialog.update_gui_asap
 
 	global APP_TAG
-	APP_TAG = 'LASAP'
-	LASAP()
+	APP_TAG = 'ASAP'
+	ASAP()
 
 if __name__ == '__main__':
-	# start_lasap()
+	# start_asap()
 	start_llwp()
 
 

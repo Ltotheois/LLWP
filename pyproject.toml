@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llwp"
-version = "2.0.8"
+version = "2.0.9"
 authors = [
   { name="Luis Bonah", email="bonah@ph1.uni-koeln.de" },
 ]
@@ -24,4 +24,4 @@ keywords = ["LLWP", "Loomis-Wood Plots", "Spectroscopy"]
 
 [project.scripts]
 llwp = "llwp:start_llwp"
-lasap = "llwp:start_lasap"
+asap = "llwp:start_asap"
