@@ -7638,8 +7638,8 @@ class ASAPAx(LWPAx):
 
 
 		if tot_xs is not None and len(tot_xs):
-			min_index = tot_xs.searchsorted(self.xrange[0], side='right')
-			max_index = tot_xs.searchsorted(self.xrange[1], side='left')
+			min_index = tot_xs.searchsorted(self.xrange[0], side='left')
+			max_index = tot_xs.searchsorted(self.xrange[1], side='right')
 
 			tot_xs = tot_xs[min_index:max_index]
 			tot_ys = tot_ys[min_index:max_index]
@@ -7778,9 +7778,9 @@ class ASAPAx(LWPAx):
 		error = self.fit_determine_uncert(0, xmiddle, xuncert)
 		
 		if self.is_upper_state:
-			xenergy = xmiddle + egy_val
+			xenergy = egy_val + xmiddle
 		else:
-			xenergy = xmiddle - egy_val
+			xenergy = egy_val - xmiddle
 
 		# Create assignment object
 		new_assignment = {'x': xenergy, 'error': error, 'xpre': 0}
@@ -7820,8 +7820,8 @@ class ASAPAx(LWPAx):
 
 	def fit_peak(self, xmin, xmax):
 		exp_xs, exp_ys = self.corr_xs, self.corr_ys
-		min_index = exp_xs.searchsorted(xmin, side='right')
-		max_index = exp_xs.searchsorted(xmax, side='left')
+		min_index = exp_xs.searchsorted(xmin, side='left')
+		max_index = exp_xs.searchsorted(xmax, side='right')
 
 		exp_xs, exp_ys = exp_xs[min_index:max_index], exp_ys[min_index:max_index]
 		
@@ -8039,7 +8039,9 @@ class ASAPWidget(LWPWidget):
 		minimum_intensity = np.log10(ref_ys.min())
 
 		for min_index, max_index, ref_pos, ref_int in zip(min_indices, max_indices, ref_xs, ref_ys):
-			min_index = max(0, min_index-1)
+			# Here we have to pad by two entries, otherwise the interpolation has to use the default values of 1
+			# -> results in strong accidental cross-correlation signal at the upper and lower limit of the plot
+			min_index = max(0, min_index-2)
 			max_index = min(exp_len, max_index+1)
 
 			dataframe = ExpFile.df.iloc[min_index:max_index].copy()
@@ -8058,15 +8060,17 @@ class ASAPWidget(LWPWidget):
 			if use_weights:
 				power = np.log10(ref_int) - minimum_intensity + 1
 				interp_ys = np.power(np.abs(interp_ys), power)
-				
-			tot_ys *= interp_ys
+			
+			# @Luis: Here we are normalizing the y-values, so that the cross-correlation plot is not getting too small in magnitude, which otherwise can lead to problems when fitting the experimental lineshape
+			# The root cause is the maximal exponent precision of a 64 bit integer
+			tot_ys *= interp_ys/interp_ys.max()
 			n_correlated_transitions += 1
 
 		if n_correlated_transitions < 2:
 			tot_xs = tot_ys = np.array([])
 			
 		# @Luis: Think about offering options to normalize spectrum here
-
+		tot_ys /= tot_ys.max()
 		return(tot_xs, tot_ys)
 
 
@@ -8379,7 +8383,7 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 		row_i += 1
 
 		tmp_layout.addWidget(QQ(QLabel, text='Units Cat File:'), row_i, 0)
-		tmp_layout.addWidget(QQ(QDoubleSpinBoxFullPrec, 'asap_catunitconversionfactor'), row_i, 1)
+		tmp_layout.addWidget(QQ(QDoubleSpinBoxFullPrec, 'asap_catunitconversionfactor', range=(None, None)), row_i, 1)
 
 		
 		tmp_layout.setRowStretch(row_i + 1, 1)
