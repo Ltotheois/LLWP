@@ -3915,8 +3915,25 @@ class AssignAllDialog(QDialog):
 			
 			offsets[i_row] = xmiddle - xref
 			row_qns = np.array((qnus, np.zeros_like(qnus)))
-			self.new_assignments.append({'xmiddle': xmiddle, 'xuncert': xuncert, 'row_qns': row_qns, 'xref': xref, 'pred_egy': pred_egy.get(i_row, 0)})
-			
+			xassigned = xmiddle + pred_egy.get(i_row, 0) if asap_ax.is_upper_state else xmiddle - pred_egy.get(i_row, 0)
+			self.new_assignments.append({'xmiddle': xassigned, 'xuncert': xuncert, 'row_qns': row_qns, 'xref': xref})
+
+			# Add transitions assignments
+			if config['asap_assigntransitions']:
+				entries = asap_ax.entries.query('(use_for_cross_correlation)').copy()
+				entries['x'] += xmiddle
+				noq = config['series_qns']
+				
+				for i, entry in entries.iterrows():
+					print(entry)
+					row_qns = np.array([ [entry[f'qn{ul}{i+1}'] for i in range(noq)] for ul in 'ul' ])
+					self.new_assignments.append({
+						'xmiddle': entry['x'],
+						'xuncert': xuncert,
+						'row_qns': row_qns,
+						'xref': xref,
+					})
+
 			ax.plot(fit_xs - xref, fit_ys, color=config['color_fit'], lw=2, alpha=0.5)
 			ax.axvline(xmiddle - xref, zorder=10, color=config['color_fit'])
 		
@@ -4116,13 +4133,14 @@ class AssignAllDialog(QDialog):
 		xs = []
 		qns = []
 		errors = []
+		
+		fit_determine_uncert = mainwindow.lwpwidget._ax_class.fit_determine_uncert
 		for assignment in self.new_assignments:
-			xs.append(assignment['xmiddle'] + assignment.get('pred_egy', 0))
-			errors.append(LWPWidget._ax_class.fit_determine_uncert(assignment['xref'], assignment['xmiddle'], assignment['xuncert']))
+			xs.append(assignment['xmiddle'])
+			errors.append(fit_determine_uncert(assignment['xref'], assignment['xmiddle'], assignment['xuncert']))
 			qns.append(assignment['row_qns'])
 
 		qns = np.array(qns)
-
 		new_assignments = {
 			'x': xs,
 			'error': errors,
@@ -7922,6 +7940,7 @@ class ASAPMenu(Menu):
 			'Files': (
 				QQ(QAction, parent=parent, text="Add Files", change=File.add_files_dialog, shortcut='Ctrl+O', tooltip="Add any kind of Files"),
 				QQ(QAction, parent=parent, text='Reread All Files', change=lambda _: File.reread_all(), shortcut='Ctrl+R', tooltip="Reread all Exp, Cat and Lin files"),
+				QQ(QAction, 'flag_autoreloadfiles', checkable=True, parent=parent, text='Auto Reload Files', tooltip="Automatically reload files on change"),
 				None,
 				toggleaction_files,
 				None,
@@ -8063,14 +8082,21 @@ class ASAPWidget(LWPWidget):
 			
 			# @Luis: Here we are normalizing the y-values, so that the cross-correlation plot is not getting too small in magnitude, which otherwise can lead to problems when fitting the experimental lineshape
 			# The root cause is the maximal exponent precision of a 64 bit integer
-			tot_ys *= interp_ys/interp_ys.max()
+			interp_ys_max = interp_ys.max()
+			if interp_ys_max:
+				interp_ys /= interp_ys_max
+			
+			tot_ys *= interp_ys
 			n_correlated_transitions += 1
 
+		# @Luis: Think about offering options to normalize spectrum here
 		if n_correlated_transitions < 2:
 			tot_xs = tot_ys = np.array([])
-			
-		# @Luis: Think about offering options to normalize spectrum here
-		tot_ys /= tot_ys.max()
+		else:
+			tot_ys_max = tot_ys.max()
+			if tot_ys_max:
+				tot_ys /= tot_ys_max
+		
 		return(tot_xs, tot_ys)
 
 
