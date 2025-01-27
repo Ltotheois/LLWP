@@ -344,6 +344,12 @@ class Config(dict):
 		'asap_detailviewerwidth': (0, float),
 		'asap_detailviewerfilter': (False, bool),
 		'asap_assigntransitions': (True, bool),
+		
+		'asap_squaredwidth': (0, float),
+		'asap_squaredresolution': (0, float),
+		'asap_squaredfilterqueryenergylevels': ('', str),
+		'asap_squaredfilterquerytransitions': ('', str),
+		'asap_squaredisupper': (True, bool),
 	}
 
 	def __init__(self, signal, *args, **kwargs):
@@ -3925,7 +3931,6 @@ class AssignAllDialog(QDialog):
 				noq = config['series_qns']
 				
 				for i, entry in entries.iterrows():
-					print(entry)
 					row_qns = np.array([ [entry[f'qn{ul}{i+1}'] for i in range(noq)] for ul in 'ul' ])
 					self.new_assignments.append({
 						'xmiddle': entry['x'],
@@ -7917,6 +7922,7 @@ class ASAPMenu(Menu):
 			ASAPSettingsWindow.instance.toggleViewAction(),
 			NewAssignmentsWindow.instance.toggleViewAction(),
 			ASAPDetailViewer.instance.toggleViewAction(),
+			ASAPSquaredWindow.instance.toggleViewAction(),
 			LogWindow.instance.toggleViewAction(),
 			CmdWindow.instance.toggleViewAction(),
 		]
@@ -8061,7 +8067,7 @@ class ASAPWidget(LWPWidget):
 			# Here we have to pad by two entries, otherwise the interpolation has to use the default values of 1
 			# -> results in strong accidental cross-correlation signal at the upper and lower limit of the plot
 			min_index = max(0, min_index-2)
-			max_index = min(exp_len, max_index+1)
+			max_index = min(exp_len, max_index+2)
 
 			dataframe = ExpFile.df.iloc[min_index:max_index].copy()
 			dataframe = dataframe[dataframe['visible']]
@@ -8437,8 +8443,240 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 		if check_order:
 			self.check_order()
 
+class ASAPSquaredWindow(EQDockWidget):
+	default_position = None
+	available_in = ['ASAP', ]
+	
+	drawplot = pyqtSignal()
+	clipboard_requested = pyqtSignal(str)
+	
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.setWindowTitle('ASAP²')
+		
+		widget = QGroupBox()
+		layout = QVBoxLayout()
+		self.setWidget(widget)
+		widget.setLayout(layout)
+		
+		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
+		self.plot_canvas = FigureCanvas(self.fig)
+		layout.addWidget(self.plot_canvas)
+		
+		self.mpltoolbar = NavigationToolbar2QT(self.plot_canvas, self)
+		layout.addWidget(self.mpltoolbar)
+		
+		tmp_layout = QHBoxLayout()
+		tmp_layout.addWidget(QQ(QLabel, text='Width: '))
+		tmp_layout.addWidget(QQ(QDoubleSpinBoxFullPrec, 'asap_squaredwidth', width=120))
+		tmp_layout.addWidget(QQ(QLabel, text='Resolution: '))
+		tmp_layout.addWidget(QQ(QDoubleSpinBoxFullPrec, 'asap_squaredresolution', width=120))
+		tmp_layout.addWidget(QQ(QCheckBox, 'asap_squaredisupper', text='Is upper level', width=120))
+		tmp_layout.addStretch(1)
+	
+		layout.addLayout(tmp_layout)
+		
+		layout.addWidget(QQ(QLabel, text='Filter for energy levels: '))
+		layout.addWidget(QQ(QPlainTextEdit, 'asap_squaredfilterqueryenergylevels'))
+		
+		layout.addWidget(QQ(QLabel, text='Filter for transitions: '))
+		layout.addWidget(QQ(QPlainTextEdit, 'asap_squaredfilterquerytransitions'))
+		
+		tmp_layout = QHBoxLayout()
+		tmp_layout.addStretch(1)
+		
+		tmp_layout.addWidget(QQ(QPushButton, text='Calc ASAP²', change=lambda x: self.calc_asap_squared()))
+		tmp_layout.addWidget(QQ(QPushButton, text='Assign', change=lambda x: self.assign_asap_squared()))
+		tmp_layout.addWidget(QQ(QPushButton, text='Export', change=lambda x: self.export_data()))
+		
+		tmp_layout.addStretch(1)
+		layout.addLayout(tmp_layout)
+		
+		self.drawplot.connect(self.draw_canvas)
+		self.clipboard_requested.connect(self.copy_to_clipboard)
+		
+		self.data = None
+		self.fit_vline = None
+		self.fit_curve = None
+		self.xmiddle = None
+		self.xuncert = None
+		self.assignments = None
+		self.noq = None
+	
+	@QThread.threaded_d
+	@status_d
+	def calc_asap_squared(self, thread=None):
+		self.xmiddle = None
+		self.xuncert = None
+		self.noq = config['series_qns']
+		assignments = []
+		
+		for ax in self.fig.get_axes():
+			self.fig.delaxes(ax)
+		self.ax = self.fig.subplots()
+		self.span_selector = matplotlib.widgets.SpanSelector(self.ax, self.on_range, 'horizontal', useblit=True)
 
+		width = config['asap_squaredwidth'] or config['plot_width']
+		resolution = config['asap_squaredresolution'] or config['asap_resolution']
+		
+		egy_df = ASAPAx.egy_df
+		query = config['asap_squaredfilterqueryenergylevels']
+		if query:
+			egy_df = egy_df.query(query)
+		
+		cat_df = CatFile.get_data().copy()
+		query = config['asap_squaredfilterquerytransitions']
+		if query:
+			cat_df = cat_df.query(query)
+		
+		exp_df = ExpFile.df.copy()
+		exp_df = exp_df[exp_df['visible']]
+		
+		n_lines = 0
+		rel_xs = np.arange(-width/2, width/2 + resolution, resolution)
+		asap2_ys = np.ones_like(rel_xs)
+		qn_labels_egy = [f'qn{i+1}' for i in range(self.noq)]
+		qn_labels = [f'qn{ul}{i+1}' for ul in 'ul' for i in range(self.noq)]
 
+		for _, target_level in egy_df.iterrows():
+			qns = [target_level[x] for x in qn_labels_egy]
+			
+			if config['asap_squaredisupper']:
+				query = ' and '.join([f'qnu{i+1} == {qn}' for i, qn in enumerate(qns)])
+				assignments.append((target_level['egy'], +1, *qns, *np.zeros_like(qns)))
+			else:
+				query = ' and '.join([f'qnl{i+1} == {qn}' for i, qn in enumerate(qns)])
+				assignments.append((target_level['egy'], -1, *qns, *np.zeros_like(qns)))
+
+			possible_transitions = cat_df.query(query)
+			predicted_positions = possible_transitions['x'].values
+			predicted_positions *= config['asap_catunitconversionfactor']
+
+			min_indices = exp_df['x'].searchsorted(predicted_positions - width/2, side='left')
+			max_indices = exp_df['x'].searchsorted(predicted_positions + width/2, side='right')
+			
+			tot_ys = np.ones_like(rel_xs)
+			exp_len = len(exp_df)
+
+			for min_index, max_index, ref_position in zip(min_indices, max_indices, predicted_positions):
+				min_index = max(0, min_index-2)
+				max_index = min(exp_len, max_index+2)
+				
+				tmp = exp_df.iloc[min_index:max_index]
+				xs = tmp['x'].values
+				ys = tmp['y'].values
+
+				interp_ys = np.interp(rel_xs, xs-ref_position, ys)
+				tot_ys *= interp_ys
+			
+			asap2_ys *= tot_ys/tot_ys.max()
+			n_lines += len(predicted_positions)
+		
+			if config['asap_assigntransitions']:
+				for x, *qns in possible_transitions[['x'] + qn_labels].values:
+					assignments.append((x, +1, *qns))
+		
+		asap2_ys /= asap2_ys.max()
+		self.ax.plot(rel_xs, asap2_ys, color=config['color_exp'])
+		self.assignments = assignments
+		self.data = np.vstack((rel_xs, asap2_ys)).T
+		self.drawplot.emit()
+	
+	def assign_asap_squared(self):
+		if self.xmiddle is None or self.xuncert is None:
+			notify_warning.emit('No peak fitted in cross-correlation plot.')
+			return
+		
+		if self.data is None or self.assignments is None:
+			notify_warning.emit('No cross-correlation data available.')
+			return
+		
+		columns = ['x', 'dx'] + [f'qn{ul}{i+1}' for ul in 'ul' for i in range(self.noq)]
+		new_assignments = pd.DataFrame(self.assignments, columns=columns)
+		new_assignments['xpre'] = 0
+		new_assignments['weight'] = 1
+		new_assignments['error'] = mainwindow.lwpwidget._ax_class.fit_determine_uncert(0, self.xmiddle, self.xuncert)
+		new_assignments['comment'] = config['fit_comment']
+		new_assignments['filename'] = '__newassignments__'
+		new_assignments['x'] = new_assignments['x'] + new_assignments['dx'] * self.xmiddle
+		
+		for i in range(self.noq, N_QNS):
+			new_assignments[f'qnu{i+1}'] = pyckett.SENTINEL
+			new_assignments[f'qnl{i+1}'] = pyckett.SENTINEL
+		
+		NewAssignments.get_instance().add_rows(new_assignments)
+	
+	def on_range(self, xmin, xmax):
+		if xmax == xmin:
+			return
+		
+		is_shift_pressed = (QApplication.keyboardModifiers() == Qt.KeyboardModifier.ShiftModifier)
+		if is_shift_pressed: # Zoom xrange
+			self.ax.set_xlim(xmin, xmax)
+			self.drawplot.emit()
+		else: # Fit xrange
+			self.fit_data(xmin, xmax)
+	
+	@QThread.threaded_d
+	@status_d
+	def fit_data(self, xmin, xmax, thread=None):
+		# Delete artists highlighting previous fit
+		if self.fit_vline is not None:
+			self.fit_vline.remove()
+			self.fit_vline = None
+		if self.fit_curve is not None:
+			self.fit_curve.remove()
+			self.fit_curve = None
+		
+		if self.data is None:
+			notify_warning.emit('No cross-correlation data available.')
+			return
+		
+		exp_xs, exp_ys = self.data.T
+		mask = (exp_xs >= xmin) & (exp_xs <= xmax)
+		exp_xs, exp_ys = exp_xs[mask], exp_ys[mask]
+		fit_xs = np.linspace(xmin, xmax, config['fit_xpoints'])
+		fitmethod = config['fit_fitmethod']
+		peakdirection = config['fit_peakdirection']
+		
+		if (len(exp_xs) == 0) or ((len(exp_xs) < 2) and fitmethod != 'Pgopher'):
+			notify_error.emit('The data could not be fit as there were too few points selected.')
+			raise GUIAbortedError('The data could not be fit as there were too few points selected.')
+
+		try:
+			fit_function = get_fitfunction(fitmethod, config['fit_offset'])
+			xmiddle, xuncert, fit_xs, fit_ys = fit_function(exp_xs, exp_ys, peakdirection, fit_xs)
+		except Exception as E:
+			self.fitcurve = None
+			self.fitline = None
+			notify_error.emit(f"The fitting failed with the following error message : {str(E)}")
+			raise
+		
+		if config['fit_copytoclipboard']:
+			self.clipboard_requested.emit(str(xmiddle))
+
+		# Highlight fit in plot
+		self.fit_curve = self.ax.plot(fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1)[0]
+		self.fit_vline = self.ax.axvline(x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1)
+		self.xmiddle = xmiddle
+		self.xuncert = xuncert
+		
+		self.drawplot.emit()
+	
+	def export_data(self):
+		if self.data is None:
+			notify_warning.emit('No cross-correlation data computed. Nothing to save yet.')
+			return
+		
+		fname = QFileDialog.getSaveFileName(None, 'Choose file to save cross-correlation data to',"","CSV Files (*.csv);;All Files (*)")[0]
+		if fname:
+			np.savetxt(fname, self.data, delimiter='\t')
+	
+	def draw_canvas(self):
+		self.plot_canvas.draw_idle()
+		
+	def copy_to_clipboard(self, value):
+		QApplication.clipboard().setText(value)
 
 ##
 ## Startup
@@ -8458,8 +8696,8 @@ def start_asap():
 	ASAP()
 
 if __name__ == '__main__':
-	# start_asap()
-	start_llwp()
+	start_asap()
+	# start_llwp()
 
 
 ##
