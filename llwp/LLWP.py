@@ -341,15 +341,17 @@ class Config(dict):
 		'asap_resolution': (6e-6, float),
 		'asap_weighted': (True, bool),
 		'asap_catunitconversionfactor': (0, float),
+		'asap_assigntransitions': (True, bool),
+		
 		'asap_detailviewerwidth': (0, float),
 		'asap_detailviewerfilter': (False, bool),
-		'asap_assigntransitions': (True, bool),
 		
 		'asap_squaredwidth': (0, float),
 		'asap_squaredresolution': (0, float),
 		'asap_squaredfilterqueryenergylevels': ('', str),
 		'asap_squaredfilterquerytransitions': ('', str),
 		'asap_squaredisupper': (True, bool),
+		'asap_squareplotlog': (False, bool),
 	}
 
 	def __init__(self, signal, *args, **kwargs):
@@ -7589,6 +7591,7 @@ class ASAPAx(LWPAx):
 
 	def __init__(self, ax, row_i, col_i):
 		self.ax = ax
+		
 		self.row_i = row_i
 		self.col_i = col_i
 		
@@ -7681,7 +7684,6 @@ class ASAPAx(LWPAx):
 			yrange = (-2,+2)
 
 		ax.set_ylim(yrange)
-		
 		self.update_annotation()
 		
 
@@ -8471,7 +8473,8 @@ class ASAPSquaredWindow(EQDockWidget):
 		tmp_layout.addWidget(QQ(QDoubleSpinBoxFullPrec, 'asap_squaredwidth', width=120))
 		tmp_layout.addWidget(QQ(QLabel, text='Resolution: '))
 		tmp_layout.addWidget(QQ(QDoubleSpinBoxFullPrec, 'asap_squaredresolution', width=120))
-		tmp_layout.addWidget(QQ(QCheckBox, 'asap_squaredisupper', text='Is upper level', width=120))
+		tmp_layout.addWidget(QQ(QCheckBox, 'asap_squaredisupper', text='Is upper level'))
+		tmp_layout.addWidget(QQ(QCheckBox, 'asap_squareplotlog', text='Plot logarithmic'))
 		tmp_layout.addStretch(1)
 	
 		layout.addLayout(tmp_layout)
@@ -8576,11 +8579,16 @@ class ASAPSquaredWindow(EQDockWidget):
 				for x, *qns in possible_transitions[['x'] + qn_labels].values:
 					assignments.append((x, +1, *qns))
 		
-		asap2_ys /= asap2_ys.max()
+		ys_max = asap2_ys.max()
+		if ys_max > 0:
+			asap2_ys /= ys_max
 		self.ax.plot(rel_xs, asap2_ys, color=config['color_exp'])
+		if config['asap_squareplotlog']:
+			self.ax.set_yscale('log')
 		self.assignments = assignments
 		self.data = np.vstack((rel_xs, asap2_ys)).T
 		self.drawplot.emit()
+		notify_info.emit(f'Cross-correlation was calculated for a total of {n_lines} lines.')
 	
 	def assign_asap_squared(self):
 		if self.xmiddle is None or self.xuncert is None:
