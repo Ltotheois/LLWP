@@ -234,7 +234,7 @@ class Config(dict):
 
 		'fit_fitmethod': ('Pgopher', str),
 		'fit_uncertainty': (0.05, float),
-		'fit_uncertaintystep': (0.01, float),
+		'fit_uncertainty_method': ('Value', str),
 		'fit_copytoclipboard': (True, bool),
 		'fit_xpoints': (1000, int),
 		'fit_peakdirection': (1, int),
@@ -2335,24 +2335,13 @@ class LWPAx():
 
 	@classmethod
 	def fit_determine_uncert(cls, ref_pos, xmiddle, xuncert):
-		error_param = config['fit_uncertainty']
-		if error_param > 0:
-			return(error_param)
-		elif error_param >= -1:
+		error_method = config['fit_uncertainty_method']
+		if error_method == 'Obs-Calc':
 			return( abs(xmiddle - ref_pos) )
-		elif error_param >= -2:
-			resp, rc = QInputDialog.getText(mainwindow, 'Set error', 'Error:')
-			if rc:
-				try:
-					return(float(resp))
-				except ValueError:
-					notify_error.emit("Did not understand the given value for the error. The line was not assigned.")
-					raise CustomError("Did not understand the given value for the error. The line was not assigned.")
-			else:
-				GUIAbortedError
-		
-		elif error_value >= -3:
+		elif error_method == 'Fit':
 			return(xuncert)
+		else:
+			return(config['fit_uncertainty'])
 
 	def fit_data(self, xmin, xmax):
 		# Delete artists highlighting previous fit
@@ -5139,8 +5128,6 @@ class NewAssignmentsWindow(EQDockWidget):
 		mainwidget.setLayout(layout)
 
 		tooltip_append = "Append to file if checked or overwrite content if unchecked"
-		tooltip_uncert = "Positive Values are absolute Values, -1 for obs-calc, -2 for dialog, -3 for StdDev from Fit"
-
 		new_assignments = self.new_assignments = NewAssignments.get_instance()
 
 		widgets = self.widgets = {
@@ -5150,9 +5137,14 @@ class NewAssignmentsWindow(EQDockWidget):
 			'add_row': QQ(QToolButton, text='+', change=lambda x: addemptyrow_inplace(new_assignments.get_new_assignments_df(), self.model)),
 			'resize': QQ(QToolButton, text='Resize', change=lambda x: self.model.resize_columns(reset=True)),
 			# 'append': QQ(QCheckBox, 'flag_appendonsave', text='Append', tooltip=tooltip_append),
-			'error_label': QQ(QLabel, text='Default Uncertainty: ', tooltip=tooltip_uncert),
-			'error': QQ(QDoubleSpinBox, 'fit_uncertainty', range=(-3, None), minWidth=120, singlestep=config["fit_uncertaintystep"], tooltip=tooltip_uncert),
+			'error_label': QQ(QLabel, text='Default Uncertainty: '),
+			'error_type': QQ(QComboBox, 'fit_uncertainty_method', options=['Fit', 'Obs-Calc', 'Value']),
+			'error': QQ(QDoubleSpinBox, 'fit_uncertainty', range=(None, None), minWidth=120),
 		}
+
+		config.register("fit_uncertainty_method", lambda elem=widgets['error']: elem.setVisible(config["fit_uncertainty_method"] == 'Value'))
+		widgets['error'].setVisible(config["fit_uncertainty_method"] == 'Value')
+
 
 		tmp = { f'qn{UL.lower()}{i+1}': f'{UL}{i+1}' for UL in 'UL' for i in range(N_QNS) }
 		headers = { **tmp, 'x': 'Freq', 'error': 'Unc', 'weight': 'Weight', 'comment': 'Comment'}
@@ -5171,7 +5163,7 @@ class NewAssignmentsWindow(EQDockWidget):
 		layout.addWidget(self.table)
 		buttonsBox = QHBoxLayout()
 		
-		for key in ('error_label', None, 'error'):
+		for key in ('error_label', None, 'error', 'error_type'):
 			buttonsBox.addWidget(widgets[key]) if key is not None else buttonsBox.addStretch(2)
 		layout.addLayout(buttonsBox)
 
@@ -7889,11 +7881,6 @@ class ASAPAx(LWPAx):
 			ASAPSettingsWindow.instance.egy_file_button.setText(basename)
 		
 		notify_info.emit(f'Successfully loaded the energy file \'{basename}\'.')
-
-	@classmethod
-	def fit_determine_uncert(cls, *args, **kwargs):
-		error = super().fit_determine_uncert(*args, **kwargs)
-		return(-abs(error))
 
 		
 class ASAPMenu(Menu):
