@@ -342,6 +342,7 @@ class Config(dict):
 		'asap_weighted': (True, bool),
 		'asap_catunitconversionfactor': (0, float),
 		'asap_assigntransitions': (True, bool),
+		'asap_excludearoundassigned': (0, float),
 		
 		'asap_detailviewerwidth': (0, float),
 		'asap_detailviewerfilter': (False, bool),
@@ -8052,6 +8053,13 @@ class ASAPWidget(LWPWidget):
 
 		minimum_intensity = np.log10(ref_ys.min())
 
+		exclude_width = config['asap_excludearoundassigned']
+		if exclude_width:
+			already_assigned_peaks = LinFile.get_data()
+			query = ' or '.join([f'qnl{i+1} != 0' for i in range(config['series_qns'])])
+			already_assigned_peaks = already_assigned_peaks.query(query)
+			already_assigned_peaks = already_assigned_peaks['x'].values
+
 		for min_index, max_index, ref_pos, ref_int in zip(min_indices, max_indices, ref_xs, ref_ys):
 			# Here we have to pad by two entries, otherwise the interpolation has to use the default values of 1
 			# -> results in strong accidental cross-correlation signal at the upper and lower limit of the plot
@@ -8068,6 +8076,14 @@ class ASAPWidget(LWPWidget):
 			ys = dataframe['y']
 
 			interp_ys = np.interp(tot_xs, xs-ref_pos, ys, left=1, right=1)
+			
+			if exclude_width:
+				min_indices_exclude = np.searchsorted(tot_xs, already_assigned_peaks-ref_pos-exclude_width/2, side='left')
+				max_indices_exclude = np.searchsorted(tot_xs, already_assigned_peaks-ref_pos+exclude_width/2, side='right')
+				
+				for min_index_exclude, max_index_exclude in zip(min_indices_exclude, max_indices_exclude):
+					if min_index_exclude != max_index_exclude:
+						interp_ys[min_index_exclude:max_index_exclude] = 0
 
 			# @Luis: Check this
 			# Christian uses the minimal intensity from query as the minimum_intensity
