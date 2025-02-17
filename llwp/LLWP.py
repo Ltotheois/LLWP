@@ -278,7 +278,7 @@ class Config(dict):
 
 		'commandlinedialog_commands': ([], list),
 		'commandlinedialog_current': (0, int),
-	
+		
 		'closebylines_catfstring': ('{x:12.4f} {qns} {ylog}', str),
 		'closebylines_linfstring': ('{x:12.4f} {qns}', str),
 
@@ -629,7 +629,12 @@ class PlotWidget(QWidget):
 				con_ys = con_ys[convolution_padding:-convolution_padding]
 				con_xs = con_xs[:-1]
 				
-				colors.append( cat_df.loc[mask, 'color'].values )
+				tmp_mask = (con_ys != 0)
+				con_xs = con_xs[tmp_mask]
+				con_ys = con_ys[tmp_mask]
+				
+				color = CatFile.ids[unique_filename]._color
+				colors.append( np.full((len(con_xs) - 1), color) )
 				segs.append( np.array(((con_xs[:-1], con_xs[1:]), (con_ys[:-1], con_ys[1:]))).T )
 
 			if segs:
@@ -2201,7 +2206,12 @@ class LWPAx():
 						con_ys = con_ys[convolution_padding:-convolution_padding]
 						con_xs = con_xs[:-1]
 						
-						colors.append( dataframe.loc[mask, 'color'].values )
+						tmp_mask = (con_ys != 0)
+						con_xs = con_xs[tmp_mask]
+						con_ys = con_ys[tmp_mask]
+
+						color = CatFile.ids[unique_filename]._color
+						colors.append( np.full((len(con_xs) - 1), color) )
 						segs.append( np.array(((con_xs[:-1], con_xs[1:]), (con_ys[:-1], con_ys[1:]))).T )
 
 					if segs:
@@ -3292,6 +3302,10 @@ class LLWP(QApplication):
 		config.register('plot_fontdict', lambda: matplotlib.rc('font', **config['plot_fontdict']))
 		self.styleHints().colorSchemeChanged.connect(self.update_matplotlib_theme)
 		self.update_matplotlib_theme()
+		
+		mpl_style_filename = llwpfile('.mplstyle')
+		if os.path.exists(mpl_style_filename):
+			matplotlib.style.use(mpl_style_filename)
 
 	def update_matplotlib_theme(self):
 		matplotlib.style.use('dark_background' if is_dark_theme() else 'default')
@@ -8707,8 +8721,8 @@ def start_asap():
 	ASAP()
 
 if __name__ == '__main__':
-	start_asap()
-	# start_llwp()
+	# start_asap()
+	start_llwp()
 
 
 ##
