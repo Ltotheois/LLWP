@@ -7616,6 +7616,7 @@ class ASAPAx(LWPAx):
 			self.span =  matplotlib.widgets.SpanSelector(ax, lambda xmin, xmax: self.on_range(xmin, xmax), 'horizontal', useblit=True, button=1)
 		
 		self.exp_coll = matplotlib.collections.LineCollection(np.zeros(shape=(0,2,2)), colors=config["color_exp"], capstyle='round')
+		self.lin_coll = self.ax.scatter([], [], color=config['color_ref'], marker="*", zorder=100)
 
 		with matplotlib_lock:
 			ax.add_collection(self.exp_coll)
@@ -7669,7 +7670,6 @@ class ASAPAx(LWPAx):
 		tot_xs = self.corr_xs
 		tot_ys = self.corr_ys
 
-
 		if tot_xs is not None and len(tot_xs):
 			min_index = tot_xs.searchsorted(self.xrange[0], side='left')
 			max_index = tot_xs.searchsorted(self.xrange[1], side='right')
@@ -7677,14 +7677,12 @@ class ASAPAx(LWPAx):
 			tot_xs = tot_xs[min_index:max_index]
 			tot_ys = tot_ys[min_index:max_index]
 		
-		
 		self.vals_to_coll(tot_xs, tot_ys)
 
 		if tot_ys is not None and len(tot_ys):
-			yrange = (np.min(tot_ys), np.max(tot_ys))
+			# yrange = (np.min(tot_ys), np.max(tot_ys))
+			yrange = (0, np.max(tot_ys))
 		margin = config['plot_ymargin']
-
-		
 
 		yrange = (yrange[0]-margin*(yrange[1]-yrange[0]), yrange[1]+margin*(yrange[1]-yrange[0]))
 		if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
@@ -7693,6 +7691,22 @@ class ASAPAx(LWPAx):
 		ax.set_ylim(yrange)
 		self.update_annotation()
 		
+		# Plot position of previous assignments
+		if self.qns is not None and self.egy_df is not None:
+			query = ' and '.join([f'(qnu{i+1} == {qn} and qnl{i+1} == 0)' for i, qn in enumerate(self.qns)])
+			lin_positions = LinFile.query_c(query)['x'].to_numpy()
+		
+			query = ' and '.join([f'qn{i+1} == {qn}' for i, qn in enumerate(self.qns)])
+			vals = self.egy_df.query(query)["egy"].to_numpy()
+			egy_val = vals[0] if len(vals) else 0
+		
+			lin_positions = lin_positions - egy_val
+			tuples = [(x, 0) for x in lin_positions] if len(lin_positions) else [[None, None]]
+
+			self.lin_coll.set_offsets(tuples)
+			self.lin_coll.set_color(config['color_ref'])
+		else:
+			self.lin_coll.set_offsets([[None, None]])
 
 	def update_annotation(self):
 		fstring = config['plot_annotationfstring']
@@ -8721,8 +8735,8 @@ def start_asap():
 	ASAP()
 
 if __name__ == '__main__':
-	# start_asap()
-	start_llwp()
+	start_asap()
+	# start_llwp()
 
 
 ##
