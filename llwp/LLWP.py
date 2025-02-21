@@ -6965,35 +6965,72 @@ class CmdWindow(EQDockWidget):
 ##
 ## Global Functions
 ##
-def lineshape(shape, derivative, *args):
-	if shape == "Gauss":
-		x, x_0, amp, width = args
-		width = width/(2*np.sqrt(2*np.log(2)))
-		if width == 0:
-			return [0 if i!=x_0 else np.inf for i in x]
-		ys = np.exp(-(x-x_0)**2/(2*width**2))/(width*(2*np.pi)**0.5)
-	elif shape == "Lorentz":
-		x, x_0, amp, width = args
-		width = width/2
-		if width == 0:
-			return [0 if i!=x_0 else np.inf for i in x]
-		ys = 1/(np.pi*width*(1+((x-x_0)/width)**2))
-	else: #Voigt
-		x, x_0, amp, gauss, lorentz = args
-		gauss = gauss/(2*np.sqrt(2*np.log(2)))
-		lorentz = lorentz/2
-		if gauss == 0 and lorentz == 0:
-			return [0 if i!=x_0 else np.inf for i in x]
-		ys = special.voigt_profile(x-x_0, gauss, lorentz)
+def Gaussian(derivative, x, x0, amp, fwhm):
+	sigma = fwhm/(2*np.sqrt(2*np.log(2)))
+	if sigma == 0:
+		return [0 if i!=x0 else np.inf for i in x]
+	
+	if derivative == 0:
+		ys = amp * np.exp(-(x-x0)**2/(2*sigma**2))
+	elif derivative == 1:
+		ys = -amp / (sigma * np.exp(-0.5)) * (x-x0) * np.exp(-(x-x0)**2/(2*sigma**2))
+	elif derivative == 2:
+		ys = amp * (1 - ((x-x0)/sigma)**2) * np.exp(-(x-x0)**2/(2*sigma**2))
+	else:
+		raise NotImplementedError('Only the zeroth, first, and second derivatives of a Gaussian are implemented.')
+	return(ys)
 
-	for _ in range(0, int(derivative)):
-		ys = np.gradient(ys, edge_order=2)
-	if derivative%2 == 0 and derivative != 0 and derivative%4 != 0:
-		ys = -ys
-	ymax = np.max(ys) if np.isfinite(ys).any() else 1
-	if not np.isfinite(ymax) or ymax == 0:
-		ymax = 1
-	ys = amp*ys/ymax
+def Lorentzian(derivative, x, x0, amp, fwhm):
+	gamma = fwhm/2
+	if gamma == 0:
+		return [0 if i!=x0 else np.inf for i in x]
+	
+	if derivative == 0:
+		ys = gamma**2 /((gamma**2 + (x-x0)**2))
+	elif derivative == 1:
+		ys = (-amp*gamma**3 * 16/9 * np.sqrt(3)) * (x-x0)/((x-x0)**2 + gamma**2)**2
+	elif derivative == 2:
+		ys = (amp * gamma**4) * (gamma**2 - 3 * (x-x0)**2) / ((x-x0)**2 + gamma**2)**3
+	else:
+		raise NotImplementedError('Only the zeroth, first, and second derivatives of a Gaussian are implemented.')
+	return(ys)
+
+def Voigt(derivative, x, x0, amp, fwhm_gauss, fwhm_lorentz):
+	sigma = fwhm_gauss/(2*np.sqrt(2*np.log(2)))
+	gamma = fwhm_lorentz/2
+	if gamma == sigma == 0:
+		return [0 if i!=x0 else np.inf for i in x]
+	
+	z = (x - x0 + 1j * gamma) / (sigma * np.sqrt(2))
+	wz = special.wofz(z)
+	w0 = special.wofz((1j * gamma) / (sigma * np.sqrt(2)))
+	
+	if derivative == 0:
+		tmp = lambda x, x0, wz, sigma, gamma: np.real(wz)/(sigma * np.sqrt(2*np.pi))            
+	elif derivative == 1:
+		tmp = lambda x, x0, wz, sigma, gamma: 1/(sigma**3 * np.sqrt(2*np.pi)) * (gamma * np.imag(wz) - (x-x0) * np.real(wz))
+	elif derivative == 2:
+		tmp = lambda x, x0, wz, sigma, gamma: 1/(sigma**5 * np.sqrt(2*np.pi)) * (gamma * (2*(x-x0) * np.imag(wz) - sigma * np.sqrt(2/np.pi)) + (gamma**2 + sigma**2 - (x-x0)**2) * np.real(wz))
+	else:
+		raise NotImplementedError('Only the zeroth, first, and second derivatives of a Gaussian are implemented.')
+	
+	ys = tmp(x, x0, wz, sigma, gamma)
+	ymax = tmp(0, 0, w0, sigma, gamma)
+	ys *= amp / ymax
+
+	return(ys)
+
+def lineshape(shape, derivative, *args):
+	if shape == 'Gauss':
+		lineshape_function = Gaussian
+	elif shape == 'Lorentz':
+		lineshape_function = Lorentzian
+	elif shape == 'Voigt':
+		lineshape_function = Voigt
+	else:
+		raise NotImplementedError(f'The lineshape {shape} is not implemented.')
+	
+	ys = lineshape_function(derivative, *args)
 	return(ys)
 
 def fit_pgopher(xs, ys, peakdirection, fit_xs):
