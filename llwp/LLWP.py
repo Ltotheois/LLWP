@@ -353,6 +353,7 @@ class Config(dict):
 		'asap_squaredfilterquerytransitions': ('', str),
 		'asap_squaredisupper': (True, bool),
 		'asap_squareplotlog': (False, bool),
+		'asap_squarethreshold': (0, float),
 	}
 
 	def __init__(self, signal, *args, **kwargs):
@@ -8358,7 +8359,8 @@ class ASAPDetailViewer(EQDockWidget):
 
 			qnus_string = ','.join([f'{row[qn]}' for qn in qns_labels[0]])
 			qnls_string = ','.join([f'{row[qn]}' for qn in qns_labels[1]])
-			qnstring = f'{qnus_string} ← {qnls_string}'
+			# @Luis: Think about also giving the intensity here
+			qnstring = f'{qnus_string} ← {qnls_string}, {row["y"]:.1e}'
 
 			ax.plot(xs, ys, color=config['color_exp'])
 			ax.text(**annotate_kwargs, s=qnstring, transform=ax.transAxes)
@@ -8504,6 +8506,8 @@ class ASAPSquaredWindow(EQDockWidget):
 		tmp_layout.addWidget(QQ(QDoubleSpinBoxFullPrec, 'asap_squaredwidth', width=120))
 		tmp_layout.addWidget(QQ(QLabel, text='Resolution: '))
 		tmp_layout.addWidget(QQ(QDoubleSpinBoxFullPrec, 'asap_squaredresolution', width=120))
+		tmp_layout.addWidget(QQ(QLabel, text='Threshold: '))
+		tmp_layout.addWidget(QQ(QDoubleSpinBoxFullPrec, 'asap_squarethreshold', range=(None, None), width=120))
 		tmp_layout.addWidget(QQ(QCheckBox, 'asap_squaredisupper', text='Is upper level'))
 		tmp_layout.addWidget(QQ(QCheckBox, 'asap_squareplotlog', text='Plot logarithmic'))
 		tmp_layout.addStretch(1)
@@ -8554,6 +8558,11 @@ class ASAPSquaredWindow(EQDockWidget):
 		resolution = config['asap_squaredresolution'] or config['asap_resolution']
 		
 		egy_df = ASAPAx.egy_df
+
+		if egy_df is None:
+			notify_warning.emit('No *.egy file loaded.')
+			return
+
 		query = config['asap_squaredfilterqueryenergylevels']
 		if query:
 			egy_df = egy_df.query(query)
@@ -8567,6 +8576,7 @@ class ASAPSquaredWindow(EQDockWidget):
 		exp_df = exp_df[exp_df['visible']]
 		
 		n_lines = 0
+		threshold = config['asap_squarethreshold']
 		rel_xs = np.arange(-width/2, width/2 + resolution, resolution)
 		asap2_ys = np.ones_like(rel_xs)
 		qn_labels_egy = [f'qn{i+1}' for i in range(self.noq)]
@@ -8601,6 +8611,7 @@ class ASAPSquaredWindow(EQDockWidget):
 				ys = tmp['y'].values
 
 				interp_ys = np.interp(rel_xs, xs-ref_position, ys)
+				interp_ys = interp_ys * (interp_ys > threshold)
 				tot_ys *= interp_ys
 			
 			asap2_ys *= tot_ys/tot_ys.max()
