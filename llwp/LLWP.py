@@ -7469,7 +7469,8 @@ def restart():
 	File.save_files(project_filename)
 	mainwindow.closeEvent()
 	NewAssignments.get_instance().save_backup()
-	os.execl(sys.executable, sys.executable, __file__, project_filename)
+	args = () if APP_TAG == 'LLWP' else ('--ASAP', )
+	os.execl(sys.executable, sys.executable, __file__, project_filename, *args)
 
 def except_hook(cls, exception, traceback):
 	if isinstance(exception, GUIAbortedError):
@@ -7974,7 +7975,6 @@ class ASAPAx(LWPAx):
 		
 		notify_info.emit(f'Successfully loaded the energy file \'{basename}\'.')
 
-		
 class ASAPMenu(Menu):
 	def __init__(self, parent, *args, **kwargs):
 		mb = parent.menuBar()
@@ -8348,7 +8348,6 @@ class ASAP(LLWP):
 	
 	def debug_setup(self):
 		pass
-
 
 
 class ASAPDetailViewer(EQDockWidget):
@@ -8808,8 +8807,11 @@ def start_asap():
 	ASAP()
 
 if __name__ == '__main__':
-	# start_asap()
-	start_llwp()
+	args = sys.argv
+	if '--ASAP' in args:
+		start_asap()
+	else:
+		start_llwp()
 
 
 ##
