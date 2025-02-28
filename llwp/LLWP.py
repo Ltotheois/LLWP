@@ -58,6 +58,7 @@ from PyQt6.QtWidgets import *
 from PyQt6.QtGui import *
 
 import matplotlib
+import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvas, NavigationToolbar2QT
 
 import warnings
@@ -2267,6 +2268,15 @@ class LWPAx():
 			qns_dict = self.create_qns_dict()
 			query = ' and '.join([f'({key} == {value})' for key, value in qns_dict.items()])
 			
+			# Special case if we are limited to a certain *.lin file
+			reference_states = ReferenceSeriesWindow.instance.get_state()
+			if query and self.col_i < len(reference_states):
+				reference_state = reference_states[self.col_i]
+				filepath = reference_state['lin_file']
+				if filepath is not None:
+					filepath = filepath.replace('\\', '\\\\')
+					query = query + f' and (filename == "{filepath}" or filename =="__newassignments__")'
+			
 			if query and LinFile.has_results(query):
 				color = config["color_lin"]
 		
@@ -2415,7 +2425,7 @@ class LWPAx():
 		if not config['series_blendwidth']:
 			return(False)
 		reference_states = ReferenceSeriesWindow.instance.get_state()
-		if self.col_i > len(reference_states):
+		if self.col_i >= len(reference_states):
 			return(False)
 		reference_state = reference_states[self.col_i]
 		if not reference_state['check_blends']:
@@ -2641,7 +2651,7 @@ class LWPWidget(QGroupBox):
 		
 		compiled_expression = compile(expression, '', 'eval')
 		return(compiled_expression)
-		
+	
 	@QThread.threaded_d
 	@status_d
 	@drawplot_decorator.d
@@ -3981,11 +3991,21 @@ class AssignAllDialog(QDialog):
 		positions, qns = refwidget.calc_references(n_rows, n_qns)
 		qn_labels = [f'qn{ul}{i+1}' for ul in ('u', 'l') for i in range(n_qns)]
 		
+		# Special case if we are limited to a certain *.lin file
+		reference_states = ReferenceSeriesWindow.instance.get_state()
+		if self.i_col < len(reference_states):
+			reference_state = reference_states[self.i_col]
+			filepath = reference_state['lin_file']
+			if filepath is not None:
+				filepath = filepath.replace('\\', '\\\\')
+				file_query = f' and (filename == "{filepath}" or filename =="__newassignments__")'
+		
 		# Find already assigned transitions of series
 		offsets = {}
 		for i_row, (ref_pos, row_qns) in enumerate(zip(positions, qns)):
 			query = ' and '.join([f'({label} == {qn})' for qn, label in zip(row_qns.flatten(), qn_labels)])
-			
+			if file_query:
+				query = query + file_query
 			vals = LinFile.query_c(query)['x'].to_numpy()
 			
 			if len(vals) == 0:
@@ -4327,6 +4347,7 @@ class ReferenceSelector(QTabWidget):
 		self.state = {
 			'method': self.methods[0],
 			'check_blends': False,
+			'lin_file': None,
 			'transition': {},
 			'list': {
 				'qns': None,
@@ -4442,7 +4463,7 @@ class ReferenceSelector(QTabWidget):
 			current = options.index(current_file)
 		else:
 			current = 0
-		item, ok = QInputDialog.getItem(self, "Choose File", f"Limit this series to the following file:", options, current=current, editable=False)
+		item, ok = QInputDialog.getItem(self, "Choose File", f"Limit this series to the following file (the corresponding *.lin file is determined automatically):", options, current=current, editable=False)
 		if not (ok and item):
 			return
 
@@ -4555,6 +4576,7 @@ class ReferenceSelector(QTabWidget):
 		qns = np.zeros(shape, dtype=np.int64)
 		positions = np.zeros(n_rows, dtype=np.float64)
 		self.state['check_blends'] = False
+		self.state['lin_file'] = None
 
 		if method == 'Transition':
 			state = self.state['transition']
@@ -4583,6 +4605,9 @@ class ReferenceSelector(QTabWidget):
 			if file_to_limit_data_to:
 				filepath = file_to_limit_data_to.replace('\\', '\\\\')
 				conditions.append(f'(filename == "{filepath}")')
+				
+				# @Luis: Maybe also offer option to select a different file here
+				self.state['lin_file'] = file_to_limit_data_to.replace('.cat', '.lin')
 			
 			conditions = " and ".join(conditions)  if conditions else '(visible)'
 			cat_df = CatFile.query_c(conditions)
@@ -8783,8 +8808,8 @@ def start_asap():
 	ASAP()
 
 if __name__ == '__main__':
-	start_asap()
-	# start_llwp()
+	# start_asap()
+	start_llwp()
 
 
 ##
