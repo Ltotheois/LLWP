@@ -5535,6 +5535,7 @@ class ConfigWindow(EQDockWidget):
 		self.setWidget(mainwidget)
 		mainwidget.setLayout(vbox)
 
+		self.timer = None
 		self.updating = False
 		self.visibilityChanged.connect(self.on_visibility_change)
 
@@ -5544,7 +5545,8 @@ class ConfigWindow(EQDockWidget):
 			self.timer.timeout.connect(self.get_values)
 			self.timer.start(200)
 		else:
-			self.timer.stop()
+			if self.timer is not None:
+				self.timer.stop()
 
 	def search(self, text):
 		for key, value in self.widgets.items():
@@ -8421,7 +8423,8 @@ class ASAPDetailViewer(EQDockWidget):
 			qnus_string = ','.join([f'{row[qn]}' for qn in qns_labels[0]])
 			qnls_string = ','.join([f'{row[qn]}' for qn in qns_labels[1]])
 			# @Luis: Think about also giving the intensity here
-			qnstring = f'{qnus_string} ← {qnls_string}, {row["y"]:.1e}'
+			# qnstring = f'{qnus_string} ← {qnls_string}, {row["y"]:.1e}'
+			qnstring = f'{qnus_string} ← {qnls_string}'
 
 			ax.plot(xs, ys, color=config['color_exp'])
 			ax.text(**annotate_kwargs, s=qnstring, transform=ax.transAxes)
