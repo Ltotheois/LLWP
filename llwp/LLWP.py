@@ -1127,6 +1127,9 @@ class File():
 		
 		if hasattr(self, 'is_stickspectrum'):
 			self.is_stickspectrum = default_values.get('is_stickspectrum', False)
+		
+		if hasattr(self, 'convert_to_MHz'):
+			self.convert_to_MHz = default_values.get('convert_to_MHz', False)
 
 	def apply_all(self):
 		self.apply_color()
@@ -1212,6 +1215,8 @@ class File():
 		}
 		if hasattr(self, 'is_stickspectrum'):
 			dict_['is_stickspectrum'] = self.is_stickspectrum
+		if hasattr(self, 'convert_to_MHz'):
+			dict_['convert_to_MHz'] = self.convert_to_MHz
 		return(dict_)
 
 	@classmethod
@@ -1767,9 +1772,13 @@ class LinFile(File):
 	
 	has_y_data = False
 
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self.convert_to_MHz = False
+
 	def load_file_core(self):
 		if self.extension not in config['flag_linformats']:
-			data = pyckett.lin_to_df(self.filename_abs, sort=False)
+			data = pyckett.lin_to_df(self.filename_abs, sort=False, convert_to_MHz=self.convert_to_MHz)
 		else:
 			kwargs = config['flag_linformats'][self.extension].copy()
 
@@ -2005,8 +2014,13 @@ class FileAdditionalSettingsDialog(QDialog):
 			self.layout.addWidget(tmp['widget'])
 		
 		if hasattr(self.file, 'is_stickspectrum'):
-			tmp_widget = QQ(QCheckBox, text='Is Stick Spectrum: ', change=self.update_stickspectrum, value=file.is_stickspectrum)
+			tmp_widget = QQ(QCheckBox, text='Is Stick Spectrum', change=self.update_stickspectrum, value=file.is_stickspectrum)
 			self.widgets['is_stickspectrum'] = tmp_widget
+			self.layout.addWidget(tmp_widget)
+		
+		if hasattr(self.file, 'convert_to_MHz'):
+			tmp_widget = QQ(QCheckBox, text='Convert IR data to MHz', change=self.update_convert_to_MHz, value=file.convert_to_MHz)
+			self.widgets['convert_to_MHz'] = tmp_widget
 			self.layout.addWidget(tmp_widget)
 
 		self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Apply | QDialogButtonBox.StandardButton.Reset | QDialogButtonBox.StandardButton.Close)
@@ -2027,6 +2041,9 @@ class FileAdditionalSettingsDialog(QDialog):
 		if hasattr(self.file, 'is_stickspectrum'):
 			self.widgets['is_stickspectrum'].setChecked(False)
 		
+		if hasattr(self.file, 'convert_to_MHz'):
+			self.widgets['convert_to_MHz'].setChecked(False)
+		
 		self.apply_all()
 
 	def apply_all(self):
@@ -2039,6 +2056,8 @@ class FileAdditionalSettingsDialog(QDialog):
 			self.update_color_query()
 			if hasattr(self.file, 'is_stickspectrum'):
 				self.update_stickspectrum()
+			if hasattr(self.file, 'convert_to_MHz'):
+				self.update_convert_to_MHz()
 		
 		mainwindow.lwpwidget.set_data()
 		
@@ -2077,6 +2096,13 @@ class FileAdditionalSettingsDialog(QDialog):
 		file = self.file
 		is_stickspectrum = self.widgets['is_stickspectrum'].isChecked()
 		file.is_stickspectrum = is_stickspectrum
+		mainwindow.lwpwidget.set_data()
+	
+	def update_convert_to_MHz(self, _=None):
+		file = self.file
+		convert_to_MHz = self.widgets['convert_to_MHz'].isChecked()
+		file.convert_to_MHz = convert_to_MHz
+		file.load_file()
 		mainwindow.lwpwidget.set_data()
 
 	def on_exit(self, _=None):
