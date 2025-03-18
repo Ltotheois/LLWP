@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llwp"
-version = "2.0.12"
+version = "2.0.13"
 authors = [
   { name="Luis Bonah", email="bonah@ph1.uni-koeln.de" },
 ]
 description = "LLWP is a fast, efficient and easy solution for exploring and assigning spectra - relying on Loomis-Wood plots."
 readme = "README.md"
 requires-python = ">=3.7"
-dependencies = ['numpy', 'pandas', 'matplotlib', 'wrapt', 'pyckett >= 0.1.19', 'scipy', 'PyQt6']
+dependencies = ['numpy', 'pandas', 'matplotlib', 'wrapt', 'pyckett >= 0.1.22', 'scipy', 'PyQt6']
 classifiers = [
 	"Programming Language :: Python :: 3",
 	"License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
