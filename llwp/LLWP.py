@@ -4019,6 +4019,7 @@ class AssignAllDialog(QDialog):
 		
 		# Special case if we are limited to a certain *.lin file
 		reference_states = ReferenceSeriesWindow.instance.get_state()
+		file_query = None
 		if self.i_col < len(reference_states):
 			reference_state = reference_states[self.i_col]
 			filepath = reference_state['lin_file']
