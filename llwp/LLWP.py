@@ -4023,7 +4023,6 @@ class AssignAllDialog(QDialog):
 		if self.i_col < len(reference_states):
 			reference_state = reference_states[self.i_col]
 			filepath = reference_state['lin_file']
-			print(f'filepath = {filepath}')
 			if filepath is not None:
 				filepath = filepath.replace('\\', '\\\\')
 				file_query = f' and (filename == "{filepath}" or filename =="__newassignments__")'
