@@ -341,7 +341,7 @@ class Config(dict):
 		'asap_query': ('', str),
 		'asap_resolution': (6e-6, float),
 		'asap_weighted': (True, bool),
-		'asap_catunitconversionfactor': (0, float),
+		'asap_catunitconversionfactor': (1/pyckett.WN_TO_MHZ, float),
 		'asap_assigntransitions': (True, bool),
 		'asap_excludearoundassigned': (0, float),
 		
@@ -3896,10 +3896,9 @@ class AssignAllDialog(QDialog):
 			
 			if len(vals) > 1:
 				qnsstring = ','.join(map(str, qnus))
-				notify_warning.emit(f'Multiple assignments for level {qnsstring} found. Did not use it as reference.')
-				continue
+				notify_warning.emit(f'Multiple assignments for level {qnsstring} found. Using their mean value as the reference.')
 
-			offsets[i_row] = vals[0] - pred_egy.get(i_row, 0)
+			offsets[i_row] = vals.mean() - pred_egy.get(i_row, 0)
 		
 		if len(offsets) < 1:
 			msg = 'Please assign at least a single transition of the series (two subsequent would be great).'
@@ -4040,10 +4039,9 @@ class AssignAllDialog(QDialog):
 			
 			if len(vals) > 1:
 				qnsstring = ','.join(map(str, row_qns[0])) + ' ← ' + ','.join(map(str, row_qns[1]))
-				notify_warning.emit(f'Multiple assignments for transition {qnsstring} found. Did not use it as reference.')
-				continue
+				notify_warning.emit(f'Multiple assignments for transition {qnsstring} found. Using their mean value as the reference.')
 			
-			offsets[i_row] = vals[0] - ref_pos
+			offsets[i_row] = vals.mean() - ref_pos
 		
 		if len(offsets) < 1:
 			msg = 'Please assign at least a single transition of the series (two subsequent would be great).'
