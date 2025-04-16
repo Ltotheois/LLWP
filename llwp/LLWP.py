@@ -215,7 +215,7 @@ class Config(dict):
 		'plot_skipbinning': (1000, int),
 		'plot_hovercutoff': (20, float),
 		'plot_annotationkwargs': ({"x": 1, "y": 1, "horizontalalignment": "right", "verticalalignment": "top"}, dict),
-		'plot_annotationfstring': ('{x}', str),
+		'plot_annotationfstring': ('{qns}', str),
 
 		'convolution_kernel': ([], list),
 		'convolution_stepwidth': (0.2, float),
@@ -8394,7 +8394,7 @@ class ASAPDetailViewer(EQDockWidget):
 		
 		tmp_layout = QHBoxLayout()
 		tmp_layout.addWidget(QQ(QLabel, text='Width:'))
-		tmp_layout.addWidget(QQ(QDoubleSpinBox, 'asap_detailviewerwidth'))
+		tmp_layout.addWidget(QQ(QDoubleSpinBox, 'asap_detailviewerwidth', range=(0, None), width=80))
 		tmp_layout.addStretch()
 
 		layout.addLayout(tmp_layout)
