@@ -4466,7 +4466,7 @@ class ReferenceSelector(QTabWidget):
 		button_update = QQ(QPushButton, text="Update", change=lambda x: self.expression_update(type='expresion'))
 
 		label_N0 = QQ(QLabel, text="N0: ")
-		self.input_N0 = QQ(QSpinBox, value=self.state["expression"]["N0"], range=(0, None), change=lambda x: self.expression_update(type='index'))
+		self.input_N0 = QQ(QSpinBox, value=self.state["expression"]["N0"], range=(None, None), change=lambda x: self.expression_update(type='index'))
 
 		layout.addWidget(self.input_expr)
 		hbox = QHBoxLayout()
