@@ -2611,6 +2611,13 @@ class LWPWidget(QGroupBox):
 		with matplotlib_lock:
 			self.plotcanvas.draw_idle()
 
+	def save_figure(self, fname=None):
+		if fname is None:
+			fname = QFileDialog.getSaveFileName(None, 'Choose file to save to')[0]
+		
+		if fname:
+			self.fig.savefig(fname)
+
 	def on_click(self, event):
 		ax = event.inaxes
 		index = np.asarray(np.where(self.axes  == ax)).T
@@ -2814,6 +2821,7 @@ class LWPWidget(QGroupBox):
 		get_position_action = menu.addAction('Copy Reference Position')
 		get_qns_action = menu.addAction('Copy QNs')
 		set_active_action = menu.addAction('Make active Ax')
+		save_figure_action = menu.addAction('Save Figure')
 		open_blend_action = menu.addAction('Open in Blended Lines')
 		fit_all_action = menu.addAction('Fit all')
 
@@ -2828,6 +2836,8 @@ class LWPWidget(QGroupBox):
 
 			output_string = '\n'.join(output_string)
 			QApplication.clipboard().setText(output_string)
+		elif action == save_figure_action:
+			self.save_figure()
 		elif action == set_active_action:
 			mainwindow.lwpwidget._active_ax_index = (lwpax.row_i, lwpax.col_i)
 		elif action == fit_all_action:
@@ -8357,6 +8367,7 @@ class ASAPWidget(LWPWidget):
 
 		menu = QMenu(self)
 		set_active_action = menu.addAction('Make active Ax')
+		save_figure_action = menu.addAction('Save Figure')
 		fit_all_action = menu.addAction('Fit all')
 
 		action = menu.exec(self.mapToGlobal(event.pos()))
@@ -8365,6 +8376,8 @@ class ASAPWidget(LWPWidget):
 		elif action == fit_all_action:
 			i_col = lwpax.col_i
 			AssignAllDialog.show_dialog(i_col)
+		elif action == save_figure_action:
+			self.save_figure()
 
 class ASAPMainWindow(MainWindow):
 	mainwidget_class = ASAPWidget
