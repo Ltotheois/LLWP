@@ -2477,8 +2477,8 @@ class LWPAx():
 			qn_labels = pyckett.qnlabels_from_quanta(N_QNS)
 			query = ' and '.join([f'( {label} == {new_assignment[label]} )' for label in qn_labels if new_assignment[label] != pyckett.SENTINEL])
 			tmp_cat = entries.query(query)
+
 			y_at_xpre = tmp_cat["y"].values[0]
-		
 			min_y_value = y_at_xpre * config['series_blendminrelratio']
 			entries = entries.query('y >= @min_y_value')
 		
@@ -3743,7 +3743,7 @@ class OffsetDialog(QDialog):
 class QNsDialog(QDialog):
 	_instance = None
 	
-	def __init__(self, frequency):
+	def __init__(self, frequency, file_to_limit_data_to=None):
 		super().__init__()
 
 		if self._instance:
@@ -3791,6 +3791,8 @@ class QNsDialog(QDialog):
 		table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
 		tmp_df = CatFile.get_data().copy()
+		if file_to_limit_data_to:
+			tmp_df = tmp_df.query('filename == @file_to_limit_data_to')
 		tmp_df["dist"] = tmp_df["x"] - frequency
 		tmp_df["log y"] = np.log10(tmp_df["y"])
 		tmp_df["absdist"] = abs(tmp_df["dist"])
@@ -6207,7 +6209,6 @@ class BlendedLinesWindow(EQDockWidget):
 			notify_info.emit(f"Saved the fit to the file {filename}.")
 		else:
 			notify_info.emit(f"No fit values to be saved.")
-
 	
 	def assign(self, x, error):
 		index = self.plot_widget.index
@@ -6239,7 +6240,13 @@ class BlendedLinesWindow(EQDockWidget):
 		new_assignment.update(lwpax.create_qns_dict(complete=True))
 		new_assignment.update({'weight': 1, 'comment': config['fit_comment'], 'filename': '__newassignments__'})
 		
-		dialog = QNsDialog(x)
+		# Prepare to limit QNs to user-defined file
+		reference_states = ReferenceSeriesWindow.instance.get_state()
+		col_i = self.plot_widget.index[1]
+		reference_state = reference_states[col_i]
+		file_to_limit_data_to = reference_state['transition'].get('file')
+
+		dialog = QNsDialog(x, file_to_limit_data_to)
 		dialog.exec()
 
 		if dialog.result() != 1:
