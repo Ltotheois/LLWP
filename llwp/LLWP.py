@@ -339,6 +339,7 @@ class Config(dict):
 		'assignall_maxdegree': (3, int),
 		
 		'asap_query': ('', str),
+		'asap_minrelratio': (0, float),
 		'asap_resolution': (6e-6, float),
 		'asap_weighted': (True, bool),
 		'asap_catunitconversionfactor': (1/pyckett.WN_TO_MHZ, float),
@@ -7499,7 +7500,10 @@ def exp_to_df(fname, n_bytes=4096, **kwargs):
 		sniffer = csv.Sniffer()
 		with open(fname, 'r') as file:
 			data = file.read(n_bytes)
-		delimiter = sniffer.sniff(data).delimiter
+		try:
+			delimiter = sniffer.sniff(data).delimiter
+		except Exception:
+			delimiter = '\t'
 		kwargs['delimiter'] = delimiter
 
 	data = pd.read_csv(fname, **kwargs)
@@ -8221,16 +8225,10 @@ class ASAPWidget(LWPWidget):
 						interp_ys[min_index_exclude:max_index_exclude] = 0
 
 			# @Luis: Check this
-			# Christian uses the minimal intensity from query as the minimum_intensity
+			# Christian uses the minimal intensity from the query as the minimum_intensity
 			if use_weights:
 				power = np.log10(ref_int) - minimum_intensity + 1
 				interp_ys = np.power(np.abs(interp_ys), power)
-			
-			# @Luis: Here we are normalizing the y-values, so that the cross-correlation plot is not getting too small in magnitude, which otherwise can lead to problems when fitting the experimental lineshape
-			# The root cause is the maximal exponent precision of a 64 bit integer
-			interp_ys_max = interp_ys.max()
-			if interp_ys_max:
-				interp_ys /= interp_ys_max
 			
 			tot_ys *= interp_ys
 			n_correlated_transitions += 1
@@ -8244,7 +8242,6 @@ class ASAPWidget(LWPWidget):
 				tot_ys /= tot_ys_max
 		
 		return(tot_xs, tot_ys)
-
 
 	@QThread.threaded_d
 	@status_d
@@ -8293,8 +8290,14 @@ class ASAPWidget(LWPWidget):
 					cond = [f"(qn{ul}{i+1} == {qn})" for i, qn in enumerate(row_qns)]
 					condition  = " & ".join(cond)
 					row_entries_all = entries.query(condition)
-					row_entries = row_entries_all[row_entries_all['use_for_cross_correlation']]
 
+					if config['asap_minrelratio']:
+						row_entries = row_entries_all[row_entries_all['use_for_cross_correlation']]
+						ymax = row_entries['y'].max()
+						ythreshold = ymax * config['asap_minrelratio']
+						row_entries_all.loc[:, 'use_for_cross_correlation'] = row_entries_all.eval('(use_for_cross_correlation) & (y > @ythreshold)')
+
+					row_entries = row_entries_all[row_entries_all['use_for_cross_correlation']]
 					corr_xs, corr_ys = self.calc_correlation_plot(row_qns, row_entries, offset, width, resolution)
 					
 					ax = self.lwpaxes[i_row, i_col]
@@ -8573,7 +8576,11 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 		placeholder = 'Expression to filter the transitions used in the cross-correlation plot'
 		tmp_layout.addWidget(QQ(QLabel, text='Transitions filter: '))
 		tmp_layout.addWidget(QQ(QPlainTextEdit, 'asap_query', placeholder=placeholder))
-
+		
+		tooltip = 'Relative intensity threshold compared to the strongest prediction'
+		tmp_layout.addWidget(QQ(QLabel, text='Relative intensity threshold: '))
+		tmp_layout.addWidget(QQ(QDoubleSpinBox, 'asap_minrelratio', tooltip=tooltip, range=(0, 1)))
+		
 		tmp_layout.addStretch()
 
 		layout.addWidget(QQ(QPushButton, text='Calculate Cross Correlation', change=lambda _: mainwindow.lwpwidget.calc_correlation_plots()))
