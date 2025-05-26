@@ -575,8 +575,8 @@ class PlotWidget(QWidget):
 		)
 
 		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
-		self.plot_canvas = FigureCanvas(self.fig)
-		layout.addWidget(self.plot_canvas, 6)
+		self.plotcanvas = FigureCanvas(self.fig)
+		layout.addWidget(self.plotcanvas, 6)
 		layout.addStretch()
 
 		self.ax = self.fig.subplots()
@@ -593,7 +593,7 @@ class PlotWidget(QWidget):
 		self.ax.add_collection(self.exp_coll)
 		self.ax.add_collection(self.cat_coll)
 
-		self.request_redraw.connect(self.plot_canvas.draw_idle)
+		self.request_redraw.connect(self.plotcanvas.draw_idle)
 
 	def from_current_plot(self):
 		tmp_ax = mainwindow.lwpwidget.get_current_ax()
@@ -3174,7 +3174,7 @@ class LWPWidget(QGroupBox):
 		open_blend_action = menu.addAction("Open in Blended Lines")
 		fit_all_action = menu.addAction("Fit all")
 
-		action = menu.exec(self.mapToGlobal(event.pos()))
+		action = menu.exec(self.plotcanvas.mapToGlobal(event.pos()))
 		if action == get_position_action:
 			QApplication.clipboard().setText(str(lwpax.ref_position))
 		elif action == get_qns_action:
@@ -4430,7 +4430,7 @@ class AssignAllDialog(QDialog):
 		self.__class__._instance = self
 
 		self.init_gui()
-		self.drawplot.connect(self.plot_canvas.draw_idle)
+		self.drawplot.connect(self.plotcanvas.draw_idle)
 		self.update_gui()
 
 	def update_gui_asap(self, reset_axes_to_skip=True):
@@ -4810,10 +4810,10 @@ class AssignAllDialog(QDialog):
 		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
 		cid = self.fig.canvas.mpl_connect("button_press_event", self.on_click)
 
-		self.plot_canvas = FigureCanvas(self.fig)
-		self.mpl_toolbar = NavigationToolbar2QT(self.plot_canvas, self)
+		self.plotcanvas = FigureCanvas(self.fig)
+		self.mpl_toolbar = NavigationToolbar2QT(self.plotcanvas, self)
 
-		layout.addWidget(self.plot_canvas, 1)
+		layout.addWidget(self.plotcanvas, 1)
 		layout.addWidget(self.mpl_toolbar)
 
 		grid_layout = QGridLayout()
@@ -6610,7 +6610,7 @@ class ResidualsWindow(EQDockWidget):
 		self.setWindowTitle("Residuals")
 
 		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
-		self.plot_canvas = FigureCanvas(self.fig)
+		self.plotcanvas = FigureCanvas(self.fig)
 
 		self.ax = self.fig.subplots()
 
@@ -6631,14 +6631,14 @@ class ResidualsWindow(EQDockWidget):
 			"button_press_event", lambda x: self.on_hover(x, True)
 		)
 
-		self.mpl_toolbar = NavigationToolbar2QT(self.plot_canvas, self)
+		self.mpl_toolbar = NavigationToolbar2QT(self.plotcanvas, self)
 		self.df = None
 
 		layout = QVBoxLayout(margin=True)
 		mainwidget = QWidget()
 		self.setWidget(mainwidget)
 		mainwidget.setLayout(layout)
-		layout.addWidget(self.plot_canvas, 6)
+		layout.addWidget(self.plotcanvas, 6)
 		hlayout = QHBoxLayout()
 		hlayout.addWidget(QLabel("x-axis: "))
 		hlayout.addWidget(
@@ -7030,7 +7030,7 @@ class BlendedLinesWindow(EQDockWidget):
 		self.table.setMinimumHeight(50)
 		layout.addWidget(self.table, 1)
 
-		self.cid = self.plot_widget.plot_canvas.mpl_connect(
+		self.cid = self.plot_widget.plotcanvas.mpl_connect(
 			"button_press_event", lambda event: self.add_peak(event)
 		)
 		self.fill_table_requested.connect(self.fill_table)
@@ -7829,7 +7829,7 @@ class EnergyLevelsWindow(EQDockWidget):
 		self.setWidget(mainwidget)
 
 		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
-		self.plot_canvas = FigureCanvas(self.fig)
+		self.plotcanvas = FigureCanvas(self.fig)
 
 		self.fname = None
 		self.dataframe = None
@@ -7852,9 +7852,9 @@ class EnergyLevelsWindow(EQDockWidget):
 		self.annot.set_visible(False)
 		self.fig.canvas.mpl_connect("motion_notify_event", self.on_hover)
 
-		self.mpl_toolbar = NavigationToolbar2QT(self.plot_canvas, self)
+		self.mpl_toolbar = NavigationToolbar2QT(self.plotcanvas, self)
 
-		layout.addWidget(self.plot_canvas, 6)
+		layout.addWidget(self.plotcanvas, 6)
 		layout.addWidget(self.mpl_toolbar)
 		hlayout = QHBoxLayout()
 		hlayout.addWidget(
@@ -9262,6 +9262,10 @@ class ASAPAx(LWPAx):
 		self.entries = None
 		self.is_upper_state = True
 
+		self.width = None
+		self.offset = None
+		self.resolution = None
+
 		self.corr_xs = None
 		self.corr_ys = None
 		self.curr_state = {}
@@ -9940,14 +9944,12 @@ class ASAPWidget(LWPWidget):
 	@status_d
 	@drawplot_decorator.d
 	def calc_correlation_plots(self, thread=None):
-		fit_vline = self._ax_class.fit_vline
-		fit_curve = self._ax_class.fit_curve
-		if fit_vline is not None:
-			fit_vline.remove()
-			fit_vline = None
-		if fit_curve is not None:
-			fit_curve.remove()
-			fit_curve = None
+		if self._ax_class.fit_vline is not None:
+			self._ax_class.fit_vline.remove()
+			self._ax_class.fit_vline = None
+		if self._ax_class.fit_curve is not None:
+			self._ax_class.fit_curve.remove()
+			self._ax_class.fit_curve = None
 
 		if not hasattr(ASAPSettingsWindow, "instance"):
 			return
@@ -10021,6 +10023,9 @@ class ASAPWidget(LWPWidget):
 					ax.corr_xs = corr_xs
 					ax.corr_ys = corr_ys
 					ax.qns = row_qns
+					ax.offset = offset
+					ax.width = width
+					ax.resolution = resolution
 					ax.is_upper_state = state["is_upper_state"]
 					threads.append(ax.update())
 
@@ -10137,6 +10142,10 @@ class ASAPDetailViewer(EQDockWidget):
 		self.setWidget(widget)
 		widget.setLayout(layout)
 
+		self.axes = []
+		self.entries = None
+		self.asap_ax = None
+
 		tmp_layout = QHBoxLayout()
 		tmp_layout.addWidget(QQ(QLabel, text="Width:"))
 		tmp_layout.addWidget(
@@ -10154,8 +10163,9 @@ class ASAPDetailViewer(EQDockWidget):
 		)
 
 		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
-		self.plot_canvas = FigureCanvas(self.fig)
-		layout.addWidget(self.plot_canvas)
+		self.plotcanvas = FigureCanvas(self.fig)
+		self.plotcanvas.contextMenuEvent = self.contextMenuCanvas
+		layout.addWidget(self.plotcanvas)
 
 		mainwindow.lwpwidget.peak_fitted.connect(self.update_view)
 		self.drawplot.connect(self.draw_canvas)
@@ -10173,6 +10183,9 @@ class ASAPDetailViewer(EQDockWidget):
 		if config["asap_detailviewerfilter"]:
 			entries = entries[entries["use_for_cross_correlation"]].copy()
 
+		if entries is None or not len(entries):
+			return
+		
 		width = config["asap_detailviewerwidth"] or config["plot_width"]
 		entries["xmin"] = entries["x"] - width / 2 + offset
 		entries["xmax"] = entries["x"] + width / 2 + offset
@@ -10224,11 +10237,52 @@ class ASAPDetailViewer(EQDockWidget):
 		ax = axes[0]
 		ax.xaxis.set_visible(True)
 		ax.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(3))
+		
+		self.axes = axes
+		self.entries = entries.copy()
+		self.asap_ax = asap_ax
 
 		self.drawplot.emit()
 
+	def contextMenuCanvas(self, event):
+		x, y = event.x(), event.y()
+		geometry = self.plotcanvas.geometry()
+		width, height = geometry.width(), geometry.height()
+		x_rel, y_rel = x / width, 1 - y / height
+
+		for i, ax in enumerate(self.axes):
+			xmin, ymin, width, height = ax.get_position().bounds
+			if xmin <= x_rel <= xmin + width and ymin <= y_rel <= ymin + height:
+				break
+		else:  # Clicked outside of ax
+			return
+		
+		menu = QMenu(self)
+		remove_action = menu.addAction("Remove this transition")
+
+		action = menu.exec(self.plotcanvas.mapToGlobal(event.pos()))
+		if action == remove_action:
+			index = self.entries.index[i]
+
+			ax = self.asap_ax
+			ax_entries = ax.entries
+			ax_entries = ax_entries.drop(index)
+			ax.entries = ax_entries
+
+			corr_xs, corr_ys = mainwindow.lwpwidget.calc_correlation_plot(
+				ax.qns, ax.entries, ax.offset, ax.width, ax.resolution
+			)
+			ax.corr_xs = corr_xs
+			ax.corr_ys = corr_ys
+
+			ax.update().wait()
+			self.drawplot.emit()
+			self.update_view(ax, ax.offset)
+			
+
+
 	def draw_canvas(self):
-		self.plot_canvas.draw_idle()
+		self.plotcanvas.draw_idle()
 
 
 class ASAPSettingsWindow(ReferenceSeriesWindow):
@@ -10386,10 +10440,10 @@ class ASAPSquaredWindow(EQDockWidget):
 		widget.setLayout(layout)
 
 		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
-		self.plot_canvas = FigureCanvas(self.fig)
-		layout.addWidget(self.plot_canvas)
+		self.plotcanvas = FigureCanvas(self.fig)
+		layout.addWidget(self.plotcanvas)
 
-		self.mpltoolbar = NavigationToolbar2QT(self.plot_canvas, self)
+		self.mpltoolbar = NavigationToolbar2QT(self.plotcanvas, self)
 		layout.addWidget(self.mpltoolbar)
 
 		tmp_layout = QHBoxLayout()
@@ -10672,7 +10726,7 @@ class ASAPSquaredWindow(EQDockWidget):
 			np.savetxt(fname, self.data, delimiter="\t")
 
 	def draw_canvas(self):
-		self.plot_canvas.draw_idle()
+		self.plotcanvas.draw_idle()
 
 	def copy_to_clipboard(self, value):
 		QApplication.clipboard().setText(value)
