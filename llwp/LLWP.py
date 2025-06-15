@@ -2716,9 +2716,11 @@ class LWPAx:
 
 		try:
 			fit_function = get_fitfunction(fitmethod, config["fit_offset"])
-			xmiddle, xuncert, fit_xs, fit_ys = fit_function(
+			fit_results = fit_function(
 				exp_xs, exp_ys, peakdirection, fit_xs
 			)
+			xmiddle, xuncert = fit_results['xmiddle'], fit_results['xuncert']
+			fit_xs, fit_ys = fit_results['fit_xs'], fit_results['fit_ys']
 		except Exception as E:
 			self.fitcurve = None
 			self.fitline = None
@@ -4556,12 +4558,14 @@ class AssignAllDialog(QDialog):
 			fit_function = get_fitfunction(fitmethod, offset, kwargs=kwargs)
 
 			try:
-				xmiddle, xuncert, fit_xs, fit_ys = fit_function(
+				fit_results = fit_function(
 					exp_xs,
 					exp_ys,
 					peakdirection,
 					fit_xs,
 				)
+				xmiddle, xuncert = fit_results['xmiddle'], fit_results['xuncert']
+				fit_xs, fit_ys = fit_results['fit_xs'], fit_results['fit_ys']
 			except Exception as E:
 				notify_warning.emit(
 					f"Error when trying to fit row {i_row}. Error reads '{E}'."
@@ -4731,12 +4735,14 @@ class AssignAllDialog(QDialog):
 			fit_function = get_fitfunction(fitmethod, offset, kwargs=kwargs)
 
 			try:
-				xmiddle, xuncert, fit_xs, fit_ys = fit_function(
+				fit_results = fit_function(
 					exp_xs,
 					exp_ys,
 					peakdirection,
 					fit_xs,
 				)
+				xmiddle, xuncert = fit_results['xmiddle'], fit_results['xuncert']
+				fit_xs, fit_ys = fit_results['fit_xs'], fit_results['fit_ys']
 			except Exception as E:
 				notify_warning.emit(
 					f"Error when trying to fit row {i_row}. Error reads '{E}'."
@@ -8570,10 +8576,13 @@ def fit_pgopher(xs, ys, peakdirection, fit_xs):
 	fit_xs = xs[mask]
 	fit_ys = ys[mask] - ymin
 
-	xmiddle = np.sum(fit_xs * fit_ys) / np.sum(fit_ys)
-	xuncert = 0
-
-	return (xmiddle, xuncert, fit_xs, fit_ys + ymin)
+	results = {
+		'xmiddle': np.sum(fit_xs * fit_ys) / np.sum(fit_ys),
+		'xuncert': 0,
+		'fit_xs': fit_xs,
+		'fit_ys': fit_ys,
+	}
+	return (results)
 
 
 def fit_polynom(xs, ys, peakdirection, fit_xs, rank):
@@ -8589,8 +8598,13 @@ def fit_polynom(xs, ys, peakdirection, fit_xs, rank):
 	else:
 		xmiddle = fit_xs[np.argmax(fit_ys)]
 
-	xuncert = 0
-	return (xmiddle, xuncert, fit_xs, fit_ys)
+	results = {
+		'xmiddle': xmiddle,
+		'xuncert': 0,
+		'fit_xs': fit_xs,
+		'fit_ys': fit_ys,
+	}
+	return(results)
 
 
 def fit_polynom_multirank(xs, ys, peakdirection, fit_xs, maxrank):
@@ -8600,19 +8614,16 @@ def fit_polynom_multirank(xs, ys, peakdirection, fit_xs, maxrank):
 	maxrank = min(len(xs), maxrank)
 	for rank in range(maxrank):
 		try:
-			try:
-				popt = np.polyfit(xs, ys, rank)
-			except Exception as E:
-				popt = np.polyfit(xs, ys, rank)
-			polynom = np.poly1d(popt)
-			fit_ys = polynom(exp_xs)
-
-			rms = np.mean((fit_ys - ys) ** 2)
-			if rms < best_rms:
-				best_rms = rms
-				best_rank = rank
+			popt = np.polyfit(xs, ys, rank)
 		except Exception as E:
-			continue
+			popt = np.polyfit(xs, ys, rank)
+		polynom = np.poly1d(popt)
+		fit_ys = polynom(xs)
+
+		rms = np.mean((fit_ys - ys) ** 2)
+		if rms < best_rms:
+			best_rms = rms
+			best_rank = rank
 
 	popt = np.polyfit(xs, ys, best_rank)
 	polynom = np.poly1d(popt)
@@ -8623,8 +8634,13 @@ def fit_polynom_multirank(xs, ys, peakdirection, fit_xs, maxrank):
 	else:
 		xmiddle = fit_xs[np.argmax(fit_ys)]
 
-	xuncert = 0
-	return (xmiddle, xuncert, fit_xs, fit_ys)
+	results = {
+		'xmiddle': xmiddle,
+		'xuncert': 0,
+		'fit_xs': fit_xs,
+		'fit_ys': fit_ys,
+	}
+	return(results)
 
 
 def fit_lineshape(
@@ -8683,7 +8699,15 @@ def fit_lineshape(
 	xmiddle = popt[0]
 	xuncert = perr[0]
 
-	return (xmiddle, xuncert, fit_xs, fit_ys)
+	results = {
+		'xmiddle': xmiddle,
+		'xuncert': xuncert,
+		'fit_xs': fit_xs,
+		'fit_ys': fit_ys,
+		'popt': popt,
+		'perr': perr,
+	}
+	return(results)
 
 
 def get_fitfunction(fitmethod, offset=False, **kwargs):
@@ -9591,9 +9615,11 @@ class ASAPAx(LWPAx):
 
 		try:
 			fit_function = get_fitfunction(fitmethod, config["fit_offset"])
-			xmiddle, xuncert, fit_xs, fit_ys = fit_function(
+			fit_results = fit_function(
 				exp_xs, exp_ys, peakdirection, fit_xs
 			)
+			xmiddle, xuncert = fit_results['xmiddle'], fit_results['xuncert']
+			fit_xs, fit_ys = fit_results['fit_xs'], fit_results['fit_ys']
 
 		except Exception as E:
 			self.fitcurve = None
@@ -9868,6 +9894,7 @@ class ASAPWidget(LWPWidget):
 
 		xmin, xmax = offset - width / 2, offset + width / 2
 		tot_xs = np.arange(xmin, xmax + resolution, resolution)
+
 		tot_ys = np.ones_like(tot_xs)
 
 		exp_len = len(ExpFile.df)
@@ -9888,8 +9915,9 @@ class ASAPWidget(LWPWidget):
 		):
 			# Here we have to pad by two entries, otherwise the interpolation has to use the default values of 1
 			# -> results in strong accidental cross-correlation signal at the upper and lower limit of the plot
-			min_index = max(0, min_index - 2)
-			max_index = min(exp_len, max_index + 2)
+			# Reasons are the float inaccuracy in different places 
+			min_index = max(0, min_index - 20)
+			max_index = min(exp_len, max_index + 20)
 
 			dataframe = ExpFile.df.iloc[min_index:max_index].copy()
 			dataframe = dataframe[dataframe["visible"]]
@@ -10263,7 +10291,23 @@ class ASAPDetailViewer(EQDockWidget):
 		action = menu.exec(self.plotcanvas.mapToGlobal(event.pos()))
 		if action == remove_action:
 			index = self.entries.index[i]
+			entry = self.entries.iloc[i]
 
+			# Remove corresponding assignments from new assignments df
+			noq = config['series_qns']
+			query = ' and '.join([f'qn{ul}{i+1} == {entry[f"qn{ul}{i+1}"]}' for ul in "ul" for i in range(noq)])
+			
+			new_assignments = NewAssignments.get_instance()
+			df = new_assignments.get_new_assignments_df()
+			indices = df.query(query).index
+			df.drop(indices, inplace=True)
+			
+			df.reset_index(drop=True, inplace=True)
+			new_assignments.load_file()
+			new_assignments_window = NewAssignmentsWindow.instance
+			new_assignments_window.model.update()
+
+			# Update cross-correlation plot
 			ax = self.asap_ax
 			ax_entries = ax.entries
 			ax_entries = ax_entries.drop(index)
@@ -10590,7 +10634,8 @@ class ASAPSquaredWindow(EQDockWidget):
 				interp_ys = interp_ys * (interp_ys > threshold)
 				tot_ys *= interp_ys
 
-			asap2_ys *= tot_ys / tot_ys.max()
+			if tot_ys.max():
+				asap2_ys *= tot_ys / tot_ys.max()
 			n_lines += len(predicted_positions)
 
 			if config["asap_assigntransitions"]:
@@ -10683,9 +10728,16 @@ class ASAPSquaredWindow(EQDockWidget):
 
 		try:
 			fit_function = get_fitfunction(fitmethod, config["fit_offset"])
-			xmiddle, xuncert, fit_xs, fit_ys = fit_function(
+			fit_results = fit_function(
 				exp_xs, exp_ys, peakdirection, fit_xs
 			)
+			xmiddle, xuncert = fit_results['xmiddle'], fit_results['xuncert']
+			fit_xs, fit_ys = fit_results['fit_xs'], fit_results['fit_ys']
+			
+			if 'popt' in fit_results and 'perr' in fit_results:
+				popt, perr = fit_results['popt'], fit_results['perr']
+				notify_info.emit(f'The following parameters were determined: \n{popt=}\n{perr=}')
+			# @Luis: Retrieve here the FWHM of the lineshape
 		except Exception as E:
 			self.fitcurve = None
 			self.fitline = None
