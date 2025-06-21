@@ -248,6 +248,7 @@ class Config(dict):
 		"series_blendquery": ("", str),
 		"series_qns": (4, int),
 		"series_blendminrelratio": (0, float),
+		"series_changeqnsactions": ({}, dict),
 		"fit_fitmethod": ("Pgopher", str),
 		"fit_uncertainty": (0.05, float),
 		"fit_uncertainty_method": ("Value", str),
@@ -5547,6 +5548,17 @@ class ReferenceSelector(QTabWidget):
 		get_qns_action = menu.addAction("Copy Reference QNs")
 		fit_all_action = menu.addAction("Fit all")
 
+
+		change_qns_templates = config['series_changeqnsactions']
+		change_qns_actions = {}
+
+		if self.state['method'] == 'Transition' and len(change_qns_templates):
+				menu.addSeparator()
+
+				for label in change_qns_templates.keys():
+					action = menu.addAction(str(label))
+					change_qns_actions[action] = label
+
 		action = menu.exec(self.mapToGlobal(event.pos()))
 		if action == get_positions_action:
 			n_rows = config["plot_rows"]
@@ -5572,7 +5584,17 @@ class ReferenceSelector(QTabWidget):
 		elif action == fit_all_action:
 			i_col = self.parent.tab.indexOf(self)
 			AssignAllDialog.show_dialog(i_col)
+		elif action in change_qns_actions.keys():
+			label = change_qns_actions[action]
+			delta_qnus, delta_qnls = change_qns_templates[label]
+			seriesselector = self.series_selector
 
+			current_state = seriesselector.state
+			for i, delta in enumerate(delta_qnus):
+				current_state["qnus"][i] += delta
+			for i, delta in enumerate(delta_qnls):
+				current_state["qnls"][i] += delta
+			seriesselector.set_state()
 
 class SeriesSelector(QWidget):
 	values_changed = pyqtSignal()
@@ -10817,10 +10839,6 @@ if __name__ == "__main__":
 ##
 
 # - Auto detect format of .lin file (-> function in pyckett to check if current setting is reasonable for the file)
-# - Which of these modules should be kept?
-# - EnergyLevelsTrendWindow
-# - SpectraResolverWindow
-# - CalibrateSpectrumWindow
 
 
 ##
@@ -10833,6 +10851,10 @@ if __name__ == "__main__":
 # import glob
 # files = glob.glob(globstring)
 # File.add_multiple_files_by_type(files)
+
+
+## Additional actions to change series selector in specific way:
+# config["series_changeqnsactions"] = {"Next Ka": [[0, 1, -1], [0, 1, -1]], "Prev Ka": [[0, -1, 1], [0, -1, 1]]}
 
 
 ## Hotkey to change series selector in specific way (increase Ka, decrease Kc)
