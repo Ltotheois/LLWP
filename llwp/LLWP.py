@@ -349,7 +349,7 @@ class Config(dict):
 		"asap_assigntransitions": (True, bool),
 		"asap_excludearoundassigned": (0, float),
 		"asap_detailviewerwidth": (0, float),
-		"asap_detailviewerfilter": (False, bool),
+		"asap_detailviewerfilter": (True, bool),
 		"asap_squaredwidth": (0, float),
 		"asap_squaredresolution": (0, float),
 		"asap_squaredfilterqueryenergylevels": ("", str),
@@ -10152,6 +10152,7 @@ class ASAPWidget(LWPWidget):
 		set_active_action = menu.addAction("Make active Ax")
 		save_figure_action = menu.addAction("Save Figure")
 		fit_all_action = menu.addAction("Fit all")
+		show_detail_viewer_action = menu.addAction("Show in Detail Viewer")
 
 		action = menu.exec(self.mapToGlobal(event.pos()))
 		if action == set_active_action:
@@ -10161,6 +10162,10 @@ class ASAPWidget(LWPWidget):
 			AssignAllDialog.show_dialog(i_col)
 		elif action == save_figure_action:
 			self.save_figure()
+		elif action == show_detail_viewer_action:
+			data_xmin, data_xmax = lwpax.xrange
+			data_xclicked = data_xmin + (x_rel - xmin) / width * (data_xmax - data_xmin)
+			ASAPDetailViewer.instance.update_view(lwpax, data_xclicked)
 
 
 class ASAPMainWindow(MainWindow):
