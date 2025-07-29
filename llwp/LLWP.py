@@ -9416,7 +9416,9 @@ class ASAPAx(LWPAx):
 					for i, qn in enumerate(self.qns)
 				]
 			)
-			lin_positions = LinFile.query_c(query)["x"].to_numpy()
+			lin_tmp = LinFile.query_c(query)
+			lin_positions = lin_tmp["x"].to_numpy()
+			lin_colors = lin_tmp['color'].to_numpy()
 
 			query = " and ".join([f"qn{i+1} == {qn}" for i, qn in enumerate(self.qns)])
 			vals = self.egy_df.query(query)["egy"].to_numpy()
@@ -9430,7 +9432,7 @@ class ASAPAx(LWPAx):
 			)
 
 			self.lin_coll.set_offsets(tuples)
-			self.lin_coll.set_color(config["color_ref"])
+			self.lin_coll.set_color(lin_colors)
 		else:
 			self.lin_coll.set_offsets([[None, None]])
 
