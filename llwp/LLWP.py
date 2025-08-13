@@ -2107,6 +2107,8 @@ class NewAssignments(LinFile):
 		)
 
 	def save_backup(self):
+		if not len(self.get_new_assignments_df()):
+			return
 		savepath = llwpfile(".lin")
 		self.save(savepath, False, None)
 
@@ -6174,8 +6176,7 @@ class NewAssignmentsWindow(EQDockWidget):
 		df.reset_index(drop=True, inplace=True)
 
 		if delete_all:
-			if len(df):
-				self.new_assignments.save_backup()
+			self.new_assignments.save_backup()
 			df.drop(df.index, inplace=True)
 		else:
 			selected = [
