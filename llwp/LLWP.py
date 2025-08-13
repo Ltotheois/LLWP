@@ -6174,6 +6174,8 @@ class NewAssignmentsWindow(EQDockWidget):
 		df.reset_index(drop=True, inplace=True)
 
 		if delete_all:
+			if len(df):
+				self.new_assignments.save_backup()
 			df.drop(df.index, inplace=True)
 		else:
 			selected = [
@@ -9432,6 +9434,8 @@ class ASAPAx(LWPAx):
 			)
 
 			self.lin_coll.set_offsets(tuples)
+			# We always use the colors of the *.lin file because it is clear 
+			# that the assignments belong to the reference series in ASAP
 			self.lin_coll.set_color(lin_colors)
 		else:
 			self.lin_coll.set_offsets([[None, None]])
