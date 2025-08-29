@@ -2576,6 +2576,7 @@ class LWPAx:
 			"x": self.ref_position,
 			"qns": qnstring,
 			"width": width,
+			**qns_dict,
 		}
 		text = fstring.format(**vars)
 
