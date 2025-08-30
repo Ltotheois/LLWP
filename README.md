@@ -2,10 +2,11 @@
 
 LLWP allows you to efficiently and confidently assign (typically rotational or rovibrational) spectra by relying on Loomis-Wood plots.
 
-A quickstart guide is given down below. For more information see its [website](https://llwp.astro.uni-koeln.de).
+A quickstart guide is given down below. For more information see LLWP's [website](https://llwp.astro.uni-koeln.de).
 
 If you want to acknowledge LLWP, please cite the paper [LLWP - A new Loomis-Wood software at the example of Acetone-13C1](https://doi.org/10.1016/j.jms.2022.111674).
 
+Feel free to contact me in case of any problems or for feature requests.
 
 ## Quickstart Guide
 
@@ -34,7 +35,7 @@ To see and assign your first series
 To start the [ASAP](https://doi.org/10.1016/j.jms.2015.02.014) mode of LLWP run
 
 ```bash
-lasap
+asap
 ```
 
 To see and assign your first cross-correlation peaks
