@@ -2770,9 +2770,10 @@ class LWPAx:
 			)
 			tmp_cat = entries.query(query)
 
-			y_at_xpre = tmp_cat["y"].values[0]
-			min_y_value = y_at_xpre * config["series_blendminrelratio"]
-			entries = entries.query("y >= @min_y_value")
+			if len(tmp_cat):
+				y_at_xpre = tmp_cat["y"].values[0]
+				min_y_value = y_at_xpre * config["series_blendminrelratio"]
+				entries = entries.query("y >= @min_y_value")
 
 		if len(entries) < 2:
 			return False
@@ -8516,7 +8517,7 @@ def Lorentzian(derivative, x, x0, amp, fwhm):
 		return [0 if i != x0 else np.inf for i in x]
 
 	if derivative == 0:
-		ys = gamma**2 / ((gamma**2 + (x - x0) ** 2))
+		ys = amp * gamma**2 / ((gamma**2 + (x - x0) ** 2))
 	elif derivative == 1:
 		ys = (
 			(-amp * gamma**3 * 16 / 9 * np.sqrt(3))
@@ -8569,7 +8570,14 @@ def Voigt(derivative, x, x0, amp, fwhm_gauss, fwhm_lorentz):
 		)
 
 	ys = tmp(x, x0, wz, sigma, gamma)
-	ymax = tmp(0, 0, w0, sigma, gamma)
+	if derivative == 1:
+		xspan = max(sigma, gamma) * 2
+		tmp_xs = np.linspace(-xspan, +xspan, 1000)
+		ymax = np.max(tmp(tmp_xs, 0, w0, sigma, gamma))
+	else:
+		ymax = tmp(0, 0, w0, sigma, gamma)
+	if ymax == 0:
+		ymax = 1
 	ys *= amp / ymax
 
 	return ys
