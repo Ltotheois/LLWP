@@ -58,7 +58,6 @@ from PyQt6.QtWidgets import *
 from PyQt6.QtGui import *
 
 import matplotlib
-import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvas, NavigationToolbar2QT
 
 import warnings
@@ -2960,9 +2959,16 @@ class LWPWidget(QGroupBox):
 	def save_figure(self, fname=None):
 		if fname is None:
 			fname = QFileDialog.getSaveFileName(None, "Choose file to save to")[0]
-
 		if fname:
+			# Matplotlib spins up a different backend for saving the figure
+			# Any callbacks during this will cause errors
+			# Therefore, we have to clear all callbacks and then update them afterwards
+			callbacks = self.fig.canvas.callbacks.callbacks.copy()
+			self.fig.canvas.callbacks.callbacks.clear()
+
 			self.fig.savefig(fname)
+
+			self.fig.canvas.callbacks.callbacks.update(callbacks)
 
 	def on_click(self, event):
 		ax = event.inaxes
