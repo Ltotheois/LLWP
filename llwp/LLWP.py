@@ -58,6 +58,7 @@ from PyQt6.QtWidgets import *
 from PyQt6.QtGui import *
 
 import matplotlib
+from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvas, NavigationToolbar2QT
 
 import warnings
@@ -574,7 +575,7 @@ class PlotWidget(QWidget):
 			)
 		)
 
-		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
+		self.fig = Figure(dpi=config["plot_dpi"])
 		self.plotcanvas = FigureCanvas(self.fig)
 		layout.addWidget(self.plotcanvas, 6)
 		layout.addStretch()
@@ -966,6 +967,17 @@ class QGridLayout(QGridLayout):
 		if not margin:
 			self.setContentsMargins(0, 0, 0, 0)
 
+class Figure(Figure):
+    def savefig(self, *args, **kwargs):
+		# Matplotlib spins up a different backend for saving the figure
+		# Any callbacks during this will cause errors
+		# Therefore, we have to clear all callbacks and then update them afterwards
+        callbacks = self.canvas.callbacks.callbacks.copy()
+        self.canvas.callbacks.callbacks.clear()
+        try:
+            super().savefig(*args, **kwargs)
+        finally:
+            self.canvas.callbacks.callbacks.update(callbacks)
 
 class FigureCanvas(FigureCanvas):
 	def __init__(self, *args, **kwargs):
@@ -2823,7 +2835,7 @@ class LWPWidget(QGroupBox):
 		self.initialize_dynamic_decorator_for_drawing_plot()
 
 		with matplotlib_lock:
-			self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
+			self.fig = Figure(dpi=config["plot_dpi"])
 			self.listener_onclick = self.fig.canvas.mpl_connect(
 				"button_press_event", self.on_click
 			)
@@ -2960,15 +2972,7 @@ class LWPWidget(QGroupBox):
 		if fname is None:
 			fname = QFileDialog.getSaveFileName(None, "Choose file to save to")[0]
 		if fname:
-			# Matplotlib spins up a different backend for saving the figure
-			# Any callbacks during this will cause errors
-			# Therefore, we have to clear all callbacks and then update them afterwards
-			callbacks = self.fig.canvas.callbacks.callbacks.copy()
-			self.fig.canvas.callbacks.callbacks.clear()
-
 			self.fig.savefig(fname)
-
-			self.fig.canvas.callbacks.callbacks.update(callbacks)
 
 	def on_click(self, event):
 		ax = event.inaxes
@@ -4824,7 +4828,7 @@ class AssignAllDialog(QDialog):
 		layout = QVBoxLayout(margin=True)
 		self.setLayout(layout)
 
-		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
+		self.fig = Figure(dpi=config["plot_dpi"])
 		cid = self.fig.canvas.mpl_connect("button_press_event", self.on_click)
 
 		self.plotcanvas = FigureCanvas(self.fig)
@@ -6648,7 +6652,7 @@ class ResidualsWindow(EQDockWidget):
 		super().__init__(*args, **kwargs)
 		self.setWindowTitle("Residuals")
 
-		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
+		self.fig = Figure(dpi=config["plot_dpi"])
 		self.plotcanvas = FigureCanvas(self.fig)
 
 		self.ax = self.fig.subplots()
@@ -7867,7 +7871,7 @@ class EnergyLevelsWindow(EQDockWidget):
 		mainwidget.setLayout(layout)
 		self.setWidget(mainwidget)
 
-		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
+		self.fig = Figure(dpi=config["plot_dpi"])
 		self.plotcanvas = FigureCanvas(self.fig)
 
 		self.fname = None
@@ -10239,7 +10243,7 @@ class ASAPDetailViewer(EQDockWidget):
 			)
 		)
 
-		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
+		self.fig = Figure(dpi=config["plot_dpi"])
 		self.plotcanvas = FigureCanvas(self.fig)
 		self.plotcanvas.contextMenuEvent = self.contextMenuCanvas
 		layout.addWidget(self.plotcanvas)
@@ -10532,7 +10536,7 @@ class ASAPSquaredWindow(EQDockWidget):
 		self.setWidget(widget)
 		widget.setLayout(layout)
 
-		self.fig = matplotlib.figure.Figure(dpi=config["plot_dpi"])
+		self.fig = Figure(dpi=config["plot_dpi"])
 		self.plotcanvas = FigureCanvas(self.fig)
 		layout.addWidget(self.plotcanvas)
 
