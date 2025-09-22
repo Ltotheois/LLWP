@@ -74,7 +74,7 @@ except AttributeError:
 # On Windows systems:
 # set LLWP_QNS=10
 N_QNS = int(os.environ.get("LLWP_QNS", 10))
-N_QNS = max(6, N_QNS)
+N_QNS = max(6, N_QNS)  # Makes sure that N_QNS is at least 6
 
 QLocale.setDefault(QLocale("en_EN"))
 matplotlib.rcParams["axes.formatter.useoffset"] = False
@@ -9336,6 +9336,7 @@ class ASAPAx(LWPAx):
 
 		self.corr_xs = None
 		self.corr_ys = None
+		self.corr_col = None
 		self.curr_state = {}
 
 		with matplotlib_lock:
@@ -9372,7 +9373,7 @@ class ASAPAx(LWPAx):
 			if col_i != config["plot_cols"] - 1:
 				ax.spines["right"].set_visible(False)
 
-	def vals_to_coll(self, xs, ys):
+	def vals_to_coll(self, xs, ys, color=None):
 		if xs is None or ys is None:
 			segs = np.array([])
 		else:
@@ -9388,7 +9389,9 @@ class ASAPAx(LWPAx):
 
 			segs = np.array(((xs[:-1], xs[1:]), (ys[:-1], ys[1:]))).T
 
-		self.exp_coll.set(segments=segs, color=config["color_exp"])
+		if color is None:
+			color = config["color_exp"]
+		self.exp_coll.set(segments=segs, color=color)
 
 	# @status_d
 	@QThread.threaded_d
@@ -9413,7 +9416,7 @@ class ASAPAx(LWPAx):
 			tot_xs = tot_xs[min_index:max_index]
 			tot_ys = tot_ys[min_index:max_index]
 
-		self.vals_to_coll(tot_xs, tot_ys)
+		self.vals_to_coll(tot_xs, tot_ys, self.corr_col)
 
 		if tot_ys is not None and len(tot_ys):
 			# yrange = (np.min(tot_ys), np.max(tot_ys))
@@ -9958,10 +9961,11 @@ class ASAPWidget(LWPWidget):
 			already_assigned_peaks = already_assigned_peaks.query(query)
 			already_assigned_peaks = already_assigned_peaks["x"].values
 
+		colors = set()
 		for min_index, max_index, ref_pos, ref_int in zip(
 			min_indices, max_indices, ref_xs, ref_ys
 		):
-			# Here we have to pad by two entries, otherwise the interpolation has to use the default values of 1
+			# Here we have to pad by a little, otherwise the interpolation has to use the default values of 1
 			# -> results in strong accidental cross-correlation signal at the upper and lower limit of the plot
 			# Reasons are the float inaccuracy in different places 
 			min_index = max(0, min_index - 20)
@@ -9975,6 +9979,8 @@ class ASAPWidget(LWPWidget):
 
 			xs = dataframe["x"]
 			ys = dataframe["y"]
+
+			colors.update(dataframe['color'].unique())
 
 			interp_ys = np.interp(tot_xs, xs - ref_pos, ys, left=1, right=1)
 
@@ -10014,7 +10020,14 @@ class ASAPWidget(LWPWidget):
 			if tot_ys_max:
 				tot_ys /= tot_ys_max
 
-		return (tot_xs, tot_ys)
+		# Determine the color for the cross-correlation plot
+		# If there are multiple colors, use the default color_exp value
+		if len(colors) == 1:
+			color = list(colors)
+		else:
+			color = None
+		
+		return (tot_xs, tot_ys, color)
 
 	@QThread.threaded_d
 	@status_d
@@ -10090,7 +10103,7 @@ class ASAPWidget(LWPWidget):
 					row_entries = row_entries_all[
 						row_entries_all["use_for_cross_correlation"]
 					]
-					corr_xs, corr_ys = self.calc_correlation_plot(
+					corr_xs, corr_ys, corr_col = self.calc_correlation_plot(
 						row_qns, row_entries, offset, width, resolution
 					)
 
@@ -10098,6 +10111,7 @@ class ASAPWidget(LWPWidget):
 					ax.entries = row_entries_all
 					ax.corr_xs = corr_xs
 					ax.corr_ys = corr_ys
+					ax.corr_col = corr_col
 					ax.qns = row_qns
 					ax.offset = offset
 					ax.width = width
@@ -10366,11 +10380,12 @@ class ASAPDetailViewer(EQDockWidget):
 			ax_entries = ax_entries.drop(index)
 			ax.entries = ax_entries
 
-			corr_xs, corr_ys = mainwindow.lwpwidget.calc_correlation_plot(
+			corr_xs, corr_ys, corr_col = mainwindow.lwpwidget.calc_correlation_plot(
 				ax.qns, ax.entries, ax.offset, ax.width, ax.resolution
 			)
 			ax.corr_xs = corr_xs
 			ax.corr_ys = corr_ys
+			ax.corr_col = corr_col
 
 			ax.update().wait()
 			self.drawplot.emit()
