@@ -289,6 +289,7 @@ class Config(dict):
 		"flag_showseriesarrows": (True, bool),
 		"flag_keeponlylastassignment": (False, bool),
 		"flag_autoreloadfiles": (True, bool),
+		"flag_lincustomfreqformat": ('', str),
 		"commandlinedialog_commands": ([], list),
 		"commandlinedialog_current": (0, int),
 		"closebylines_catfstring": ("{x:12.4f} {qns} {ylog}", str),
@@ -2136,7 +2137,8 @@ class NewAssignments(LinFile):
 					fmt=format.get("format", "%.18e"),
 				)
 			else:
-				file.write(pyckett.df_to_lin(df))
+				custom_freq_format = config['flag_lincustomfreqformat']
+				file.write(pyckett.df_to_lin(df, custom_freq_format=custom_freq_format))
 
 
 class FileAdditionalSettingsDialog(QDialog):
@@ -6934,9 +6936,10 @@ class ResidualsWindow(EQDockWidget):
 							new_assignments_window.model.update()
 							# new_assignments_window.model.resize_columns()
 						else:
+							# Saving the *.lin file after removing the transitions
+							# can overwrite custom formats for the x and error values
 							with open(lin_fname, "w+") as file:
 								file.write(pyckett.df_to_lin(lin))
-
 
 class BlendedLinesWindow(EQDockWidget):
 	default_visible = False
