@@ -6939,7 +6939,8 @@ class ResidualsWindow(EQDockWidget):
 							# Saving the *.lin file after removing the transitions
 							# can overwrite custom formats for the x and error values
 							with open(lin_fname, "w+") as file:
-								file.write(pyckett.df_to_lin(lin))
+								custom_freq_format = config['flag_lincustomfreqformat']
+								file.write(pyckett.df_to_lin(lin, custom_freq_format=custom_freq_format))
 
 class BlendedLinesWindow(EQDockWidget):
 	default_visible = False
