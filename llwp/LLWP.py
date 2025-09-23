@@ -2580,6 +2580,7 @@ class LWPAx:
 			qnstring = f"{qnus_string} ← {qnls_string}"
 		else:
 			qnstring = ""
+			qns_dict = {f'qn{ul}{i+1}': 0 for ul in 'ul' for i in range(config["series_qns"])}
 
 		width = self.xrange[1] - self.xrange[0]
 
@@ -9309,6 +9310,35 @@ class LevelSelector(SeriesSelector):
 			widget.setMaximumWidth(width)
 			widget.setButtonSymbols(button_symbols)
 
+	def contextMenuEvent(self, event):
+		menu = QMenu(self)
+		fit_all_action = menu.addAction("Fit all")
+		change_qns_templates = config['series_changeqnsactions']
+		change_qns_actions = {}
+
+		if len(change_qns_templates):
+				menu.addSeparator()
+
+				for label in change_qns_templates.keys():
+					action = menu.addAction(str(label))
+					change_qns_actions[action] = label
+
+		action = menu.exec(self.mapToGlobal(event.pos()))
+		if action == fit_all_action:
+			i_col = self.parent.tab.indexOf(self)
+			AssignAllDialog.show_dialog(i_col)
+		elif action in change_qns_actions.keys():
+			label = change_qns_actions[action]
+			delta_qnus, delta_qnls = change_qns_templates[label]
+			
+			if self.state['is_upper_state']:
+				deltas = delta_qnus
+			else:
+				deltas = delta_qnls
+			
+			for i, delta in enumerate(deltas):
+				self.state['qns'][i] += delta
+			self.set_state()
 
 class ASAPAx(LWPAx):
 	fit_vline = None
@@ -9477,7 +9507,7 @@ class ASAPAx(LWPAx):
 
 		if self.qns is not None:
 			qnstring = ",".join(map(str, self.qns))
-
+			qns_dict = self.create_qns_dict()
 			query = " and ".join(
 				[
 					f"(qnu{i+1} == {qn} and qnl{i+1} == 0)"
@@ -9488,11 +9518,13 @@ class ASAPAx(LWPAx):
 				color = config["color_lin"]
 		else:
 			qnstring = ""
+			qns_dict = {f'qn{ul}{i+1}': 0 for ul in 'ul' for i in range(config["series_qns"])}
 
 		vars = {
 			"x": config["plot_offset"],
 			"qns": qnstring,
 			"width": config["plot_width"],
+			**qns_dict,
 		}
 		text = fstring.format(**vars)
 
@@ -10021,7 +10053,7 @@ class ASAPWidget(LWPWidget):
 				tot_ys /= tot_ys_max
 
 		# Determine the color for the cross-correlation plot
-		# If there are multiple colors, use the default color_exp value
+		# Default color_exp value is used if there are multiple colors
 		if len(colors) == 1:
 			color = list(colors)
 		else:
@@ -10086,7 +10118,7 @@ class ASAPWidget(LWPWidget):
 					row_qns = qns + i_row * diffs
 					cond = [f"(qn{ul}{i+1} == {qn})" for i, qn in enumerate(row_qns)]
 					condition = " & ".join(cond)
-					row_entries_all = entries.query(condition)
+					row_entries_all = entries.query(condition).copy()
 
 					if config["asap_minrelratio"]:
 						row_entries = row_entries_all[
@@ -10103,6 +10135,7 @@ class ASAPWidget(LWPWidget):
 					row_entries = row_entries_all[
 						row_entries_all["use_for_cross_correlation"]
 					]
+
 					corr_xs, corr_ys, corr_col = self.calc_correlation_plot(
 						row_qns, row_entries, offset, width, resolution
 					)
@@ -10120,7 +10153,6 @@ class ASAPWidget(LWPWidget):
 					threads.append(ax.update())
 
 					thread.earlyreturn()
-
 			# Edge cases of no reference tabs and too few tabs
 			for i_col in range(n_widgets, n_cols):
 				for i_row in range(n_rows):
@@ -10131,7 +10163,6 @@ class ASAPWidget(LWPWidget):
 					threads.append(ax.update())
 
 			thread.earlyreturn()
-
 			for thread_ in threads:
 				thread_.wait()
 
