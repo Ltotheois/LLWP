@@ -313,6 +313,7 @@ class Config(dict):
 		"blendedlines_color_points": ("#ff3352", Color),
 		"blendedlines_color_baseline": ("#f6fa14", Color),
 		"blendedlines_autopositionpeaks": (True, bool),
+		"blendedlines_matplotlibtoolbar": (True, bool),
 		"report_blends": (True, bool),
 		"report_query": ("", str),
 		"seriesfinder_start": ("", str),
@@ -330,6 +331,7 @@ class Config(dict):
 		"peakfinder_onlyunassigned": (True, bool),
 		"peakfinder_width": (1, float),
 		"peakfinder_maxentries": (1000, int),
+		"peakfinder_matplotlibtoolbar": (True, bool),
 		"energylevels_defaultcolor": ("#000000", Color),
 		"energylevels_query": ("", str),
 		"energylevels_colorinput": ("", str),
@@ -6981,8 +6983,16 @@ class BlendedLinesWindow(EQDockWidget):
 				self.parent.fit_peaks(self)
 
 		self.plot_widget = CustomPlotWidget(parent=self)
-
 		layout.addWidget(self.plot_widget, 2)
+		
+		self.mpltoolbar = NavigationToolbar2QT(self.plot_widget.plotcanvas, self)
+		layout.addWidget(self.mpltoolbar)
+		
+		self.mpltoolbar.setVisible(config["blendedlines_matplotlibtoolbar"])
+		config.register(
+			"blendedlines_matplotlibtoolbar",
+			lambda: self.mpltoolbar.setVisible(config["blendedlines_matplotlibtoolbar"]),
+		)
 
 		tmplayout = QGridLayout()
 		row_id = 0
@@ -8104,6 +8114,15 @@ class PeakfinderWindow(EQDockWidget):
 
 		self.plot_widget = CustomPlotWidget(parent=self)
 		layout.addWidget(self.plot_widget)
+
+		self.mpltoolbar = NavigationToolbar2QT(self.plot_widget.plotcanvas, self)
+		layout.addWidget(self.mpltoolbar)
+		
+		self.mpltoolbar.setVisible(config["peakfinder_matplotlibtoolbar"])
+		config.register(
+			"peakfinder_matplotlibtoolbar",
+			lambda: self.mpltoolbar.setVisible(config["peakfinder_matplotlibtoolbar"]),
+		)
 
 		tmp_layout = QHBoxLayout()
 		layout.addLayout(tmp_layout)
