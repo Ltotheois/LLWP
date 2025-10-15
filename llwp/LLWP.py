@@ -10573,7 +10573,7 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 		layout.addWidget(
 			QQ(
 				QPushButton,
-				text="Calculate Cross Correlation",
+				text="Calculate Cross-Correlation",
 				change=lambda _: mainwindow.lwpwidget.calc_correlation_plots(),
 			)
 		)
