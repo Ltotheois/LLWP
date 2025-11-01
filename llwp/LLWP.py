@@ -9086,7 +9086,12 @@ def exp_to_df(fname, n_bytes=4096, **kwargs):
 	if "delimiter" not in kwargs and "sep" not in kwargs:
 		sniffer = csv.Sniffer()
 		with open(fname, "r") as file:
-			data = file.read(n_bytes)
+			for row in file:
+				stripped_row = row.strip()
+				if stripped_row.startswith(kwargs['comment']) or not stripped_row:
+					continue 
+				data = row
+				break
 		try:
 			delimiter = sniffer.sniff(data).delimiter
 		except Exception:
