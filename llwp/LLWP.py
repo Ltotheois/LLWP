@@ -291,6 +291,7 @@ class Config(dict):
 		"flag_autoreloadfiles": (True, bool),
 		"flag_lincustomfreqformat": ('', str),
 		"flag_allowdocking": (True, bool),
+		"flag_docksalwaysontop": (True, bool),
 		"commandlinedialog_commands": ([], list),
 		"commandlinedialog_current": (0, int),
 		"closebylines_catfstring": ("{x:12.4f} {qns} {ylog}", str),
@@ -1045,11 +1046,13 @@ class EQDockWidget(QDockWidget):
 		else:
 			mainwindow.addDockWidget(Qt.DockWidgetArea(self.default_position), self)
 		self.setVisible(self.default_visible)
+		self.topLevelChanged.connect(self.top_level_changed)
 
 		tmp = QShortcut("Esc", self)
 		tmp.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
 		tmp.activated.connect(self.close)
 		self.__class__.instance = self
+
 
 	def moveEvent(self, *args, **kwargs):
 		Geometry.save_widget_geometry(self)
@@ -1072,6 +1075,25 @@ class EQDockWidget(QDockWidget):
 			self.move(primary_screen.geometry().center() - self.rect().center())
 
 		return super().show(*args, **kwargs)
+
+	def top_level_changed(self, floating):
+		if not floating:
+			return
+		is_visible = self.isVisible()
+
+		if config['flag_docksalwaysontop']:
+			flags = self.windowFlags()
+			flags &= ~Qt.WindowType.Window
+			flags |= Qt.WindowType.Tool
+		else:
+			flags = self.windowFlags()
+			flags &= ~Qt.WindowType.Tool
+			flags |= Qt.WindowType.Window
+		
+		self.setWindowFlags(flags)
+		# must call show() after changing flags
+		if is_visible:
+			self.show()
 
 
 class QDialog(QDialog):
@@ -3403,6 +3425,7 @@ class Menu:
 				),
 				None,
 				QQ(QAction, 'flag_allowdocking', checkable=True, parent=parent, text='Docking'),
+				QQ(QAction, 'flag_docksalwaysontop', checkable=True, parent=parent, text='Docks always on top'),
 				None,
 			),
 			"Modules": modules_actions,
@@ -3495,6 +3518,7 @@ class MainWindow(QMainWindow):
 		Geometry.load_widget_geometry(self)
 
 		config.register('flag_allowdocking', self.update_docking)
+		config.register('flag_docksalwaysontop', self.update_docksalwaysontop)
 
 		try:
 			# Set LLWP logo as icon
@@ -3583,6 +3607,10 @@ class MainWindow(QMainWindow):
 					QDockWidget.DockWidgetFeature.DockWidgetClosable |
 					QDockWidget.DockWidgetFeature.DockWidgetFloatable
 				)
+
+	def update_docksalwaysontop(self):
+		for dock in self.findChildren(QDockWidget):
+			dock.top_level_changed(dock.isFloating())
 
 	def togglefullscreen(self):
 		if self.isFullScreen():
@@ -9916,6 +9944,7 @@ class ASAPMenu(Menu):
 				),
 				None,
 				QQ(QAction, 'flag_allowdocking', checkable=True, parent=parent, text='Docking'),
+				QQ(QAction, 'flag_docksalwaysontop', checkable=True, parent=parent, text='Docks always on top'),
 				None,
 			),
 			"Info": (
