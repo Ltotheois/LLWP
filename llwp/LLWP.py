@@ -290,6 +290,7 @@ class Config(dict):
 		"flag_keeponlylastassignment": (False, bool),
 		"flag_autoreloadfiles": (True, bool),
 		"flag_lincustomfreqformat": ('', str),
+		"flag_allowdocking": (True, bool),
 		"commandlinedialog_commands": ([], list),
 		"commandlinedialog_current": (0, int),
 		"closebylines_catfstring": ("{x:12.4f} {qns} {ylog}", str),
@@ -3401,6 +3402,8 @@ class Menu:
 					change=lambda _: ConsoleDialog.show_dialog(),
 				),
 				None,
+				QQ(QAction, 'flag_allowdocking', checkable=True, parent=parent, text='Docking'),
+				None,
 			),
 			"Modules": modules_actions,
 			"Info": (
@@ -3491,6 +3494,8 @@ class MainWindow(QMainWindow):
 		self.setAcceptDrops(True)
 		Geometry.load_widget_geometry(self)
 
+		config.register('flag_allowdocking', self.update_docking)
+
 		try:
 			# Set LLWP logo as icon
 			possible_folders = [
@@ -3559,6 +3564,25 @@ class MainWindow(QMainWindow):
 			tmp = QShortcut(keys, self)
 			tmp.activated.connect(function)
 			tmp.setContext(Qt.ShortcutContext.WidgetShortcut)
+
+	def update_docking(self, toggle=False):
+		if toggle:
+			config['flag_allowdocking'] = not config['flag_allowdocking']
+
+		if config['flag_allowdocking']:
+			for dock in self.findChildren(QDockWidget):
+				dock.setFeatures(
+					QDockWidget.DockWidgetFeature.DockWidgetClosable |
+               		QDockWidget.DockWidgetFeature.DockWidgetMovable |
+                	QDockWidget.DockWidgetFeature.DockWidgetFloatable
+				)
+		
+		else:
+			for dock in self.findChildren(QDockWidget):
+				dock.setFeatures(
+					QDockWidget.DockWidgetFeature.DockWidgetClosable |
+					QDockWidget.DockWidgetFeature.DockWidgetFloatable
+				)
 
 	def togglefullscreen(self):
 		if self.isFullScreen():
@@ -9890,6 +9914,8 @@ class ASAPMenu(Menu):
 					shortcut="CTRL+K",
 					change=lambda _: ConsoleDialog.show_dialog(),
 				),
+				None,
+				QQ(QAction, 'flag_allowdocking', checkable=True, parent=parent, text='Docking'),
 				None,
 			),
 			"Info": (
