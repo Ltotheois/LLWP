@@ -1091,8 +1091,8 @@ class EQDockWidget(QDockWidget):
 			flags |= Qt.WindowType.Window
 		
 		self.setWindowFlags(flags)
-		# must call show() after changing flags
 		if is_visible:
+			# must call show() after changing flags
 			self.show()
 
 
