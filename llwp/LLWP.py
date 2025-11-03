@@ -3318,6 +3318,11 @@ class Menu:
 			fitfunction_menu.addAction(self.fitfunction_actions[method])
 		config.register("fit_fitmethod", self.on_fitfunction_changed)
 
+		if sys.platform.startswith("win"):
+			always_on_top_action = None
+		else:
+			always_on_top_action = QQ(QAction, 'flag_docksalwaysontop', checkable=True, parent=parent, text='Docks always on top')
+
 		actions = {
 			"Files": (
 				QQ(
@@ -3425,7 +3430,7 @@ class Menu:
 				),
 				None,
 				QQ(QAction, 'flag_allowdocking', checkable=True, parent=parent, text='Docking'),
-				QQ(QAction, 'flag_docksalwaysontop', checkable=True, parent=parent, text='Docks always on top'),
+				always_on_top_action,
 				None,
 			),
 			"Modules": modules_actions,
@@ -9865,6 +9870,11 @@ class ASAPMenu(Menu):
 			fitfunction_menu.addAction(self.fitfunction_actions[method])
 		config.register("fit_fitmethod", self.on_fitfunction_changed)
 
+		if sys.platform.startswith("win"):
+			always_on_top_action = None
+		else:
+			always_on_top_action = QQ(QAction, 'flag_docksalwaysontop', checkable=True, parent=parent, text='Docks always on top')
+
 		actions = {
 			"Files": (
 				QQ(
@@ -9944,7 +9954,7 @@ class ASAPMenu(Menu):
 				),
 				None,
 				QQ(QAction, 'flag_allowdocking', checkable=True, parent=parent, text='Docking'),
-				QQ(QAction, 'flag_docksalwaysontop', checkable=True, parent=parent, text='Docks always on top'),
+				always_on_top_action,
 				None,
 			),
 			"Info": (
