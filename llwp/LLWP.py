@@ -360,8 +360,9 @@ class Config(dict):
 		"asap_squaredfilterqueryenergylevels": ("", str),
 		"asap_squaredfilterquerytransitions": ("", str),
 		"asap_squaredisupper": (True, bool),
-		"asap_squareplotlog": (False, bool),
-		"asap_squarethreshold": (0, float),
+		"asap_squaredplotlog": (False, bool),
+		"asap_squaredthreshold": (0, float),
+		"asap_squaredfilterqueryexpdata": ("", str),
 	}
 
 	def __init__(self, signal, *args, **kwargs):
@@ -10693,7 +10694,7 @@ class ASAPSquaredWindow(EQDockWidget):
 		tmp_layout.addWidget(
 			QQ(
 				QDoubleSpinBoxFullPrec,
-				"asap_squarethreshold",
+				"asap_squaredthreshold",
 				range=(None, None),
 				width=120,
 			)
@@ -10702,7 +10703,7 @@ class ASAPSquaredWindow(EQDockWidget):
 			QQ(QCheckBox, "asap_squaredisupper", text="Is upper level")
 		)
 		tmp_layout.addWidget(
-			QQ(QCheckBox, "asap_squareplotlog", text="Plot logarithmic")
+			QQ(QCheckBox, "asap_squaredplotlog", text="Plot logarithmic")
 		)
 		tmp_layout.addStretch(1)
 
@@ -10782,7 +10783,7 @@ class ASAPSquaredWindow(EQDockWidget):
 		exp_df = exp_df[exp_df["visible"]]
 
 		n_lines = 0
-		threshold = config["asap_squarethreshold"]
+		threshold = config["asap_squaredthreshold"]
 		rel_xs = np.arange(-width / 2, width / 2 + resolution, resolution)
 		asap2_ys = np.ones_like(rel_xs)
 		qn_labels_egy = [f"qn{i+1}" for i in range(self.noq)]
@@ -10824,11 +10825,16 @@ class ASAPSquaredWindow(EQDockWidget):
 
 				interp_ys = np.interp(rel_xs, xs - ref_position, ys)
 				interp_ys = interp_ys * (interp_ys > threshold)
+
+				exp_data_query = config['asap_squaredfilterqueryexpdata']
+				if exp_data_query.strip() and eval(exp_data_query):
+					continue
+
+				n_lines += 1
 				tot_ys *= interp_ys
 
 			if tot_ys.max():
 				asap2_ys *= tot_ys / tot_ys.max()
-			n_lines += len(predicted_positions)
 
 			if config["asap_assigntransitions"]:
 				for x, *qns in possible_transitions[["x"] + qn_labels].values:
@@ -10838,7 +10844,7 @@ class ASAPSquaredWindow(EQDockWidget):
 		if ys_max > 0:
 			asap2_ys /= ys_max
 		self.ax.plot(rel_xs, asap2_ys, color=config["color_exp"])
-		if config["asap_squareplotlog"]:
+		if config["asap_squaredplotlog"]:
 			self.ax.set_yscale("log")
 		self.assignments = assignments
 		self.data = np.vstack((rel_xs, asap2_ys)).T
