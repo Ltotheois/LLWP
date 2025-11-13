@@ -10237,8 +10237,7 @@ class ASAPWidget(LWPWidget):
 					corr_xs, corr_ys, corr_col, mask = self.calc_correlation_plot(
 						row_qns, row_entries, offset, width, resolution
 					)
-
-					row_entries_all = row_entries_all[mask]
+					row_entries_all.loc[row_entries.index, 'use_for_cross_correlation'] = mask
 
 					ax = self.lwpaxes[i_row, i_col]
 					ax.entries = row_entries_all
@@ -10514,7 +10513,7 @@ class ASAPDetailViewer(EQDockWidget):
 			corr_xs, corr_ys, corr_col, mask = mainwindow.lwpwidget.calc_correlation_plot(
 				ax.qns, ax.entries, ax.offset, ax.width, ax.resolution
 			)
-			ax.entries = ax.entries[mask]
+			ax.entries = ax.entries
 			ax.corr_xs = corr_xs
 			ax.corr_ys = corr_ys
 			ax.corr_col = corr_col
