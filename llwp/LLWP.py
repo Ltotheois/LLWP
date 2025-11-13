@@ -10088,9 +10088,16 @@ class ASAPWidget(LWPWidget):
 			already_assigned_peaks = already_assigned_peaks["x"].values
 
 		colors = set()
+		use_for_cross_correlation_mask = []
 		for min_index, max_index, ref_pos, ref_int in zip(
 			min_indices, max_indices, ref_xs, ref_ys
 		):
+			if min_index == max_index:
+				use_for_cross_correlation_mask.append(False)
+				continue
+			else:
+				use_for_cross_correlation_mask.append(True)
+			
 			# Here we have to pad by a little, otherwise the interpolation has to use the default values of 1
 			# -> results in strong accidental cross-correlation signal at the upper and lower limit of the plot
 			# Reasons are the float inaccuracy in different places 
@@ -10099,9 +10106,6 @@ class ASAPWidget(LWPWidget):
 
 			dataframe = ExpFile.df.iloc[min_index:max_index].copy()
 			dataframe = dataframe[dataframe["visible"]]
-
-			if not len(dataframe):
-				continue
 
 			xs = dataframe["x"]
 			ys = dataframe["y"]
@@ -10153,7 +10157,7 @@ class ASAPWidget(LWPWidget):
 		else:
 			color = None
 		
-		return (tot_xs, tot_ys, color)
+		return (tot_xs, tot_ys, color, use_for_cross_correlation_mask)
 
 	@QThread.threaded_d
 	@status_d
@@ -10230,9 +10234,11 @@ class ASAPWidget(LWPWidget):
 						row_entries_all["use_for_cross_correlation"]
 					]
 
-					corr_xs, corr_ys, corr_col = self.calc_correlation_plot(
+					corr_xs, corr_ys, corr_col, mask = self.calc_correlation_plot(
 						row_qns, row_entries, offset, width, resolution
 					)
+
+					row_entries_all = row_entries_all[mask]
 
 					ax = self.lwpaxes[i_row, i_col]
 					ax.entries = row_entries_all
@@ -10505,9 +10511,10 @@ class ASAPDetailViewer(EQDockWidget):
 			ax_entries = ax_entries.drop(index)
 			ax.entries = ax_entries
 
-			corr_xs, corr_ys, corr_col = mainwindow.lwpwidget.calc_correlation_plot(
+			corr_xs, corr_ys, corr_col, mask = mainwindow.lwpwidget.calc_correlation_plot(
 				ax.qns, ax.entries, ax.offset, ax.width, ax.resolution
 			)
+			ax.entries = ax.entries[mask]
 			ax.corr_xs = corr_xs
 			ax.corr_ys = corr_ys
 			ax.corr_col = corr_col
