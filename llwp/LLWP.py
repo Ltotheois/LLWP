@@ -9449,6 +9449,7 @@ class ASAPAx(LWPAx):
 		self.width = None
 		self.offset = None
 		self.resolution = None
+		self.x_fit = None
 
 		self.corr_xs = None
 		self.corr_ys = None
@@ -9698,7 +9699,8 @@ class ASAPAx(LWPAx):
 		)
 
 		# Emit signal for detail viewer
-		mainwindow.lwpwidget.peak_fitted.emit(self, xmiddle)
+		self.x_fit = xmiddle
+		mainwindow.lwpwidget.peak_fitted.emit(self)
 
 		# Add predicted energy to offset
 		qns_dict = self.create_qns_dict(complete=True)
@@ -9989,7 +9991,7 @@ class ASAPMenu(Menu):
 
 class ASAPWidget(LWPWidget):
 	_ax_class = ASAPAx
-	peak_fitted = pyqtSignal(ASAPAx, float)
+	peak_fitted = pyqtSignal(ASAPAx)
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
@@ -10334,8 +10336,8 @@ class ASAPWidget(LWPWidget):
 			self.save_figure()
 		elif action == show_detail_viewer_action:
 			data_xmin, data_xmax = lwpax.xrange
-			data_xclicked = data_xmin + (x_rel - xmin) / width * (data_xmax - data_xmin)
-			ASAPDetailViewer.instance.update_view(lwpax, data_xclicked)
+			lwpax.x_fit = data_xmin + (x_rel - xmin) / width * (data_xmax - data_xmin)
+			ASAPDetailViewer.instance.update_view(lwpax)
 
 
 class ASAPMainWindow(MainWindow):
@@ -10395,7 +10397,9 @@ class ASAPDetailViewer(EQDockWidget):
 		mainwindow.lwpwidget.peak_fitted.connect(self.update_view)
 		self.drawplot.connect(self.draw_canvas)
 
-	def update_view(self, asap_ax, offset):
+	def update_view(self, asap_ax):
+		offset = asap_ax.offset
+		x_fit = asap_ax.x_fit
 		if not self.isVisible():
 			return
 
@@ -10437,7 +10441,7 @@ class ASAPDetailViewer(EQDockWidget):
 
 		for ax, (i, row) in zip(axes, entries.iterrows()):
 			ax.xaxis.set_visible(False)
-			ax.axvline(offset, color=config["color_fit"])
+			ax.axvline(x_fit + row['x'], color=config["color_fit"])
 
 			min_index, max_index = row["min_index"], row["max_index"]
 			dataframe = ExpFile.df.iloc[min_index:max_index].copy()
@@ -10446,7 +10450,7 @@ class ASAPDetailViewer(EQDockWidget):
 			if not len(dataframe):
 				continue
 
-			xs = dataframe["x"] - row["x"]
+			xs = dataframe["x"]
 			ys = dataframe["y"]
 
 			qnus_string = ",".join([f"{row[qn]}" for qn in qns_labels[0]])
@@ -10457,7 +10461,8 @@ class ASAPDetailViewer(EQDockWidget):
 
 			ax.plot(xs, ys, color=config["color_exp"])
 			ax.text(**annotate_kwargs, s=qnstring, transform=ax.transAxes)
-			ax.margins(0, 0.1)
+			ax.set_xlim(row['xmin'], row['xmax'])
+			ax.margins(y=0.1)
 
 		ax = axes[0]
 		ax.xaxis.set_visible(True)
@@ -10506,9 +10511,7 @@ class ASAPDetailViewer(EQDockWidget):
 
 			# Update cross-correlation plot
 			ax = self.asap_ax
-			ax_entries = ax.entries
-			ax_entries = ax_entries.drop(index)
-			ax.entries = ax_entries
+			ax.entries = ax.entries.drop(index)
 
 			corr_xs, corr_ys, corr_col, mask = mainwindow.lwpwidget.calc_correlation_plot(
 				ax.qns, ax.entries, ax.offset, ax.width, ax.resolution
@@ -10520,7 +10523,7 @@ class ASAPDetailViewer(EQDockWidget):
 
 			ax.update().wait()
 			self.drawplot.emit()
-			self.update_view(ax, ax.offset)
+			self.update_view(ax)
 			
 
 
