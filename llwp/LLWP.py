@@ -10398,8 +10398,8 @@ class ASAPDetailViewer(EQDockWidget):
 		self.drawplot.connect(self.draw_canvas)
 
 	def update_view(self, asap_ax):
-		offset = asap_ax.offset
 		x_fit = asap_ax.x_fit
+
 		if not self.isVisible():
 			return
 
@@ -10416,8 +10416,8 @@ class ASAPDetailViewer(EQDockWidget):
 			return
 		
 		width = config["asap_detailviewerwidth"] or config["plot_width"]
-		entries["xmin"] = entries["x"] - width / 2 + offset
-		entries["xmax"] = entries["x"] + width / 2 + offset
+		entries["xmin"] = entries["x"] - width / 2 + x_fit
+		entries["xmax"] = entries["x"] + width / 2 + x_fit
 		entries["min_index"], entries["max_index"] = ExpFile.xs_to_indices(
 			entries["xmin"], entries["xmax"]
 		)
