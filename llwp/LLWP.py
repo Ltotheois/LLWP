@@ -249,6 +249,7 @@ class Config(dict):
 		"series_qns": (4, int),
 		"series_blendminrelratio": (0, float),
 		"series_changeqnsactions": ({}, dict),
+		"series_expressionkwargs": ({}, dict),
 		"fit_fitmethod": ("Pgopher", str),
 		"fit_uncertainty": (0.05, float),
 		"fit_uncertainty_method": ("Value", str),
@@ -5303,6 +5304,8 @@ class ReferenceSelector(QTabWidget):
 			change=lambda x: self.expression_update(type="index"),
 		)
 
+		config.register_widget('series_expressionkwargs', self.input_N0, lambda: self.expression_update(type="index"))
+
 		layout.addWidget(self.input_expr)
 		hbox = QHBoxLayout()
 		[
@@ -5552,7 +5555,7 @@ class ReferenceSelector(QTabWidget):
 				try:
 					expressions = [compile(expr, "", "eval") for expr in expressions]
 					rows_qns = [
-						[eval(expr, {"N": i, "N0": N0}) for expr in expressions]
+						[eval(expr, {**config["series_expressionkwargs"], "N": i, "N0": N0}) for expr in expressions]
 						for i in range(n_rows)
 					]
 				except Exception as E:
@@ -5606,7 +5609,7 @@ class ReferenceSelector(QTabWidget):
 					try:
 						expression = compile(expression, "", "eval")
 						positions = [
-							eval(expression, {"N": i, "N0": N0}) for i in range(n_rows)
+							eval(expression, {**config["series_expressionkwargs"], "N": i, "N0": N0}) for i in range(n_rows)
 						]
 					except Exception as E:
 						notify_error.emit(
