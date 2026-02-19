@@ -5243,7 +5243,7 @@ class ReferenceSelector(QTabWidget):
 		layout.addWidget(self.listtable)
 
 		if len(self.state["list"]["xs"]):
-			self.list_load(values=self.state["list"]["xs"])
+			self.list_load(values=self.state["list"])
 
 		button_open = QQ(
 			QToolButton, text="Open List", change=lambda x: self.list_load(dialog=False)
@@ -5361,22 +5361,41 @@ class ReferenceSelector(QTabWidget):
 		self.state["list"]["i0"] = self.spinbox_startat.value()
 		self.changed()
 
-	def list_load(self, values=None, dialog=False):
-		if values is not None:
-			xs = values
-			self.state["list"]["xs"] = xs
-
-		elif dialog:
-			line, ok = QInputDialog().getMultiLineText(
-				self,
-				"Specify Custom List",
-				"Write list here (delimiters are all whitespace characters, comma and semicolon):",
-			)
-			if not ok or not line:
-				return
-
-			xs = []
-			tmp_xs = re.split(r"; |, |\s", line)
+	def list_parse(self, list_string):
+		xs = []
+		all_qns = None
+		
+		# List with QNs
+		if list_string.startswith('#QNS'):
+			all_qns = []
+			lines = list_string.split('\n')
+			n_qns = config['series_qns']
+			for i_line, line in enumerate(lines):
+				line = line.strip()
+				if not line or line.startswith('#'):
+					continue
+				
+				vals = re.split(r"; |, |\s", line)
+				if len(vals) != (2 * n_qns + 1):
+					notify_warning.emit(f'Error in line {i_line}. {(2 * n_qns + 1)} numbers expected.')
+					continue
+				
+				x, *qns = vals
+				try:
+					x = float(x)
+					qns = np.array([int(qn) for qn in qns])
+					qns = np.split(qns, 2)
+					
+					xs.append(x)
+					all_qns.append(qns)
+				except ValueError:
+					notify_warning.emit(
+						f"Could not convert the values in row '{i_line}' to numerical values."
+					)
+		
+		# List with frequencies only
+		else:
+			tmp_xs = re.split(r"; |, |\s", list_string)
 			for x in tmp_xs:
 				if not x.strip():
 					continue
@@ -5386,10 +5405,31 @@ class ReferenceSelector(QTabWidget):
 					notify_warning.emit(
 						f"Could not convert the string '{x}' to a numerical value."
 					)
+		
+		return(xs, all_qns)
+
+	def list_load(self, values=None, dialog=False):
+		if values is not None:
+			xs = values['xs']
+			qns = values['qns']
+			
+			self.state["list"]["xs"] = xs
+			self.state["list"]["qns"] = qns
+
+		elif dialog:
+			list_string, ok = QInputDialog().getMultiLineText(
+				self,
+				"Specify Custom List",
+				"Write list here (delimiters are all whitespace characters, comma and semicolon):",
+			)
+			if not ok or not list_string:
+				return
+
+			xs, qns = self.list_parse(list_string)
 
 			self.state["list"].update(
 				{
-					"qns": None,
+					"qns": qns,
 					"xs": xs,
 				}
 			)
@@ -5402,25 +5442,14 @@ class ReferenceSelector(QTabWidget):
 			)
 			if not fname:
 				return
-			xs = []
 			with open(fname, "r", encoding="utf-8") as file:
-				for line in file:
-					line = line.strip()
-					if line == "" or line.startswith("#"):
-						continue
-
-					tmp = re.split(r"; |, |\s", line)
-					for x in tmp:
-						try:
-							xs.append(float(x))
-						except ValueError:
-							notify_warning.emit(
-								f"Could not convert the string '{x}' to a numerical value."
-							)
+				list_string = file.read()
+			
+			xs, qns = self.list_parse(list_string)
 
 			self.state["list"].update(
 				{
-					"qns": None,
+					"qns": qns,
 					"xs": xs,
 				}
 			)
@@ -5437,6 +5466,44 @@ class ReferenceSelector(QTabWidget):
 				currRowCount, 1, QTableWidgetItem(f"{x:{config['flag_xformatfloat']}}")
 			)
 		self.changed()
+
+	def list_from_cat_trend(self, current_level=None):
+		if current_level is None:
+			text, ok = QInputDialog().getText(self, "Start Level", "Enter the start level:")
+			if ok and text:
+				current_level = re.split(r"; |, |\s", text)
+				current_level = [int(x) for x in current_level]
+		
+		n_qns = len(current_level)
+		config['series_qns'] = n_qns
+		
+		xs = []
+		all_qns = []
+		cat_df = CatFile.get_data()
+
+		qnu_labels = [f'qnu{i+1}' for i in range(n_qns)]
+		qnl_labels = [f'qnl{i+1}' for i in range(n_qns)]
+
+		while True:
+			last_J = current_level[0]
+			query = f'qnu1 == {last_J + 1} and ' + ' and '.join([f'{label} == {x}' for label, x in zip(qnl_labels, current_level)])
+			tmp = cat_df.query(query)
+
+			if tmp.empty:
+				break
+			
+			transition = tmp.sort_values('y', ascending=False).iloc[0]
+			
+			x = transition['x']
+			qnus, qnls = transition[qnu_labels].values, transition[qnl_labels].values
+			xs.append(x)
+			all_qns.append([qnus, qnls])
+			
+			current_level = qnus
+
+		self.setCurrentIndex(1)
+		self.list_load(values={'xs': xs, 'qns': all_qns})
+		
 
 	def expression_update(self, type=None):
 		if type == "index":
@@ -5531,9 +5598,9 @@ class ReferenceSelector(QTabWidget):
 				imax = 0
 
 			positions[:imax] = xs[i0 : imax + i0]
-
+			
 			if tmp_qns is not None and len(tmp_qns) and i0 < len(tmp_qns):
-				qns[:imax] = qns[i0 : imax + i0]
+				qns[:imax] = tmp_qns[i0 : imax + i0]
 
 		else:  # Expression
 			state = self.state["expression"]
@@ -5627,6 +5694,7 @@ class ReferenceSelector(QTabWidget):
 		get_positions_action = menu.addAction("Copy Reference Positions")
 		get_qns_action = menu.addAction("Copy Reference QNs")
 		fit_all_action = menu.addAction("Fit all")
+		list_from_cat_trend_action = menu.addAction("List from cat trend")
 
 
 		change_qns_templates = config['series_changeqnsactions']
@@ -5675,6 +5743,8 @@ class ReferenceSelector(QTabWidget):
 			for i, delta in enumerate(delta_qnls):
 				current_state["qnls"][i] += delta
 			seriesselector.set_state()
+		elif action == list_from_cat_trend_action:
+			self.list_from_cat_trend()
 
 class SeriesSelector(QWidget):
 	values_changed = pyqtSignal()
