@@ -5384,7 +5384,7 @@ class ReferenceSelector(QTabWidget):
 				try:
 					x = float(x)
 					qns = np.array([int(qn) for qn in qns])
-					qns = np.split(qns, 2)
+					qns = np.array(np.split(qns, 2)).tolist()
 					
 					xs.append(x)
 					all_qns.append(qns)
@@ -5467,6 +5467,8 @@ class ReferenceSelector(QTabWidget):
 			)
 		self.changed()
 
+	# This function creates a list that follows the strongest a-type transition with \Delta J = 1
+	# to the next levels
 	def list_from_cat_trend(self, current_level=None):
 		if current_level is None:
 			text, ok = QInputDialog().getText(self, "Start Level", "Enter the start level:")
@@ -5496,13 +5498,14 @@ class ReferenceSelector(QTabWidget):
 			
 			x = transition['x']
 			qnus, qnls = transition[qnu_labels].values, transition[qnl_labels].values
-			xs.append(x)
+			qnus, qnls = [int(x) for x in qnus], [int(x) for x in qnls]
+			xs.append(float(x))
 			all_qns.append([qnus, qnls])
 			
 			current_level = qnus
 
 		self.setCurrentIndex(1)
-		self.list_load(values={'xs': xs, 'qns': all_qns})
+		self.list_load(values={'xs': xs, 'qns': np.array(all_qns).tolist()})
 		
 
 	def expression_update(self, type=None):
