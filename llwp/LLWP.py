@@ -5375,12 +5375,13 @@ class ReferenceSelector(QTabWidget):
 				if not line or line.startswith('#'):
 					continue
 				
-				vals = re.split(r"; |, |\s", line)
+				vals = re.split(r"[; |, |\s]+", line)
+				vals = [v for v in vals if v.strip()]
 				if len(vals) != (2 * n_qns + 1):
 					notify_warning.emit(f'Error in line {i_line}. {(2 * n_qns + 1)} numbers expected.')
 					continue
 				
-				x, *qns = vals
+				*qns, x = vals
 				try:
 					x = float(x)
 					qns = np.array([int(qn) for qn in qns])
@@ -5392,10 +5393,10 @@ class ReferenceSelector(QTabWidget):
 					notify_warning.emit(
 						f"Could not convert the values in row '{i_line}' to numerical values."
 					)
-		
+
 		# List with frequencies only
 		else:
-			tmp_xs = re.split(r"; |, |\s", list_string)
+			tmp_xs = re.split(r"[; |, |\s]+", list_string)
 			for x in tmp_xs:
 				if not x.strip():
 					continue

@@ -1,5 +1,11 @@
 # LLWP - Luis' Loomis-Wood Program
 
+
+<h1 align="center">
+<img src="https://llwp.astro.uni-koeln.de/LLWP.svg" width="300">
+</h1>
+
+
 LLWP allows you to efficiently and confidently assign (typically rotational or rovibrational) spectra by relying on Loomis-Wood plots.
 
 A quickstart guide is given down below. For more information see LLWP's [website](https://llwp.astro.uni-koeln.de).
