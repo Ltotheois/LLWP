@@ -10875,15 +10875,14 @@ class ASAPSquaredWindow(EQDockWidget):
 		qn_labels_egy = [f"qn{i+1}" for i in range(self.noq)]
 		qn_labels = [f"qn{ul}{i+1}" for ul in "ul" for i in range(self.noq)]
 
-		for _, target_level in egy_df.iterrows():
-			qns = [target_level[x] for x in qn_labels_egy]
-
+		columns = ['x'] + qn_labels_egy
+		for egy, *qns in egy_df[columns].itertuples(name=None, index=None):
 			if config["asap_squaredisupper"]:
 				query = " and ".join([f"qnu{i+1} == {qn}" for i, qn in enumerate(qns)])
-				assignments.append((target_level["egy"], +1, *qns, *np.zeros_like(qns)))
+				assignments.append((egy, +1, *qns, *np.zeros_like(qns)))
 			else:
 				query = " and ".join([f"qnl{i+1} == {qn}" for i, qn in enumerate(qns)])
-				assignments.append((target_level["egy"], -1, *qns, *np.zeros_like(qns)))
+				assignments.append((egy, -1, *qns, *np.zeros_like(qns)))
 
 			possible_transitions = cat_df.query(query)
 			predicted_positions = possible_transitions["x"].values
