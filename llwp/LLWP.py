@@ -349,7 +349,7 @@ class Config(dict):
 		"assignall_maxdegree": (3, int),
 		"asap_query": ("", str),
 		"asap_minrelratio": (0, float),
-		"asap_resolution": (6e-6, float),
+		"asap_stepsize": (6e-6, float),
 		"asap_weighted": (True, bool),
 		"asap_catunitconversionfactor": (1 / pyckett.WN_TO_MHZ, float),
 		"asap_assigntransitions": (True, bool),
@@ -357,7 +357,7 @@ class Config(dict):
 		"asap_detailviewerwidth": (0, float),
 		"asap_detailviewerfilter": (True, bool),
 		"asap_squaredwidth": (0, float),
-		"asap_squaredresolution": (0, float),
+		"asap_squaredstepsize": (0, float),
 		"asap_squaredfilterqueryenergylevels": ("", str),
 		"asap_squaredfilterquerytransitions": ("", str),
 		"asap_squaredisupper": (True, bool),
@@ -9525,7 +9525,7 @@ class ASAPAx(LWPAx):
 
 		self.width = None
 		self.offset = None
-		self.resolution = None
+		self.stepsize = None
 		self.x_fit = None
 
 		self.corr_xs = None
@@ -10140,7 +10140,7 @@ class ASAPWidget(LWPWidget):
 
 		return (entries, qns, diffs, ul)
 
-	def calc_correlation_plot(self, row_qns, row_entries, offset, width, resolution):
+	def calc_correlation_plot(self, row_qns, row_entries, offset, width, stepsize):
 		transitions = row_entries[row_entries["use_for_cross_correlation"]]
 
 		ref_xs = transitions["x"]
@@ -10149,7 +10149,7 @@ class ASAPWidget(LWPWidget):
 		min_indices, max_indices = transitions["min_index"], transitions["max_index"]
 
 		xmin, xmax = offset - width / 2, offset + width / 2
-		tot_xs = np.arange(xmin, xmax + resolution, resolution)
+		tot_xs = np.arange(xmin, xmax + stepsize, stepsize)
 
 		tot_ys = np.ones_like(tot_xs)
 
@@ -10266,7 +10266,7 @@ class ASAPWidget(LWPWidget):
 
 		offset = config["plot_offset"]
 		width = config["plot_width"]
-		resolution = config["asap_resolution"]
+		stepsize = config["asap_stepsize"]
 
 		threads = []
 		with matplotlib_lock:
@@ -10314,7 +10314,7 @@ class ASAPWidget(LWPWidget):
 					]
 
 					corr_xs, corr_ys, corr_col, mask = self.calc_correlation_plot(
-						row_qns, row_entries, offset, width, resolution
+						row_qns, row_entries, offset, width, stepsize
 					)
 					row_entries_all.loc[row_entries.index, 'use_for_cross_correlation'] = mask
 
@@ -10326,7 +10326,7 @@ class ASAPWidget(LWPWidget):
 					ax.qns = row_qns
 					ax.offset = offset
 					ax.width = width
-					ax.resolution = resolution
+					ax.stepsize = stepsize
 					ax.is_upper_state = state["is_upper_state"]
 					threads.append(ax.update())
 
@@ -10591,7 +10591,7 @@ class ASAPDetailViewer(EQDockWidget):
 			ax.entries = ax.entries.drop(index)
 
 			corr_xs, corr_ys, corr_col, mask = mainwindow.lwpwidget.calc_correlation_plot(
-				ax.qns, ax.entries, ax.offset, ax.width, ax.resolution
+				ax.qns, ax.entries, ax.offset, ax.width, ax.stepsize
 			)
 			ax.entries = ax.entries
 			ax.corr_xs = corr_xs
@@ -10668,9 +10668,9 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 
 		row_i += 1
 
-		tmp_layout.addWidget(QQ(QLabel, text="Interp. Resolution: "), row_i, 0)
+		tmp_layout.addWidget(QQ(QLabel, text="Interp. Stepsize: "), row_i, 0)
 		tmp_layout.addWidget(
-			QQ(QDoubleSpinBox, "asap_resolution", range=(0, None)), row_i, 1
+			QQ(QDoubleSpinBox, "asap_stepsize", range=(0, None)), row_i, 1
 		)
 
 		row_i += 1
@@ -10772,9 +10772,9 @@ class ASAPSquaredWindow(EQDockWidget):
 		tmp_layout = QHBoxLayout()
 		tmp_layout.addWidget(QQ(QLabel, text="Width: "))
 		tmp_layout.addWidget(QQ(QDoubleSpinBoxFullPrec, "asap_squaredwidth", width=120))
-		tmp_layout.addWidget(QQ(QLabel, text="Resolution: "))
+		tmp_layout.addWidget(QQ(QLabel, text="Stepsize: "))
 		tmp_layout.addWidget(
-			QQ(QDoubleSpinBoxFullPrec, "asap_squaredresolution", width=120)
+			QQ(QDoubleSpinBoxFullPrec, "asap_squaredstepsize", width=120)
 		)
 		tmp_layout.addWidget(QQ(QLabel, text="Threshold: "))
 		tmp_layout.addWidget(
@@ -10848,7 +10848,7 @@ class ASAPSquaredWindow(EQDockWidget):
 		)
 
 		width = config["asap_squaredwidth"] or config["plot_width"]
-		resolution = config["asap_squaredresolution"] or config["asap_resolution"]
+		stepsize = config["asap_squaredstepsize"] or config["asap_stepsize"]
 
 		egy_df = ASAPAx.egy_df
 
@@ -10870,12 +10870,12 @@ class ASAPSquaredWindow(EQDockWidget):
 
 		n_lines = 0
 		threshold = config["asap_squaredthreshold"]
-		rel_xs = np.arange(-width / 2, width / 2 + resolution, resolution)
+		rel_xs = np.arange(-width / 2, width / 2 + stepsize, stepsize)
 		asap2_ys = np.ones_like(rel_xs)
 		qn_labels_egy = [f"qn{i+1}" for i in range(self.noq)]
 		qn_labels = [f"qn{ul}{i+1}" for ul in "ul" for i in range(self.noq)]
 
-		columns = ['x'] + qn_labels_egy
+		columns = ['egy'] + qn_labels_egy
 		for egy, *qns in egy_df[columns].itertuples(name=None, index=None):
 			if config["asap_squaredisupper"]:
 				query = " and ".join([f"qnu{i+1} == {qn}" for i, qn in enumerate(qns)])
