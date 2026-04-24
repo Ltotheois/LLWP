@@ -3856,7 +3856,8 @@ class LLWP(QApplication):
 
 			if len(sys.argv) > 1:
 				project = sys.argv[1]
-				File.load_files(project)
+				if project != '--ASAP':
+					File.load_files(project)
 
 			mainwindow.show()
 
@@ -11086,13 +11087,15 @@ def start_asap():
 	APP_TAG = "ASAP"
 	ASAP()
 
-
-if __name__ == "__main__":
+def start():
 	args = sys.argv
 	if "--ASAP" in args:
 		start_asap()
 	else:
-		start_llwp()
+		start_llwp()	
+
+if __name__ == "__main__":
+	start()
 
 
 ##
