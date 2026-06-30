@@ -623,7 +623,7 @@ class PlotWidget(QWidget):
         filenames = exp_df["filename"]
         unique_filenames = filenames.unique()
         for unique_filename in unique_filenames:
-            mask = filenames == unique_filename
+            mask = (filenames == unique_filename)
             tmp_xs, tmp_ys = xs[mask], ys[mask]
 
             colors.append(exp_df.loc[mask, "color"].values)
@@ -649,7 +649,7 @@ class PlotWidget(QWidget):
         cat_yrange = (ys.min(), ys.max()) if len(ys) else (-1, 1)
 
         if scaling == "Per Plot":
-            ys *= exp_yrange[1] / cat_yrange[1]
+            ys = ys * exp_yrange[1] / cat_yrange[1]
         elif scaling in ["Global", "Custom"]:
             ys = (
                 ys * config["plot_expcat_factor"] * 10 ** config["plot_expcat_exponent"]
