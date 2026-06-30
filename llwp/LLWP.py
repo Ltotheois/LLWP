@@ -1408,7 +1408,7 @@ class File:
                 if len(df) > max(bins, nobinning) and binwidth != 0:
                     df = bin_data(df, binwidth, xrange)
 
-        return df
+        return df.copy()
 
     @classmethod
     def get_df(cls):
