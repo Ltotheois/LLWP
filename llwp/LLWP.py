@@ -276,7 +276,13 @@ class Config(dict):
         "flag_tableformatint": (".0f", str),
         "flag_tableformatfloat": (".2f", str),
         "flag_extensions": (
-            {"exp": [".csv"], "cat": [".cat"], "lin": [".lin"], "project": [".files"]},
+            {
+                "exp": [".csv"],
+                "cat": [".cat"],
+                "lin": [".lin"],
+                "project": [".files"],
+                "config": [".ini"],
+            },
             dict,
         ),
         "flag_notificationtime": (2000, int),
@@ -426,8 +432,9 @@ class Config(dict):
             self.callbacks[self.callbacks["id"] == id].index, inplace=True
         )
 
-    def load(self):
-        fname = llwpfile(".ini")
+    def load(self, fname=None):
+        if fname is None:
+            fname = llwpfile(".ini")
         config_parser = configparser.ConfigParser(interpolation=None)
         config_parser.read(fname)
 
@@ -447,7 +454,7 @@ class Config(dict):
                         value = class_(value)
                         self[fullkey] = value
                     except Exception as E:
-                        message = f"The value for the option {fullkey} from the option file was not understood."
+                        message = f"The value for the option '{fullkey}' from the option file was not understood."
                         self.messages.append(message)
                         print(message)
                 else:
@@ -623,7 +630,7 @@ class PlotWidget(QWidget):
         filenames = exp_df["filename"]
         unique_filenames = filenames.unique()
         for unique_filename in unique_filenames:
-            mask = (filenames == unique_filename)
+            mask = filenames == unique_filename
             tmp_xs, tmp_ys = xs[mask], ys[mask]
 
             colors.append(exp_df.loc[mask, "color"].values)
@@ -1438,6 +1445,11 @@ class File:
     def sort_files_by_type(cls, files):
         files = cls.special_file_handler.sort_files_by_type(files)
         types = config["flag_extensions"]
+
+        for type_ in ("exp", "cat", "lin", "project", "config"):
+            if type_ not in types:
+                types[type_] = []
+
         files_by_type = {key: [] for key in list(types.keys())}
 
         for file in files:
@@ -1559,6 +1571,9 @@ class File:
         )
         for thread_ in threads:
             thread_.wait()
+
+        for settings in files_by_type.get("config", []):
+            config.load(settings)
 
         CatFile.check_series_qns()
 
