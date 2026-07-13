@@ -5886,14 +5886,17 @@ class SeriesSelector(QWidget):
         self.setLayout(self.full_layout)
         self.set_state()
 
-
         config.register_widget("series_qns", self.togglediff, self.set_state)
         config.register_widget(
             "flag_showseriesarrows", self.togglediff, self.change_arrows
         )
-        config.register_widget('series_changeqnsactions', self.togglediff, self.update_qns_actions_buttons)
-        config.register_widget('series_showqnsactions', self.togglediff, self.update_qns_actions_buttons)
-        
+        config.register_widget(
+            "series_changeqnsactions", self.togglediff, self.update_qns_actions_buttons
+        )
+        config.register_widget(
+            "series_showqnsactions", self.togglediff, self.update_qns_actions_buttons
+        )
+
         self.change_arrows()
         self.update_qns_actions_buttons()
 
@@ -5907,12 +5910,16 @@ class SeriesSelector(QWidget):
             self.custom_buttons_layout.deleteLater()
             self.custom_buttons_layout = None
 
-        if not config['series_showqnsactions']:
+        if not config["series_showqnsactions"]:
             return
-    
+
         tmp_layout = QHBoxLayout()
-        for key in config['series_changeqnsactions'].keys():
-            tmp_button = QQ(QToolButton, text=key, change=lambda _, key=key: self.change_qns_action(key))
+        for key in config["series_changeqnsactions"].keys():
+            tmp_button = QQ(
+                QToolButton,
+                text=key,
+                change=lambda _, key=key: self.change_qns_action(key),
+            )
             tmp_layout.addWidget(tmp_button)
 
         tmp_layout.addStretch(1)
@@ -5920,11 +5927,11 @@ class SeriesSelector(QWidget):
         self.custom_buttons_layout = tmp_layout
 
     def change_qns_action(self, key):
-        change_qns_actions = config['series_changeqnsactions']
+        change_qns_actions = config["series_changeqnsactions"]
         if key not in change_qns_actions:
             notify_warning.emit(f"No action defined for key '{key}'")
             return
-        
+
         delta_qnus, delta_qnls = change_qns_actions[key]
 
         current_state = self.state
@@ -6128,6 +6135,7 @@ class ReferenceSeriesWindow(EQDockWidget):
     def changed(self):
         tmp = self.get_state()
         config["series_references"] = tmp
+
 
 class LogWindow(EQDockWidget):
     available_in = ["LLWP", "ASAP"]
@@ -9512,12 +9520,15 @@ class LevelSelector(SeriesSelector):
         config.register_widget(
             "flag_showseriesarrows", self.togglediff, self.change_arrows
         )
-        config.register_widget('series_changeqnsactions', self.togglediff, self.update_qns_actions_buttons)
-        config.register_widget('series_showqnsactions', self.togglediff, self.update_qns_actions_buttons)
-       
+        config.register_widget(
+            "series_changeqnsactions", self.togglediff, self.update_qns_actions_buttons
+        )
+        config.register_widget(
+            "series_showqnsactions", self.togglediff, self.update_qns_actions_buttons
+        )
+
         self.change_arrows()
         self.update_qns_actions_buttons()
-
 
     def set_state(self):
         self.updating = True
@@ -9584,22 +9595,25 @@ class LevelSelector(SeriesSelector):
                 widget.hide()
                 widget.deleteLater()
 
-        if not config['series_showqnsactions']:
+        if not config["series_showqnsactions"]:
             return
-    
-        for key in config['series_changeqnsactions'].keys():
-            tmp_button = QQ(QToolButton, text=key, change=lambda _, key=key: self.change_qns_action(key))
+
+        for key in config["series_changeqnsactions"].keys():
+            tmp_button = QQ(
+                QToolButton,
+                text=key,
+                change=lambda _, key=key: self.change_qns_action(key),
+            )
             self.custom_buttons_layout.addWidget(tmp_button)
 
         self.custom_buttons_layout.addStretch(1)
 
-
     def change_qns_action(self, key):
-        change_qns_actions = config['series_changeqnsactions']
+        change_qns_actions = config["series_changeqnsactions"]
         if key not in change_qns_actions:
             notify_warning.emit(f"No action defined for key '{key}'")
             return
-        
+
         delta_qnus, delta_qnls = change_qns_actions[key]
 
         if self.state["is_upper_state"]:
@@ -9631,7 +9645,6 @@ class LevelSelector(SeriesSelector):
         elif action in change_qns_actions.keys():
             label = change_qns_actions[action]
             self.change_qns_action(label)
-
 
 
 class ASAPAx(LWPAx):
