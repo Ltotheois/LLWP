@@ -248,6 +248,7 @@ class Config(dict):
         "series_blendquery": ("", str),
         "series_qns": (4, int),
         "series_blendminrelratio": (0, float),
+        "series_showqnsactions": (True, bool),
         "series_changeqnsactions": ({}, dict),
         "series_expressionkwargs": ({}, dict),
         "fit_fitmethod": ("Pgopher", str),
@@ -5513,6 +5514,8 @@ class ReferenceSelector(QTabWidget):
             if ok and text:
                 current_level = re.split(r"; |, |\s", text)
                 current_level = [int(x) for x in current_level]
+            else:
+                return
 
         n_qns = len(current_level)
         config["series_qns"] = n_qns
@@ -5785,15 +5788,7 @@ class ReferenceSelector(QTabWidget):
             AssignAllDialog.show_dialog(i_col)
         elif action in change_qns_actions.keys():
             label = change_qns_actions[action]
-            delta_qnus, delta_qnls = change_qns_templates[label]
-            seriesselector = self.series_selector
-
-            current_state = seriesselector.state
-            for i, delta in enumerate(delta_qnus):
-                current_state["qnus"][i] += delta
-            for i, delta in enumerate(delta_qnls):
-                current_state["qnls"][i] += delta
-            seriesselector.set_state()
+            self.series_selector.change_qns_action(label)
         elif action == list_from_cat_trend_action:
             self.list_from_cat_trend()
 
@@ -5873,10 +5868,6 @@ class SeriesSelector(QWidget):
             tmp.addWidget(diff)
 
             layout.addLayout(tmp, 4, i)
-            layout.setColumnStretch(i, 100)
-
-        for i in range(self.n_qns):
-            layout.setColumnStretch(i, 100)
 
         layout.addWidget(self.togglediff, 4, self.n_qns, 1, 1)
 
@@ -5884,17 +5875,64 @@ class SeriesSelector(QWidget):
         layout.addWidget(self.decqns, 1, self.n_qns, 1, 2)
 
         layout.setRowStretch(6, 10)
-        layout.setColumnStretch(self.n_qns + 2, 1)
+        layout.setColumnStretch(self.n_qns + 1, 1)
 
         self.layout = layout
-        self.setLayout(layout)
+        self.custom_buttons_layout = None
+
+        self.full_layout = QVBoxLayout()
+        self.full_layout.addLayout(layout)
+
+        self.setLayout(self.full_layout)
         self.set_state()
+
 
         config.register_widget("series_qns", self.togglediff, self.set_state)
         config.register_widget(
             "flag_showseriesarrows", self.togglediff, self.change_arrows
         )
+        config.register_widget('series_changeqnsactions', self.togglediff, self.update_qns_actions_buttons)
+        config.register_widget('series_showqnsactions', self.togglediff, self.update_qns_actions_buttons)
+        
         self.change_arrows()
+        self.update_qns_actions_buttons()
+
+    def update_qns_actions_buttons(self):
+        if self.custom_buttons_layout:
+            while self.custom_buttons_layout.count():
+                widget = self.custom_buttons_layout.takeAt(0).widget()
+                if widget:
+                    widget.hide()
+                    widget.deleteLater()
+            self.custom_buttons_layout.deleteLater()
+            self.custom_buttons_layout = None
+
+        if not config['series_showqnsactions']:
+            return
+    
+        tmp_layout = QHBoxLayout()
+        for key in config['series_changeqnsactions'].keys():
+            tmp_button = QQ(QToolButton, text=key, change=lambda _, key=key: self.change_qns_action(key))
+            tmp_layout.addWidget(tmp_button)
+
+        tmp_layout.addStretch(1)
+        self.full_layout.addLayout(tmp_layout)
+        self.custom_buttons_layout = tmp_layout
+
+    def change_qns_action(self, key):
+        change_qns_actions = config['series_changeqnsactions']
+        if key not in change_qns_actions:
+            notify_warning.emit(f"No action defined for key '{key}'")
+            return
+        
+        delta_qnus, delta_qnls = change_qns_actions[key]
+
+        current_state = self.state
+        for i, delta in enumerate(delta_qnus):
+            current_state["qnus"][i] += delta
+        for i, delta in enumerate(delta_qnls):
+            current_state["qnls"][i] += delta
+        self.set_state()
 
     def set_state(self):
         self.updating = True
@@ -6090,7 +6128,6 @@ class ReferenceSeriesWindow(EQDockWidget):
     def changed(self):
         tmp = self.get_state()
         config["series_references"] = tmp
-
 
 class LogWindow(EQDockWidget):
     available_in = ["LLWP", "ASAP"]
@@ -9460,7 +9497,14 @@ class LevelSelector(SeriesSelector):
         layout.setColumnStretch(self.n_qns + 2, 1)
 
         self.layout = layout
-        self.setLayout(layout)
+        self.custom_buttons_layout = QHBoxLayout()
+
+        self.full_layout = QVBoxLayout()
+        self.full_layout.addLayout(self.layout)
+        self.full_layout.addLayout(self.custom_buttons_layout)
+        self.full_layout.addStretch(1)
+
+        self.setLayout(self.full_layout)
 
         self.set_state()
 
@@ -9468,7 +9512,12 @@ class LevelSelector(SeriesSelector):
         config.register_widget(
             "flag_showseriesarrows", self.togglediff, self.change_arrows
         )
+        config.register_widget('series_changeqnsactions', self.togglediff, self.update_qns_actions_buttons)
+        config.register_widget('series_showqnsactions', self.togglediff, self.update_qns_actions_buttons)
+       
         self.change_arrows()
+        self.update_qns_actions_buttons()
+
 
     def set_state(self):
         self.updating = True
@@ -9528,6 +9577,40 @@ class LevelSelector(SeriesSelector):
             widget.setMaximumWidth(width)
             widget.setButtonSymbols(button_symbols)
 
+    def update_qns_actions_buttons(self):
+        while self.custom_buttons_layout.count():
+            widget = self.custom_buttons_layout.takeAt(0).widget()
+            if widget:
+                widget.hide()
+                widget.deleteLater()
+
+        if not config['series_showqnsactions']:
+            return
+    
+        for key in config['series_changeqnsactions'].keys():
+            tmp_button = QQ(QToolButton, text=key, change=lambda _, key=key: self.change_qns_action(key))
+            self.custom_buttons_layout.addWidget(tmp_button)
+
+        self.custom_buttons_layout.addStretch(1)
+
+
+    def change_qns_action(self, key):
+        change_qns_actions = config['series_changeqnsactions']
+        if key not in change_qns_actions:
+            notify_warning.emit(f"No action defined for key '{key}'")
+            return
+        
+        delta_qnus, delta_qnls = change_qns_actions[key]
+
+        if self.state["is_upper_state"]:
+            deltas = delta_qnus
+        else:
+            deltas = delta_qnls
+
+        for i, delta in enumerate(deltas):
+            self.state["qns"][i] += delta
+        self.set_state()
+
     def contextMenuEvent(self, event):
         menu = QMenu(self)
         fit_all_action = menu.addAction("Fit all")
@@ -9547,16 +9630,8 @@ class LevelSelector(SeriesSelector):
             AssignAllDialog.show_dialog(i_col)
         elif action in change_qns_actions.keys():
             label = change_qns_actions[action]
-            delta_qnus, delta_qnls = change_qns_templates[label]
+            self.change_qns_action(label)
 
-            if self.state["is_upper_state"]:
-                deltas = delta_qnus
-            else:
-                deltas = delta_qnls
-
-            for i, delta in enumerate(deltas):
-                self.state["qns"][i] += delta
-            self.set_state()
 
 
 class ASAPAx(LWPAx):
