@@ -358,6 +358,8 @@ class Config(dict):
         "asap_minrelratio": (0, float),
         "asap_stepsize": (6e-6, float),
         "asap_weighted": (True, bool),
+        "asap_scaletoexpints": (False, bool),
+        "asap_expcatfactor": (1, float),
         "asap_catunitconversionfactor": (1 / pyckett.WN_TO_MHZ, float),
         "asap_assigntransitions": (True, bool),
         "asap_excludearoundassigned": (0, float),
@@ -365,9 +367,7 @@ class Config(dict):
         "asap_detailviewerfilter": (True, bool),
         "asap_squaredwidth": (0, float),
         "asap_squaredstepsize": (0, float),
-        "asap_squaredfilterqueryenergylevels": ("", str),
-        "asap_squaredfilterquerytransitions": ("", str),
-        "asap_squaredisupper": (True, bool),
+        "asap_squaredfilterquery": ("", str),
         "asap_squaredplotlog": (False, bool),
         "asap_squaredthreshold": (0, float),
         "asap_squaredfilterqueryexpdata": ("", str),
@@ -9742,7 +9742,7 @@ class ASAPAx(LWPAx):
 
         ax.set_xlim(self.xrange)
         self.set_xticklabels()
-        yrange = [-1, 1]
+        yrange = [-0.1, 1.1]
 
         tot_xs = self.corr_xs
         tot_ys = self.corr_ys
@@ -9756,19 +9756,20 @@ class ASAPAx(LWPAx):
 
         self.vals_to_coll(tot_xs, tot_ys, self.corr_col)
 
-        if tot_ys is not None and len(tot_ys):
-            # yrange = (np.min(tot_ys), np.max(tot_ys))
-            yrange = (0, np.max(tot_ys))
-        margin = config["plot_ymargin"]
+        if not config["asap_scaletoexpints"]:
+            if tot_ys is not None and len(tot_ys):
+                # yrange = (np.min(tot_ys), np.max(tot_ys))
+                yrange = (0, np.max(tot_ys))
+            margin = config["plot_ymargin"]
 
-        yrange = (
-            yrange[0] - margin * (yrange[1] - yrange[0]),
-            yrange[1] + margin * (yrange[1] - yrange[0]),
-        )
-        if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
-            yrange = (-2, +2)
-
+            yrange = (
+                yrange[0] - margin * (yrange[1] - yrange[0]),
+                yrange[1] + margin * (yrange[1] - yrange[0]),
+            )
+            if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
+                yrange = (-2, +2)
         ax.set_ylim(yrange)
+
         self.update_annotation()
 
         # Plot position of previous assignments
@@ -10311,6 +10312,10 @@ class ASAPWidget(LWPWidget):
 
         exp_len = len(ExpFile.df)
         n_correlated_transitions = 0
+
+        total_calc_intensity = 1
+        total_expcatfactor = 1
+
         use_weights = config["asap_weighted"]
 
         minimum_intensity = np.log10(ref_ys.min())
@@ -10373,17 +10378,26 @@ class ASAPWidget(LWPWidget):
             if use_weights:
                 power = np.log10(ref_int) - minimum_intensity + 1
                 interp_ys = np.power(np.abs(interp_ys), power)
+                total_calc_intensity *= np.power(ref_int, power)
+                total_expcatfactor /= np.power(config["asap_expcatfactor"], power)
+            else:
+                total_calc_intensity *= ref_int
+                total_expcatfactor /= config["asap_expcatfactor"]
 
             tot_ys *= interp_ys
             n_correlated_transitions += 1
 
-        # @Luis: Think about offering options to normalize spectrum here
         if n_correlated_transitions < 2:
             tot_xs = tot_ys = np.array([])
         else:
-            tot_ys_max = tot_ys.max()
-            if tot_ys_max:
-                tot_ys /= tot_ys_max
+
+            if config["asap_scaletoexpints"]:
+                tot_ys /= total_calc_intensity / total_expcatfactor
+
+            else:
+                tot_ys_max = tot_ys.max()
+                if tot_ys_max:
+                    tot_ys /= tot_ys_max
 
         # Determine the color for the cross-correlation plot
         # Default color_exp value is used if there are multiple colors
@@ -10506,9 +10520,6 @@ class ASAPWidget(LWPWidget):
     @status_d
     @drawplot_decorator.d
     def set_data(self, thread=None):
-        n_rows = config["plot_rows"]
-        n_cols = config["plot_cols"]
-
         threads = []
         for asap_ax in self.lwpaxes.flatten():
             threads.append(asap_ax.update())
@@ -10827,20 +10838,38 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
 
         row_i = 0
 
-        tmp_layout.addWidget(QQ(QLabel, text="Weighted Transitions: "), row_i, 0)
+        tmp_layout.addWidget(QQ(QLabel, text="Weight Transitions: "), row_i, 0)
         tmp_layout.addWidget(QQ(QCheckBox, "asap_weighted"), row_i, 1)
 
         row_i += 1
 
-        tmp_layout.addWidget(QQ(QLabel, text="Interp. Stepsize: "), row_i, 0)
+        tmp_layout.addWidget(QQ(QLabel, text="Interpolation Stepsize: "), row_i, 0)
         tmp_layout.addWidget(
             QQ(QDoubleSpinBox, "asap_stepsize", range=(0, None)), row_i, 1
         )
 
         row_i += 1
 
-        tmp_layout.addWidget(QQ(QLabel, text="Only keep latest results: "), row_i, 0)
+        tmp_layout.addWidget(
+            QQ(QLabel, text="Only keep most recent Assignments: "), row_i, 0
+        )
         tmp_layout.addWidget(QQ(QCheckBox, "flag_keeponlylastassignment"), row_i, 1)
+
+        row_i += 1
+
+        tmp_layout.setRowMinimumHeight(row_i, 20)
+
+        row_i += 1
+
+        tmp_layout.addWidget(
+            QQ(QLabel, text="Scale to experimental Intensities: "), row_i, 0
+        )
+        tmp_layout.addWidget(QQ(QCheckBox, "asap_scaletoexpints"), row_i, 1)
+
+        row_i += 1
+
+        tmp_layout.addWidget(QQ(QLabel, text="Exp/Cat Intensity Factor"))
+        tmp_layout.addWidget(QQ(QDoubleSpinBox, "asap_expcatfactor", range=(0, None)))
 
         tmp_layout.setRowStretch(row_i + 1, 1)
 
@@ -10950,20 +10979,14 @@ class ASAPSquaredWindow(EQDockWidget):
             )
         )
         tmp_layout.addWidget(
-            QQ(QCheckBox, "asap_squaredisupper", text="Is upper level")
-        )
-        tmp_layout.addWidget(
             QQ(QCheckBox, "asap_squaredplotlog", text="Plot logarithmic")
         )
         tmp_layout.addStretch(1)
 
         layout.addLayout(tmp_layout)
 
-        layout.addWidget(QQ(QLabel, text="Filter for energy levels: "))
-        layout.addWidget(QQ(QPlainTextEdit, "asap_squaredfilterqueryenergylevels"))
-
         layout.addWidget(QQ(QLabel, text="Filter for transitions: "))
-        layout.addWidget(QQ(QPlainTextEdit, "asap_squaredfilterquerytransitions"))
+        layout.addWidget(QQ(QPlainTextEdit, "asap_squaredfilterquery"))
 
         tmp_layout = QHBoxLayout()
         tmp_layout.addStretch(1)
@@ -10976,7 +10999,11 @@ class ASAPSquaredWindow(EQDockWidget):
             )
         )
         tmp_layout.addWidget(
-            QQ(QPushButton, text="Assign", change=lambda x: self.assign_asap_squared())
+            QQ(
+                QPushButton,
+                text="Assign Transitions",
+                change=lambda x: self.assign_asap_squared(),
+            )
         )
         tmp_layout.addWidget(
             QQ(QPushButton, text="Export", change=lambda x: self.export_data())
@@ -11015,17 +11042,11 @@ class ASAPSquaredWindow(EQDockWidget):
         stepsize = config["asap_squaredstepsize"] or config["asap_stepsize"]
 
         egy_df = ASAPAx.egy_df
-
         if egy_df is None:
             notify_warning.emit("No *.egy file loaded.")
-            return
-
-        query = config["asap_squaredfilterqueryenergylevels"]
-        if query:
-            egy_df = egy_df.query(query)
 
         cat_df = CatFile.get_data().copy()
-        query = config["asap_squaredfilterquerytransitions"]
+        query = config["asap_squaredfilterquery"]
         if query:
             cat_df = cat_df.query(query)
 
@@ -11035,71 +11056,78 @@ class ASAPSquaredWindow(EQDockWidget):
         n_lines = 0
         threshold = config["asap_squaredthreshold"]
         rel_xs = np.arange(-width / 2, width / 2 + stepsize, stepsize)
-        asap2_ys = np.ones_like(rel_xs)
-        qn_labels_egy = [f"qn{i+1}" for i in range(self.noq)]
+
         qn_labels = [f"qn{ul}{i+1}" for ul in "ul" for i in range(self.noq)]
 
-        columns = ["egy"] + qn_labels_egy
-        for egy, *qns in egy_df[columns].itertuples(name=None, index=None):
-            if config["asap_squaredisupper"]:
-                query = " and ".join([f"qnu{i+1} == {qn}" for i, qn in enumerate(qns)])
-                assignments.append((egy, +1, *qns, *np.zeros_like(qns)))
-            else:
-                query = " and ".join([f"qnl{i+1} == {qn}" for i, qn in enumerate(qns)])
-                assignments.append((egy, -1, *qns, *np.zeros_like(qns)))
+        predicted_positions = cat_df["x"].values
+        predicted_positions = (
+            predicted_positions * config["asap_catunitconversionfactor"]
+        )
+        predicted_intensities = cat_df["y"].values
 
-            possible_transitions = cat_df.query(query)
-            predicted_positions = possible_transitions["x"].values
-            predicted_positions *= config["asap_catunitconversionfactor"]
+        min_indices = exp_df["x"].searchsorted(
+            predicted_positions - width / 2, side="left"
+        )
+        max_indices = exp_df["x"].searchsorted(
+            predicted_positions + width / 2, side="right"
+        )
 
-            min_indices = exp_df["x"].searchsorted(
-                predicted_positions - width / 2, side="left"
-            )
-            max_indices = exp_df["x"].searchsorted(
-                predicted_positions + width / 2, side="right"
-            )
+        log_y_max = 0
+        log_total_calc_intensity = 0
 
-            tot_ys = np.ones_like(rel_xs)
-            exp_len = len(exp_df)
+        tot_ys = np.ones_like(rel_xs)
+        exp_len = len(exp_df)
 
-            for min_index, max_index, ref_position in zip(
-                min_indices, max_indices, predicted_positions
-            ):
-                min_index = max(0, min_index - 2)
-                max_index = min(exp_len, max_index + 2)
+        for min_index, max_index, ref_position, ref_intensity in zip(
+            min_indices, max_indices, predicted_positions, predicted_intensities
+        ):
+            min_index = max(0, min_index - 2)
+            max_index = min(exp_len, max_index + 2)
 
-                tmp = exp_df.iloc[min_index:max_index]
-                xs = tmp["x"].values
-                ys = tmp["y"].values
+            tmp = exp_df.iloc[min_index:max_index]
+            xs = tmp["x"].values
+            ys = tmp["y"].values
 
-                interp_ys = np.interp(rel_xs, xs - ref_position, ys)
-                interp_ys = interp_ys * (interp_ys > threshold)
+            interp_ys = np.interp(rel_xs, xs - ref_position, ys)
+            interp_ys = interp_ys * (interp_ys > threshold)
 
-                exp_data_query = config["asap_squaredfilterqueryexpdata"]
-                if exp_data_query.strip() and eval(exp_data_query):
-                    continue
+            exp_data_query = config["asap_squaredfilterqueryexpdata"]
+            if exp_data_query.strip() and eval(exp_data_query):
+                continue
 
-                n_lines += 1
-                tot_ys *= interp_ys
+            log_total_calc_intensity += np.log10(ref_intensity)
+            n_lines += 1
+            tot_ys *= interp_ys
 
-            if tot_ys.max():
-                asap2_ys *= tot_ys / tot_ys.max()
+            ys_max = tot_ys.max()
+            if ys_max:
+                tot_ys /= ys_max
+                log_y_max += np.log10(ys_max)
 
-            if config["asap_assigntransitions"]:
-                for x, *qns in possible_transitions[["x"] + qn_labels].values:
-                    assignments.append((x, +1, *qns))
-
-        ys_max = asap2_ys.max()
-        if ys_max > 0:
-            asap2_ys /= ys_max
-        self.ax.plot(rel_xs, asap2_ys, color=config["color_exp"])
+        self.ax.plot(rel_xs, tot_ys, color=config["color_exp"])
         if config["asap_squaredplotlog"]:
             self.ax.set_yscale("log")
-        self.assignments = assignments
-        self.data = np.vstack((rel_xs, asap2_ys)).T
+
+        self.data = np.vstack((rel_xs, tot_ys)).T
         self.drawplot.emit()
+
+        for x, *qns in cat_df[["x"] + qn_labels].values:
+            assignments.append((x, +1, *qns))
+        self.assignments = assignments
+
+        if n_lines and not (np.isinf(log_y_max) or np.isinf(log_total_calc_intensity)):
+            tmp = log_y_max - log_total_calc_intensity
+            tmp = np.power(10, tmp / n_lines)
+            average_exp_cat_ratio = tmp
+            average_exp_cat_ratio_str = (
+                f"Average exp/cat ratio is {average_exp_cat_ratio:.2e}."
+            )
+        else:
+            average_exp_cat_ratio = 0
+            average_exp_cat_ratio_str = "Average exp/cat ratio could not be calculated."
+
         notify_info.emit(
-            f"Cross-correlation was calculated for a total of {n_lines} lines."
+            f"Cross-correlation was calculated for a total of {n_lines} lines. {average_exp_cat_ratio_str}"
         )
 
     def assign_asap_squared(self):
@@ -11184,7 +11212,6 @@ class ASAPSquaredWindow(EQDockWidget):
                 notify_info.emit(
                     f"The following parameters were determined: \n{popt=}\n{perr=}"
                 )
-            # @Luis: Retrieve here the FWHM of the lineshape
         except Exception as E:
             self.fitcurve = None
             self.fitline = None
