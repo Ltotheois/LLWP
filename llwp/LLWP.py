@@ -861,6 +861,56 @@ class QThread(QThread):
             raise
 
 
+class NTimesBehavior(QObject):
+    def __init__(self, widget):
+        super().__init__(widget)
+        self.widget = widget
+
+        widget._custom_behavior = self
+        widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        widget.customContextMenuRequested.connect(self.show_context_menu)
+        widget.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.MouseButtonPress:
+            print(f"{event.button() == Qt.MouseButton.LeftButton =}")
+            print(f"{event.modifiers() & Qt.KeyboardModifier.AltModifier =}")
+            if (
+                event.button() == Qt.MouseButton.LeftButton
+                and event.modifiers() & Qt.KeyboardModifier.AltModifier
+            ):
+                i, ok = QInputDialog.getInt(self.widget, "Repat how many times", "N: ")
+                if not ok:
+                    return True
+
+                for _ in range(i):
+                    self.widget.clicked.emit()
+                return True
+
+        return super().eventFilter(obj, event)
+
+    def show_context_menu(self, pos):
+        menu = QMenu(self.widget)
+
+        self._menu_actions = {}
+        for i in (5, 10, 20, "N"):
+            action = menu.addAction(f"{i} times")
+            self._menu_actions[action] = i
+
+        action = menu.exec(self.widget.mapToGlobal(pos))
+        i = self._menu_actions.get(action, None)
+
+        if i is None:
+            return
+        elif i == "N":
+            i, ok = QInputDialog.getInt(self.widget, "Repat how many times", "N: ")
+            if not ok:
+                return
+
+        for _ in range(i):
+            self.widget.clicked.emit()
+
+
 class QTableWidget(QTableWidget):
     def keyPressEvent(self, event):
         if not csv_copypaste(self, event):
@@ -5849,10 +5899,18 @@ class SeriesSelector(QWidget):
         ]
 
         self.incqns = QQ(
-            QPushButton, text="Inc", change=lambda x: self.incdecqns(+1), width=40
+            QPushButton,
+            text="Inc",
+            change=lambda x: self.incdecqns(+1),
+            width=40,
+            ntimes=True,
         )
         self.decqns = QQ(
-            QPushButton, text="Dec", change=lambda x: self.incdecqns(-1), width=40
+            QPushButton,
+            text="Dec",
+            change=lambda x: self.incdecqns(-1),
+            width=40,
+            ntimes=True,
         )
 
         self.togglediff = QQ(
@@ -5918,6 +5976,7 @@ class SeriesSelector(QWidget):
             tmp_button = QQ(
                 QToolButton,
                 text=key,
+                ntimes=True,
                 change=lambda _, key=key: self.change_qns_action(key),
             )
             tmp_layout.addWidget(tmp_button)
@@ -9249,6 +9308,8 @@ def QQ(widgetclass, config_key=None, **kwargs):
     if "changes" in kwargs:
         for change in kwargs["changes"]:
             changer(change)
+    if kwargs.get("ntimes"):
+        NTimesBehavior(widget)
 
     return widget
 
@@ -9467,10 +9528,18 @@ class LevelSelector(SeriesSelector):
         ]
 
         self.incqns = QQ(
-            QPushButton, text="Inc", change=lambda x: self.incdecqns(+1), width=40
+            QPushButton,
+            text="Inc",
+            change=lambda x: self.incdecqns(+1),
+            width=40,
+            ntimes=True,
         )
         self.decqns = QQ(
-            QPushButton, text="Dec", change=lambda x: self.incdecqns(-1), width=40
+            QPushButton,
+            text="Dec",
+            change=lambda x: self.incdecqns(-1),
+            width=40,
+            ntimes=True,
         )
 
         self.togglediff = QQ(
@@ -9602,6 +9671,7 @@ class LevelSelector(SeriesSelector):
             tmp_button = QQ(
                 QToolButton,
                 text=key,
+                ntimes=True,
                 change=lambda _, key=key: self.change_qns_action(key),
             )
             self.custom_buttons_layout.addWidget(tmp_button)
