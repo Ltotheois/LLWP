@@ -19,6 +19,11 @@ classifiers = [
 ]
 keywords = ["LLWP", "Loomis-Wood Plots", "Spectroscopy"]
 
+[project.optional-dependencies]
+dev = [
+    "ruff",
+]
+
 [project.urls]
 "Homepage" = "https://llwp.astro.uni-koeln.de/"
 
