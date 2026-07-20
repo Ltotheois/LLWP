@@ -4576,7 +4576,7 @@ class QNsDialog(QDialog):
             currRowCount = table.rowCount()
             table.insertRow(currRowCount)
             for j, col in enumerate(cols):
-                val = f"{row[col]:{config["flag_xformatfloat"]}}".rstrip("0").rstrip(
+                val = f"{row[col]:{config['flag_xformatfloat']}}".rstrip("0").rstrip(
                     "."
                 )
                 table.setItem(currRowCount, j + 1, QTableWidgetItem(val))
@@ -7767,16 +7767,16 @@ class BlendedLinesWindow(EQDockWidget):
                 ),
             )
             table.setItem(
-                currRowCount, 1, QTableWidgetItem(f"{x:{config["flag_xformatfloat"]}}")
+                currRowCount, 1, QTableWidgetItem(f"{x:{config['flag_xformatfloat']}}")
             )
             table.setItem(
-                currRowCount, 2, QTableWidgetItem(f"{y:{config["flag_xformatfloat"]}}")
+                currRowCount, 2, QTableWidgetItem(f"{y:{config['flag_xformatfloat']}}")
             )
             table.setItem(
-                currRowCount, 3, QTableWidgetItem(f"{wg:{config["flag_xformatfloat"]}}")
+                currRowCount, 3, QTableWidgetItem(f"{wg:{config['flag_xformatfloat']}}")
             )
             table.setItem(
-                currRowCount, 4, QTableWidgetItem(f"{wl:{config["flag_xformatfloat"]}}")
+                currRowCount, 4, QTableWidgetItem(f"{wl:{config['flag_xformatfloat']}}")
             )
             table.setCellWidget(
                 currRowCount,
@@ -8184,12 +8184,12 @@ class SeriesfinderWindow(EQDockWidget):
             table.setItem(
                 currRowCount,
                 1,
-                QTableWidgetItem(f"{row['y']:{config["flag_xformatfloat"]}}"),
+                QTableWidgetItem(f"{row['y']:{config['flag_xformatfloat']}}"),
             )
             table.setItem(
                 currRowCount,
                 2,
-                QTableWidgetItem(f"{row['x']:{config["flag_xformatfloat"]}}"),
+                QTableWidgetItem(f"{row['x']:{config['flag_xformatfloat']}}"),
             )
 
             for i, column in enumerate(qns_visible):
@@ -8658,10 +8658,10 @@ class PeakfinderWindow(EQDockWidget):
             currRowCount = self.table.rowCount()
             self.table.insertRow(currRowCount)
             self.table.setItem(
-                currRowCount, 0, QTableWidgetItem(f"{x:{config["flag_xformatfloat"]}}")
+                currRowCount, 0, QTableWidgetItem(f"{x:{config['flag_xformatfloat']}}")
             )
             self.table.setItem(
-                currRowCount, 1, QTableWidgetItem(f"{y:{config["flag_xformatfloat"]}}")
+                currRowCount, 1, QTableWidgetItem(f"{y:{config['flag_xformatfloat']}}")
             )
         self.table.resizeColumnsToContents()
         self.table.setHidden(False)
