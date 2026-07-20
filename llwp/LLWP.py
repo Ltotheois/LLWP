@@ -930,8 +930,6 @@ class NTimesBehavior(QObject):
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Type.MouseButtonPress:
-            print(f"{event.button() == Qt.MouseButton.LeftButton =}")
-            print(f"{event.modifiers() & Qt.KeyboardModifier.AltModifier =}")
             if (
                 event.button() == Qt.MouseButton.LeftButton
                 and event.modifiers() & Qt.KeyboardModifier.AltModifier
