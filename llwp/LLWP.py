@@ -4,6 +4,8 @@
 # Author: Luis Bonah
 # Description: Loomis-Wood Plot Software for Assigning experimental Spectra to Quantum Numbers
 
+# ruff: noqa: E402
+
 CREDITSSTRING = """Made by Luis Bonah
 
 As this programs GUI is based on PyQt6, which is GNU GPL v3 licensed, this program is also licensed under GNU GPL v3 (See the bottom paragraph).
@@ -53,9 +55,64 @@ import pyckett
 from functools import lru_cache
 from scipy import optimize, special, signal
 
-from PyQt6.QtCore import *
-from PyQt6.QtWidgets import *
-from PyQt6.QtGui import *
+from PyQt6.QtCore import (
+    pyqtSignal,
+    Qt,
+    QAbstractTableModel,
+    QEvent,
+    QFileSystemWatcher,
+    QLocale,
+    QObject,
+    QPoint,
+    QThread,
+    QTimer,
+)
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QAbstractSpinBox,
+    QApplication,
+    QCheckBox,
+    QColorDialog,
+    QComboBox,
+    QCompleter,
+    QDialog,
+    QDialogButtonBox,
+    QDockWidget,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMenu,
+    QPushButton,
+    QPlainTextEdit,
+    QWidget,
+    QScrollArea,
+    QSpinBox,
+    QStatusBar,
+    QTableView,
+    QTableWidget,
+    QTabWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QToolBox,
+    QToolButton,
+    QVBoxLayout,
+)
+from PyQt6.QtGui import (
+    QAction,
+    QColor,
+    QCursor,
+    QIcon,
+    QShortcut,
+    QTextCursor,
+    QValidator,
+)
 
 import matplotlib
 from matplotlib.figure import Figure
@@ -89,7 +146,7 @@ def status_d(func):
 
         try:
             return func(*args, **kwargs)
-        except Exception as E:
+        except Exception:
             raise
         finally:
             tmp = mw.status_counter.decrease()
@@ -396,11 +453,11 @@ class Config(dict):
     def callback(self, args):
         key, value, widget = args
         if widget:
-            callbacks = self.callbacks.query(f"key == @key and widget != @widget")[
+            callbacks = self.callbacks.query("key == @key and widget != @widget")[
                 "function"
             ].values
         else:
-            callbacks = self.callbacks.query(f"key == @key")["function"].values
+            callbacks = self.callbacks.query("key == @key")["function"].values
 
         counter_value = self._group_callbacks_counter.get_value()
         if counter_value:
@@ -448,13 +505,13 @@ class Config(dict):
                         class_ = self.initial_values[fullkey][1]
                         if class_ in (dict, list, tuple):
                             value = json.loads(value)
-                        elif class_ == bool:
+                        elif class_ is bool:
                             value = True if value in ["True", "1"] else False
-                        elif class_ == str:
+                        elif class_ is str:
                             value = value.encode("utf-8").decode("unicode_escape")
                         value = class_(value)
                         self[fullkey] = value
-                    except Exception as E:
+                    except Exception:
                         message = f"The value for the option '{fullkey}' from the option file was not understood."
                         self.messages.append(message)
                         print(message)
@@ -484,9 +541,9 @@ class Config(dict):
             category = category.capitalize()
             if category not in output_dict:
                 output_dict[category] = {}
-            if type(value) in (dict, list, tuple):
+            if isinstance(value, (dict, list, tuple)):
                 value = json.dumps(value)
-            elif type(value) == str:
+            elif isinstance(value, str):
                 value = value.encode("unicode_escape").decode("utf-8")
 
             output_dict[category][name] = value
@@ -757,7 +814,7 @@ class PlotWidget(QWidget):
             center -= width / 4
         elif dir == "sright":
             center += width / 4
-        elif dir == "wheel" and factor != None:
+        elif dir == "wheel" and factor is not None:
             width *= factor
 
         self.xrange = center - width / 2, center + width / 2
@@ -855,9 +912,9 @@ class QThread(QThread):
                 self.thread_id = threading.current_thread().ident
                 self.active_runnables[self.function] = self.thread_id
             self.function(*self.args, **self.kwargs, thread=self)
-        except EarlyReturnError as E:
+        except EarlyReturnError:
             pass
-        except Exception as E:
+        except Exception:
             raise
 
 
@@ -929,7 +986,7 @@ class QSpinBox(QSpinBox):
         # AdaptiveDecimalStepType is not implemented in earlier versions of PyQt5
         try:
             self.setStepType(QAbstractSpinBox.StepType.AdaptiveDecimalStepType)
-        except:
+        except Exception:
             pass
 
     def setSingleStep(self, value):
@@ -942,8 +999,8 @@ class QSpinBox(QSpinBox):
         return super().setValue(value)
 
     def setRange(self, min, max):
-        min = min if not min is None else -2147483647
-        max = max if not max is None else +2147483647
+        min = min if min is not None else -2147483647
+        max = max if max is not None else +2147483647
         return super().setRange(min, max)
 
 
@@ -954,7 +1011,7 @@ class QDoubleSpinBox(QDoubleSpinBox):
         # AdaptiveDecimalStepType is not implemented in earlier versions of PyQt5
         try:
             self.setStepType(QAbstractSpinBox.StepType.AdaptiveDecimalStepType)
-        except:
+        except Exception:
             pass
 
     def setSingleStep(self, value):
@@ -971,8 +1028,8 @@ class QDoubleSpinBox(QDoubleSpinBox):
         return np.float64(text)
 
     def setRange(self, min, max):
-        min = min if not min is None else -np.inf
-        max = max if not max is None else +np.inf
+        min = min if min is not None else -np.inf
+        max = max if max is not None else +np.inf
         return super().setRange(min, max)
 
     def validate(self, text, position):
@@ -1002,7 +1059,7 @@ class QDoubleSpinBoxFullPrec(QDoubleSpinBox):
         # AdaptiveDecimalStepType is not implemented in earlier versions of PyQt5
         try:
             self.setStepType(QAbstractSpinBox.StepType.AdaptiveDecimalStepType)
-        except:
+        except Exception:
             pass
 
     def textFromValue(self, value):
@@ -1315,7 +1372,6 @@ class File:
     @status_d
     def load_file(self, thread=None):
         with self.sort_df_counter:
-
             self.check_file()
             data = self.load_file_core()
 
@@ -1567,10 +1623,6 @@ class File:
                 )
                 cls.clean_up_data()
 
-                # Apply color
-                colors = [file.color for file in files]
-                color_queries = [file.color_query for file in files]
-
                 for file in files:
                     if not (file.color == default_color and not file.color_query):
                         file.apply_color()
@@ -1587,7 +1639,7 @@ class File:
             cls.clear_caches()
 
         if len(exceptions) == 0:
-            notify_info.emit(f"Successfully loaded all files.")
+            notify_info.emit("Successfully loaded all files.")
         else:
             error_string = "\n".join(
                 f"{file}: {error}" for file, error in exceptions.items()
@@ -1600,7 +1652,7 @@ class File:
     def add_files_dialog():
         files = QFileDialog.getOpenFileNames(
             None,
-            f"Choose File(s)",
+            "Choose File(s)",
         )[0]
         files_by_type = File.sort_files_by_type(files)
         File.add_multiple_files_by_type(files_by_type)
@@ -1716,7 +1768,7 @@ class File:
     @classmethod
     def gui_change_color_all(cls, argument):
         dcolor = config[cls.default_color_key]
-        if type(argument) == str:
+        if isinstance(argument, str):
             color = argument
         else:
             color = QColorDialog.getColor(
@@ -1743,7 +1795,7 @@ class File:
             color_picker.setStyleSheet(f"background-color: {Color.rgbt_to_trgb(color)}")
 
     def gui_change_color(self, argument):
-        if type(argument) == str:
+        if isinstance(argument, str):
             color = argument
         else:
             color = QColorDialog.getColor(
@@ -1903,7 +1955,7 @@ class File:
 
     def delete(self):
         # Delete from Filewatcher
-        resp = self.files_watcher.removePath(self.filename_abs)
+        self.files_watcher.removePath(self.filename_abs)
 
         # Delete row from files window
         for widget in self.gui_widgets.values():
@@ -1977,7 +2029,7 @@ class CatFile(File):
         if not len(df):
             return
 
-        qnu_labels = [f"qnu{i+1}" for i in range(N_QNS)]
+        qnu_labels = [f"qnu{i + 1}" for i in range(N_QNS)]
         noq = len(qnu_labels)
         for i, qnu_label in enumerate(qnu_labels):
             unique_values = df[qnu_label].unique()
@@ -2160,7 +2212,7 @@ class NewAssignments(LinFile):
         self.new_assignments_df = pd.concat((self.new_assignments_df, new_rows))
         if config["flag_keeponlylastassignment"]:
             subset = [
-                f"qn{ul}{i+1}" for ul in "ul" for i in range(config["series_qns"])
+                f"qn{ul}{i + 1}" for ul in "ul" for i in range(config["series_qns"])
             ]
             self.new_assignments_df = self.new_assignments_df.drop_duplicates(
                 subset=subset, keep="last", ignore_index=True
@@ -2667,8 +2719,8 @@ class LWPAx:
                 color = config["color_lin"]
 
             noq = config["series_qns"]
-            qnus = [f"qnu{i+1}" for i in range(noq)]
-            qnls = [f"qnl{i+1}" for i in range(noq)]
+            qnus = [f"qnu{i + 1}" for i in range(noq)]
+            qnls = [f"qnl{i + 1}" for i in range(noq)]
 
             qnus_string = ",".join([f"{qns_dict[qn]}" for qn in qnus if qn in qns_dict])
             qnls_string = ",".join([f"{qns_dict[qn]}" for qn in qnls if qn in qns_dict])
@@ -2677,7 +2729,7 @@ class LWPAx:
         else:
             qnstring = ""
             qns_dict = {
-                f"qn{ul}{i+1}": 0 for ul in "ul" for i in range(config["series_qns"])
+                f"qn{ul}{i + 1}": 0 for ul in "ul" for i in range(config["series_qns"])
             }
 
         width = self.xrange[1] - self.xrange[0]
@@ -2744,15 +2796,17 @@ class LWPAx:
         qns_dict = (
             {}
             if not complete
-            else {f"qn{ul}{i+1}": pyckett.SENTINEL for ul in "ul" for i in range(N_QNS)}
+            else {
+                f"qn{ul}{i + 1}": pyckett.SENTINEL for ul in "ul" for i in range(N_QNS)
+            }
         )
         if self.qns is None:
             return qns_dict
 
         qnus, qnls = self.qns
         for i, (qnu, qnl) in enumerate(zip(qnus, qnls)):
-            qns_dict[f"qnu{i+1}"] = qnu
-            qns_dict[f"qnl{i+1}"] = qnl
+            qns_dict[f"qnu{i + 1}"] = qnu
+            qns_dict[f"qnl{i + 1}"] = qnl
         return qns_dict
 
     @classmethod
@@ -2812,7 +2866,7 @@ class LWPAx:
             raise GUIAbortedError("No Experimental Indices available.")
 
         df = ExpFile.df.iloc[indices_exp[0] : indices_exp[1]]
-        df = df.query(f"(visible) and x < @xmax and x > @xmin").copy()
+        df = df.query("(visible) and x < @xmax and x > @xmin").copy()
 
         exp_xs, exp_ys = df["x"].to_numpy(), df["y"].to_numpy()
         fit_xs = np.linspace(xmin, xmax, config["fit_xpoints"])
@@ -2880,7 +2934,7 @@ class LWPAx:
 
             if len(tmp_cat):
                 y_at_xpre = tmp_cat["y"].values[0]
-                min_y_value = y_at_xpre * config["series_blendminrelratio"]
+                min_y_value = y_at_xpre * config["series_blendminrelratio"]  # noqa: F841
                 entries = entries.query("y >= @min_y_value")
 
         if len(entries) < 2:
@@ -2903,12 +2957,12 @@ class LWPAx:
                 }
 
                 for i in range(noq):
-                    new_assignments[f"qnu{i+1}"] = entries[f"qnu{i+1}"]
-                    new_assignments[f"qnl{i+1}"] = entries[f"qnl{i+1}"]
+                    new_assignments[f"qnu{i + 1}"] = entries[f"qnu{i + 1}"]
+                    new_assignments[f"qnl{i + 1}"] = entries[f"qnl{i + 1}"]
 
                 for i in range(noq, N_QNS):
-                    new_assignments[f"qnu{i+1}"] = pyckett.SENTINEL
-                    new_assignments[f"qnl{i+1}"] = pyckett.SENTINEL
+                    new_assignments[f"qnu{i + 1}"] = pyckett.SENTINEL
+                    new_assignments[f"qnl{i + 1}"] = pyckett.SENTINEL
 
                 NewAssignments.get_instance().add_rows(new_assignments)
                 return True
@@ -3204,8 +3258,8 @@ class LWPWidget(QGroupBox):
             i_rows, i_cols = np.indices((n_rows, n_cols))
             vars = {"x": positions, "w": width_value, "i_row": i_rows, "i_col": i_cols}
             for i in range(n_qns):
-                vars[f"qnu{i+1}"] = qns[:, :, 0, i]
-                vars[f"qnl{i+1}"] = qns[:, :, 1, i]
+                vars[f"qnu{i + 1}"] = qns[:, :, 0, i]
+                vars[f"qnl{i + 1}"] = qns[:, :, 1, i]
 
             widths = eval(width_expr_comp, vars)
 
@@ -3216,8 +3270,8 @@ class LWPWidget(QGroupBox):
             i_rows, i_cols = np.indices((n_rows, n_cols))
             vars = {"x": positions, "o": offset_value, "i_row": i_rows, "i_col": i_cols}
             for i in range(n_qns):
-                vars[f"qnu{i+1}"] = qns[:, :, 0, i]
-                vars[f"qnl{i+1}"] = qns[:, :, 1, i]
+                vars[f"qnu{i + 1}"] = qns[:, :, 0, i]
+                vars[f"qnl{i + 1}"] = qns[:, :, 1, i]
 
             offsets = eval(offset_expr_comp, vars)
 
@@ -3354,7 +3408,7 @@ class Menu:
         ]
 
         for i, view_action in enumerate(view_actions):
-            view_action.setShortcut(f"Shift+{i+2}")
+            view_action.setShortcut(f"Shift+{i + 2}")
 
         modules_actions = [
             ResidualsWindow.instance.toggleViewAction(),
@@ -3367,7 +3421,7 @@ class Menu:
         ]
 
         for i, modules_action in enumerate(modules_actions):
-            modules_action.setShortcut(f"Ctrl+{i+1}")
+            modules_action.setShortcut(f"Ctrl+{i + 1}")
 
         fitfunction_menu = QMenu("Choose Fit Function", parent=parent)
         self.fitfunction_actions = {}
@@ -3375,7 +3429,10 @@ class Menu:
         current_method = config["fit_fitmethod"]
         for method in LWPAx.fit_methods:
             is_checked = method == current_method
-            callback = lambda _, method=method: self.set_fitmethod_gui(method)
+
+            def callback(_, method=method):
+                return self.set_fitmethod_gui(method)
+
             self.fitfunction_actions[method] = QQ(
                 QAction,
                 parent=parent,
@@ -3615,7 +3672,6 @@ class MainWindow(QMainWindow):
             for folder in possible_folders:
                 iconpath = os.path.join(folder, "LLWP.svg")
                 if os.path.isfile(iconpath):
-                    icon = QIcon(iconpath)
                     break
 
             # Make LLWP appear separate from python scripts in taskbar
@@ -3623,7 +3679,7 @@ class MainWindow(QMainWindow):
             import ctypes
 
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_TAG)
-        except Exception as E:
+        except Exception:
             pass
 
     def create_gui_components(self):
@@ -3841,7 +3897,7 @@ class NotificationsBox(QScrollArea):
         self.setFixedWidth(self.width_)
 
         self.setStyleSheet(
-            f"""
+            """
 			background-color: transparent;
 		"""
         )
@@ -4072,7 +4128,7 @@ class AssignBlendsDialog(QDialog):
         self.table = QTableWidget()
         self.cols = (
             ["x", "y", "dist"]
-            + [f"qn{ul}{i+1}" for ul in ("u", "l") for i in range(N_QNS)]
+            + [f"qn{ul}{i + 1}" for ul in ("u", "l") for i in range(N_QNS)]
             + ["filename"]
         )
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -4080,7 +4136,7 @@ class AssignBlendsDialog(QDialog):
         self.table.setColumnCount(len(self.cols) + 1)
         self.table.setHorizontalHeaderLabels(
             ["Y/N", "x", "log. y", "Dist"]
-            + [f"{ul}{i+1}" for ul in ("U", "L") for i in range(N_QNS)]
+            + [f"{ul}{i + 1}" for ul in ("U", "L") for i in range(N_QNS)]
             + ["Filename"]
         )
         layout.addWidget(self.table)
@@ -4148,12 +4204,12 @@ class AssignBlendsDialog(QDialog):
         }
 
         for i in range(self.noq):
-            new_assignments[f"qnu{i+1}"] = selected_rows[f"qnu{i+1}"]
-            new_assignments[f"qnl{i+1}"] = selected_rows[f"qnl{i+1}"]
+            new_assignments[f"qnu{i + 1}"] = selected_rows[f"qnu{i + 1}"]
+            new_assignments[f"qnl{i + 1}"] = selected_rows[f"qnl{i + 1}"]
 
         for i in range(self.noq, N_QNS):
-            new_assignments[f"qnu{i+1}"] = pyckett.SENTINEL
-            new_assignments[f"qnl{i+1}"] = pyckett.SENTINEL
+            new_assignments[f"qnu{i + 1}"] = pyckett.SENTINEL
+            new_assignments[f"qnl{i + 1}"] = pyckett.SENTINEL
 
         NewAssignments.get_instance().add_rows(new_assignments)
 
@@ -4464,7 +4520,7 @@ class QNsDialog(QDialog):
         self.__class__._instance = self
 
         noq = config["series_qns"]
-        visible_qn_labels = [f"qn{ul}{n+1}" for ul in ("u", "l") for n in range(noq)]
+        visible_qn_labels = [f"qn{ul}{n + 1}" for ul in ("u", "l") for n in range(noq)]
         self.result_ = {key: pyckett.SENTINEL for key in visible_qn_labels}
 
         self.setWindowTitle(f"Choose QNs for transition at {frequency}")
@@ -4486,16 +4542,15 @@ class QNsDialog(QDialog):
         for i in range(noq):
             widget = QQ(QSpinBox, value=0, range=(0, None))
             qnslayout.addWidget(widget, 1, i)
-            self.sbs[f"qnu{i+1}"] = widget
+            self.sbs[f"qnu{i + 1}"] = widget
 
         for i in range(noq):
             widget = QQ(QSpinBox, value=0, range=(0, None))
             qnslayout.addWidget(widget, 2, i)
-            self.sbs[f"qnl{i+1}"] = widget
+            self.sbs[f"qnl{i + 1}"] = widget
 
         for i in range(noq):
-            lab = QLabel(f"QN {i+1}")
-            qnslayout.addWidget(QQ(QLabel, text=f"QN{i+1}"), 0, i)
+            qnslayout.addWidget(QQ(QLabel, text=f"QN{i + 1}"), 0, i)
 
         qnslayout.setColumnStretch(noq + 1, 1)
         layout.addLayout(qnslayout)
@@ -4521,7 +4576,7 @@ class QNsDialog(QDialog):
             currRowCount = table.rowCount()
             table.insertRow(currRowCount)
             for j, col in enumerate(cols):
-                val = f'{row[col]:{config["flag_xformatfloat"]}}'.rstrip("0").rstrip(
+                val = f"{row[col]:{config["flag_xformatfloat"]}}".rstrip("0").rstrip(
                     "."
                 )
                 table.setItem(currRowCount, j + 1, QTableWidgetItem(val))
@@ -4599,7 +4654,7 @@ class AssignAllDialog(QDialog):
             self.axes_to_skip = set()
 
         n_rows = config["plot_rows"]
-        n_qns = self.noq = config["series_qns"]
+        self.noq = config["series_qns"]
 
         fit_width = config["assignall_fitwidth"]
         plot_width = config["assignall_plotwidth"]
@@ -4611,7 +4666,6 @@ class AssignAllDialog(QDialog):
         offset = config["fit_offset"]
 
         asap_axes = mainwindow.lwpwidget.lwpaxes[:, self.i_col]
-        qn_labels = [f"qn{ul}{i+1}" for ul in ("u", "l") for i in range(n_qns)]
         positions = np.zeros(asap_axes.shape)
         qns = []
         for asap_ax in asap_axes:
@@ -4625,7 +4679,7 @@ class AssignAllDialog(QDialog):
                 continue
 
             eqy_query = " and ".join(
-                [f"(qn{i+1} == {qn})" for i, qn in enumerate(qnus)]
+                [f"(qn{i + 1} == {qn})" for i, qn in enumerate(qnus)]
             )
             egy_offsets = ASAPAx.egy_df.query(eqy_query)["egy"].to_numpy()
             if len(egy_offsets) == 1:
@@ -4633,7 +4687,10 @@ class AssignAllDialog(QDialog):
 
             # We have to get the energy levels here as the upper levels, as this is how they are defined in the *lin format
             query = " and ".join(
-                [f"(qnu{i+1} == {qn}) and (qnl{i+1} == 0)" for i, qn in enumerate(qnus)]
+                [
+                    f"(qnu{i + 1} == {qn}) and (qnl{i + 1} == 0)"
+                    for i, qn in enumerate(qnus)
+                ]
             )
             vals = LinFile.query_c(query)["x"].to_numpy()
 
@@ -4755,7 +4812,7 @@ class AssignAllDialog(QDialog):
 
                 for i, entry in entries.iterrows():
                     row_qns = np.array(
-                        [[entry[f"qn{ul}{i+1}"] for i in range(noq)] for ul in "ul"]
+                        [[entry[f"qn{ul}{i + 1}"] for i in range(noq)] for ul in "ul"]
                     )
                     self.new_assignments.append(
                         {
@@ -4799,7 +4856,7 @@ class AssignAllDialog(QDialog):
         # - problem is: user will not check the assignments anymore
         # - current decision: users have to actually look at lineshapes for fitting them all
         positions, qns = refwidget.calc_references(n_rows, n_qns)
-        qn_labels = [f"qn{ul}{i+1}" for ul in ("u", "l") for i in range(n_qns)]
+        qn_labels = [f"qn{ul}{i + 1}" for ul in ("u", "l") for i in range(n_qns)]
 
         # Special case if we are limited to a certain *.lin file
         reference_states = ReferenceSeriesWindow.instance.get_state()
@@ -4917,13 +4974,13 @@ class AssignAllDialog(QDialog):
             if blendwidth and blendquery and check_blends:
                 qns_shape = row_qns.shape
                 row_qns_dict = {
-                    f"qn{ul}{i+1}": qn
+                    f"qn{ul}{i + 1}": qn
                     for qns, ul in zip(row_qns, "ul")
                     for i, qn in enumerate(qns)
                 }
                 for i in range(qns_shape[1], N_QNS):
-                    row_qns_dict[f"qnu{i+1}"] = pyckett.SENTINEL
-                    row_qns_dict[f"qnl{i+1}"] = pyckett.SENTINEL
+                    row_qns_dict[f"qnu{i + 1}"] = pyckett.SENTINEL
+                    row_qns_dict[f"qnl{i + 1}"] = pyckett.SENTINEL
 
                 xmin, xmax = xref - blendwidth, xref + blendwidth
                 entries = CatFile.get_data(xrange=(xmin, xmax)).copy()
@@ -4932,7 +4989,7 @@ class AssignAllDialog(QDialog):
 
                 for i, entry in entries.iterrows():
                     tmp_qns = [
-                        [entry[f"qn{ul}{i+1}"] for i in range(qns_shape[1])]
+                        [entry[f"qn{ul}{i + 1}"] for i in range(qns_shape[1])]
                         for ul in "ul"
                     ]
                     tmp_xref = entry["x"]
@@ -4973,7 +5030,7 @@ class AssignAllDialog(QDialog):
         self.setLayout(layout)
 
         self.fig = Figure(dpi=config["plot_dpi"])
-        cid = self.fig.canvas.mpl_connect("button_press_event", self.on_click)
+        self.cid = self.fig.canvas.mpl_connect("button_press_event", self.on_click)
 
         self.plotcanvas = FigureCanvas(self.fig)
         self.mpl_toolbar = NavigationToolbar2QT(self.plotcanvas, self)
@@ -5061,12 +5118,12 @@ class AssignAllDialog(QDialog):
         }
 
         for i in range(self.noq):
-            new_assignments[f"qnu{i+1}"] = qns[:, 0, i]
-            new_assignments[f"qnl{i+1}"] = qns[:, 1, i]
+            new_assignments[f"qnu{i + 1}"] = qns[:, 0, i]
+            new_assignments[f"qnl{i + 1}"] = qns[:, 1, i]
 
         for i in range(self.noq, N_QNS):
-            new_assignments[f"qnu{i+1}"] = pyckett.SENTINEL
-            new_assignments[f"qnl{i+1}"] = pyckett.SENTINEL
+            new_assignments[f"qnu{i + 1}"] = pyckett.SENTINEL
+            new_assignments[f"qnl{i + 1}"] = pyckett.SENTINEL
 
         NewAssignments.get_instance().add_rows(new_assignments)
 
@@ -5417,7 +5474,7 @@ class ReferenceSelector(QTabWidget):
         item, ok = QInputDialog.getItem(
             self,
             "Choose File",
-            f"Limit this series to the following file (the corresponding *.lin file is determined automatically):",
+            "Limit this series to the following file (the corresponding *.lin file is determined automatically):",
             options,
             current=current,
             editable=False,
@@ -5574,8 +5631,8 @@ class ReferenceSelector(QTabWidget):
         all_qns = []
         cat_df = CatFile.get_data()
 
-        qnu_labels = [f"qnu{i+1}" for i in range(n_qns)]
-        qnl_labels = [f"qnl{i+1}" for i in range(n_qns)]
+        qnu_labels = [f"qnu{i + 1}" for i in range(n_qns)]
+        qnl_labels = [f"qnl{i + 1}" for i in range(n_qns)]
 
         while True:
             last_J = current_level[0]
@@ -5643,14 +5700,14 @@ class ReferenceSelector(QTabWidget):
                     if normalizing_value is None:
                         normalizing_value = qnu // diff
                     conditions_incr.append(
-                        f"((qnu{i+1} - {qnu-normalizing_value*diff})/{diff})"
+                        f"((qnu{i + 1} - {qnu - normalizing_value * diff})/{diff})"
                     )
                     conditions_incr.append(
-                        f"((qnl{i+1} - {qnl-normalizing_value*diff})/{diff})"
+                        f"((qnl{i + 1} - {qnl - normalizing_value * diff})/{diff})"
                     )
                 else:
-                    conditions.append(f"(qnu{i+1} == {qnu})")
-                    conditions.append(f"(qnl{i+1} == {qnl})")
+                    conditions.append(f"(qnu{i + 1} == {qnu})")
+                    conditions.append(f"(qnl{i + 1} == {qnl})")
 
             if len(conditions_incr):
                 conditions.append(" == ".join(conditions_incr))
@@ -5672,8 +5729,8 @@ class ReferenceSelector(QTabWidget):
                 tmp_qnus, tmp_qnls = qnus + i_row * diffs, qnls + i_row * diffs
                 qns[i_row] = (tmp_qnus, tmp_qnls)
 
-                cond_upper = [f"(qnu{i+1} == {qn})" for i, qn in enumerate(tmp_qnus)]
-                cond_lower = [f"(qnl{i+1} == {qn})" for i, qn in enumerate(tmp_qnls)]
+                cond_upper = [f"(qnu{i + 1} == {qn})" for i, qn in enumerate(tmp_qnus)]
+                cond_lower = [f"(qnl{i + 1} == {qn})" for i, qn in enumerate(tmp_qnls)]
                 condition = " & ".join(cond_upper + cond_lower)
 
                 vals = cat_df.query(condition)["x"].to_numpy()
@@ -5726,7 +5783,7 @@ class ReferenceSelector(QTabWidget):
                         ]
                         for i in range(n_rows)
                     ]
-                except Exception as E:
+                except Exception:
                     notify_error.emit("The provided expression could not be evaluated.")
                     raise
 
@@ -5745,14 +5802,14 @@ class ReferenceSelector(QTabWidget):
                         if normalizing_value is None:
                             normalizing_value = qnu // diff
                         conditions_incr.append(
-                            f"((qnu{i+1} - {qnu-normalizing_value*diff})/{diff})"
+                            f"((qnu{i + 1} - {qnu - normalizing_value * diff})/{diff})"
                         )
                         conditions_incr.append(
-                            f"((qnl{i+1} - {qnl-normalizing_value*diff})/{diff})"
+                            f"((qnl{i + 1} - {qnl - normalizing_value * diff})/{diff})"
                         )
                     else:
-                        conditions.append(f"(qnu{i+1} == {qnu})")
-                        conditions.append(f"(qnl{i+1} == {qnl})")
+                        conditions.append(f"(qnu{i + 1} == {qnu})")
+                        conditions.append(f"(qnl{i + 1} == {qnl})")
 
                 if len(conditions_incr):
                     conditions.append(" == ".join(conditions_incr))
@@ -5761,7 +5818,9 @@ class ReferenceSelector(QTabWidget):
                 cat_df = CatFile.query_c(conditions)
 
                 # Get the exact predictions from prefiltered dataframe
-                qn_labels = [f"qn{ul}{i+1}" for ul in ("u", "l") for i in range(n_qns)]
+                qn_labels = [
+                    f"qn{ul}{i + 1}" for ul in ("u", "l") for i in range(n_qns)
+                ]
                 for i_row, row_qns in enumerate(rows_qns):
                     query = " and ".join(
                         [f"({label} == {qn})" for qn, label in zip(row_qns, qn_labels)]
@@ -5783,7 +5842,7 @@ class ReferenceSelector(QTabWidget):
                             )
                             for i in range(n_rows)
                         ]
-                    except Exception as E:
+                    except Exception:
                         notify_error.emit(
                             "The provided expression could not be evaluated."
                         )
@@ -5862,27 +5921,29 @@ class SeriesSelector(QWidget):
 
         layout = QGridLayout()
 
-        create_qn = lambda: QQ(
-            QSpinBox,
-            minWidth=60,
-            maxWidth=60,
-            range=(None, None),
-            visible=False,
-            singlestep=1,
-            change=lambda x: self.changed(),
-        )
+        def create_qn():
+            return QQ(
+                QSpinBox,
+                minWidth=60,
+                maxWidth=60,
+                range=(None, None),
+                visible=False,
+                singlestep=1,
+                change=lambda x: self.changed(),
+            )
 
         self.qnus = [create_qn() for _ in range(self.n_qns)]
         self.qnls = [create_qn() for _ in range(self.n_qns)]
 
-        create_widget = lambda widget, kwargs: QQ(
-            widget,
-            minWidth=40,
-            maxWidth=40,
-            visible=False,
-            change=lambda x: self.changed(),
-            **kwargs,
-        )
+        def create_widget(widget, kwargs):
+            return QQ(
+                widget,
+                minWidth=40,
+                maxWidth=40,
+                visible=False,
+                change=lambda x: self.changed(),
+                **kwargs,
+            )
 
         self.incr = [
             create_widget(QCheckBox, {"text": "Inc"}) for _ in range(self.n_qns)
@@ -6386,7 +6447,7 @@ class NewAssignmentsWindow(EQDockWidget):
         self.setWidget(mainwidget)
         mainwidget.setLayout(layout)
 
-        tooltip_append = "Append to file if checked or overwrite content if unchecked"
+        # tooltip_append = "Append to file if checked or overwrite content if unchecked"
         new_assignments = self.new_assignments = NewAssignments.get_instance()
 
         widgets = self.widgets = {
@@ -6430,7 +6491,9 @@ class NewAssignmentsWindow(EQDockWidget):
         widgets["error"].setVisible(config["fit_uncertainty_method"] == "Value")
 
         tmp = {
-            f"qn{UL.lower()}{i+1}": f"{UL}{i+1}" for UL in "UL" for i in range(N_QNS)
+            f"qn{UL.lower()}{i + 1}": f"{UL}{i + 1}"
+            for UL in "UL"
+            for i in range(N_QNS)
         }
         headers = {
             **tmp,
@@ -6739,8 +6802,8 @@ class CloseByLinesWindow(EQDockWidget):
                 continue
 
             for row in df.to_dict(orient="records"):
-                qnus = [row[f"qnu{i+1}"] for i in range(noq)]
-                qnls = [row[f"qnl{i+1}"] for i in range(noq)]
+                qnus = [row[f"qnu{i + 1}"] for i in range(noq)]
+                qnls = [row[f"qnl{i + 1}"] for i in range(noq)]
 
                 qnus_string = "".join(
                     [f"{qn:3.0f}" for qn in qnus if qn != pyckett.SENTINEL]
@@ -6770,7 +6833,7 @@ class CloseByLinesWindow(EQDockWidget):
         total_text = "<br>".join([x[1] for x in textrows])
         total_text = f"<pre>{total_text}</pre>"
         self.text_area.setHtml(total_text)
-        self.text_area.scrollToAnchor(f"anchor")
+        self.text_area.scrollToAnchor("anchor")
 
     @property
     def text_is_frozen(self):
@@ -6901,13 +6964,13 @@ class ConfigWindow(EQDockWidget):
                 pass
             elif converter in (dict, list, tuple):
                 value = json.loads(value)
-            elif converter == bool:
+            elif converter is bool:
                 value = True if value in ["True", "1"] else False
             else:
                 value = converter(value)
             config[key] = value
             oklab.setText("Good")
-        except Exception as E:
+        except Exception:
             oklab.setText("Bad")
 
 
@@ -7030,7 +7093,7 @@ class ResidualsWindow(EQDockWidget):
 
         noq = config["series_qns"]
         self.noq = noq
-        qns_visible = [f"qn{ul}{n+1}" for ul in ("u", "l") for n in range(noq)]
+        qns_visible = [f"qn{ul}{n + 1}" for ul in ("u", "l") for n in range(noq)]
         df = pd.merge(lin_df, cat_df, how="inner", on=qns_visible)
         df.rename(
             columns={
@@ -7068,7 +7131,7 @@ class ResidualsWindow(EQDockWidget):
         try:
             thread = self.plot_residuals_core()
             thread.wait()
-        except Exception as E:
+        except Exception:
             notify_warning.emit("There was an error in your Residuals window input")
         finally:
             self.fig.canvas.draw_idle()
@@ -7142,8 +7205,8 @@ class ResidualsWindow(EQDockWidget):
                 if len(tmp_transitions):
                     noq = self.noq
                 for i, row in tmp_transitions.iterrows():
-                    qnus = [row[f"qnu{n+1}"] for n in range(noq)]
-                    qnls = [row[f"qnl{n+1}"] for n in range(noq)]
+                    qnus = [row[f"qnu{n + 1}"] for n in range(noq)]
+                    qnls = [row[f"qnl{n + 1}"] for n in range(noq)]
                     text.append(
                         f"{', '.join(map(str, qnus))} ← {', '.join(map(str, qnls))}"
                     )
@@ -7401,14 +7464,15 @@ class BlendedLinesWindow(EQDockWidget):
         now = 2 if profile == "Voigt" else 1
         noa = 2 + now * (not fixedwidth)
 
-        fitfunction = lambda x, *args, fixedwidth=fixedwidth: self.fitfunction(
-            x, profile, derivative, polynomrank, *args, fixedwidth=fixedwidth
-        )
-        fitfunction_no_baseline = (
-            lambda x, *args, fixedwidth=fixedwidth: self.fitfunction(
+        def fitfunction(x, *args, fixedwidth=fixedwidth):
+            return self.fitfunction(
+                x, profile, derivative, polynomrank, *args, fixedwidth=fixedwidth
+            )
+
+        def fitfunction_no_baseline(x, *args, fixedwidth=fixedwidth):
+            return self.fitfunction(
                 x, profile, derivative, 0, *args, fixedwidth=fixedwidth
             )
-        )
 
         with plot_widget.plot_parts_lock:
             for part in plot_widget.plot_parts:
@@ -7492,7 +7556,7 @@ class BlendedLinesWindow(EQDockWidget):
                 popt, pcov = optimize.curve_fit(
                     fitfunction, exp_xs, exp_ys, p0=p0, bounds=bounds
                 )
-            except Exception as E:
+            except Exception:
                 popt, pcov = optimize.curve_fit(
                     fitfunction, exp_xs, exp_ys, p0=p0, bounds=bounds
                 )
@@ -7703,16 +7767,16 @@ class BlendedLinesWindow(EQDockWidget):
                 ),
             )
             table.setItem(
-                currRowCount, 1, QTableWidgetItem(f'{x:{config["flag_xformatfloat"]}}')
+                currRowCount, 1, QTableWidgetItem(f"{x:{config["flag_xformatfloat"]}}")
             )
             table.setItem(
-                currRowCount, 2, QTableWidgetItem(f'{y:{config["flag_xformatfloat"]}}')
+                currRowCount, 2, QTableWidgetItem(f"{y:{config["flag_xformatfloat"]}}")
             )
             table.setItem(
-                currRowCount, 3, QTableWidgetItem(f'{wg:{config["flag_xformatfloat"]}}')
+                currRowCount, 3, QTableWidgetItem(f"{wg:{config["flag_xformatfloat"]}}")
             )
             table.setItem(
-                currRowCount, 4, QTableWidgetItem(f'{wl:{config["flag_xformatfloat"]}}')
+                currRowCount, 4, QTableWidgetItem(f"{wl:{config["flag_xformatfloat"]}}")
             )
             table.setCellWidget(
                 currRowCount,
@@ -7760,13 +7824,13 @@ class BlendedLinesWindow(EQDockWidget):
                 json.dump(all_fits, file, indent=2)
             notify_info.emit(f"Saved the fit to the file {filename}.")
         else:
-            notify_info.emit(f"No fit values to be saved.")
+            notify_info.emit("No fit values to be saved.")
 
     def assign(self, x, error):
         index = self.plot_widget.index
         try:
             lwpax = mainwindow.lwpwidget.lwpaxes[index]
-        except IndexError as E:
+        except IndexError:
             message = "The reference ax is not existing anymore. Assigning is therefore not possible."
             notify_error.emit(message)
             raise GUIAbortedError(message)
@@ -7793,7 +7857,7 @@ class BlendedLinesWindow(EQDockWidget):
         index = self.plot_widget.index
         try:
             lwpax = mainwindow.lwpwidget.lwpaxes[index]
-        except IndexError as E:
+        except IndexError:
             message = "The reference ax is not existing anymore. Assigning is therefore not possible."
             notify_error.emit(message)
             raise GUIAbortedError(message)
@@ -7999,19 +8063,19 @@ class SeriesfinderWindow(EQDockWidget):
         tmp_condition = []
         if config["seriesfinder_atype"]:
             tmp_condition.append(
-                f"(abs(qnu2-qnl2) % 2 == 0 and abs(qnu3-qnl3) % 2 == 1)"
+                "(abs(qnu2-qnl2) % 2 == 0 and abs(qnu3-qnl3) % 2 == 1)"
             )
         if config["seriesfinder_btype"]:
             tmp_condition.append(
-                f"(abs(qnu2-qnl2) % 2 == 1 and abs(qnu3-qnl3) % 2 == 1)"
+                "(abs(qnu2-qnl2) % 2 == 1 and abs(qnu3-qnl3) % 2 == 1)"
             )
         if config["seriesfinder_ctype"]:
             tmp_condition.append(
-                f"(abs(qnu2-qnl2) % 2 == 1 and abs(qnu3-qnl3) % 2 == 0)"
+                "(abs(qnu2-qnl2) % 2 == 1 and abs(qnu3-qnl3) % 2 == 0)"
             )
         if config["seriesfinder_xtype"]:
             tmp_condition.append(
-                f"(abs(qnu2-qnl2) % 2 == 0 and abs(qnu3-qnl3) % 2 == 0)"
+                "(abs(qnu2-qnl2) % 2 == 0 and abs(qnu3-qnl3) % 2 == 0)"
             )
         if tmp_condition:
             condition.append(" or ".join(tmp_condition))
@@ -8030,8 +8094,10 @@ class SeriesfinderWindow(EQDockWidget):
 
         self.noq = noq = config["series_qns"]
 
-        qns_visible = [f"qn{ul}{n+1}" for ul in ("u", "l") for n in range(noq)]
-        qns_invisible = [f"qn{ul}{n+1}" for ul in ("u", "l") for n in range(noq, N_QNS)]
+        qns_visible = [f"qn{ul}{n + 1}" for ul in ("u", "l") for n in range(noq)]
+        qns_invisible = [
+            f"qn{ul}{n + 1}" for ul in ("u", "l") for n in range(noq, N_QNS)
+        ]
 
         if config["seriesfinder_onlyunassigned"]:
             tmp_lin_df = LinFile.get_data().copy()
@@ -8039,7 +8105,7 @@ class SeriesfinderWindow(EQDockWidget):
             tmp_lin_df.drop(columns=["x"] + qns_invisible, inplace=True)
 
             tmp_cat_df = pd.merge(tmp_cat_df, tmp_lin_df, how="outer", on=qns_visible)
-            tmp_cat_df = tmp_cat_df[tmp_cat_df.DROP != True]
+            tmp_cat_df = tmp_cat_df[not tmp_cat_df.DROP]
             unassigned = "without already assigned lines"
         else:
             unassigned = "with already assigned lines"
@@ -8063,18 +8129,20 @@ class SeriesfinderWindow(EQDockWidget):
 
             if normalizing_qn is not None:
                 tmp_cat_df["normalizing_value"] = (
-                    tmp_cat_df[f"qnu{i+1}"] // normalizing_diff
+                    tmp_cat_df[f"qnu{i + 1}"] // normalizing_diff
                 )
                 subset = []
                 for i, diff in enumerate(diffs):
-                    tmp_cat_df[f"norm_qnu{i+1}"] = (
-                        tmp_cat_df[f"qnu{i+1}"] - tmp_cat_df["normalizing_value"] * diff
+                    tmp_cat_df[f"norm_qnu{i + 1}"] = (
+                        tmp_cat_df[f"qnu{i + 1}"]
+                        - tmp_cat_df["normalizing_value"] * diff
                     )
-                    tmp_cat_df[f"norm_qnl{i+1}"] = (
-                        tmp_cat_df[f"qnl{i+1}"] - tmp_cat_df["normalizing_value"] * diff
+                    tmp_cat_df[f"norm_qnl{i + 1}"] = (
+                        tmp_cat_df[f"qnl{i + 1}"]
+                        - tmp_cat_df["normalizing_value"] * diff
                     )
-                    subset.append(f"norm_qnu{i+1}")
-                    subset.append(f"norm_qnl{i+1}")
+                    subset.append(f"norm_qnu{i + 1}")
+                    subset.append(f"norm_qnl{i + 1}")
 
                 tmp_cat_df["n_transitions"] = tmp_cat_df.groupby(subset)["y"].transform(
                     "count"
@@ -8116,12 +8184,12 @@ class SeriesfinderWindow(EQDockWidget):
             table.setItem(
                 currRowCount,
                 1,
-                QTableWidgetItem(f'{row["y"]:{config["flag_xformatfloat"]}}'),
+                QTableWidgetItem(f"{row['y']:{config["flag_xformatfloat"]}}"),
             )
             table.setItem(
                 currRowCount,
                 2,
-                QTableWidgetItem(f'{row["x"]:{config["flag_xformatfloat"]}}'),
+                QTableWidgetItem(f"{row['x']:{config["flag_xformatfloat"]}}"),
             )
 
             for i, column in enumerate(qns_visible):
@@ -8139,8 +8207,8 @@ class SeriesfinderWindow(EQDockWidget):
         self.outputTable.resizeColumnsToContents()
 
     def startHere(self, row):
-        qnus = [int(row[f"qnu{i+1}"]) for i in range(self.noq)]
-        qnls = [int(row[f"qnl{i+1}"]) for i in range(self.noq)]
+        qnus = [int(row[f"qnu{i + 1}"]) for i in range(self.noq)]
+        qnls = [int(row[f"qnl{i + 1}"]) for i in range(self.noq)]
 
         tab_widget = ReferenceSeriesWindow.instance.tab
         refwidget = tab_widget.widget(config["series_currenttab"])
@@ -8320,7 +8388,7 @@ class EnergyLevelsWindow(EQDockWidget):
                     y_range[0] - config["plot_ymargin"] * (y_range[1] - y_range[0]),
                     y_range[1] + config["plot_ymargin"] * (y_range[1] - y_range[0]),
                 )
-        except:
+        except Exception:
             notify_error.emit("There was an error in your Energy Levels window inputs")
             raise
         finally:
@@ -8337,7 +8405,7 @@ class EnergyLevelsWindow(EQDockWidget):
                 text = []
                 for i, row in tmp_levels.iterrows():
                     text.append(
-                        ",".join(str(int(row[f"qn{i+1}"])) for i in range(self.noq))
+                        ",".join(str(int(row[f"qn{i + 1}"])) for i in range(self.noq))
                     )
                 text = "\n".join(text)
                 self.annot.set_text(text)
@@ -8487,14 +8555,14 @@ class PeakfinderWindow(EQDockWidget):
             if key in config["peakfinder_kwargs"]:
                 value = config["peakfinder_kwargs"][key]
                 try:
-                    if type(value) in [tuple, list]:
+                    if isinstance(value, (tuple, list)):
                         input_min.setValue(value[0])
                         input_max.setValue(value[1])
                         input_type.setCurrentIndex(1)
                     else:
                         input_min.setValue(value)
                         input_type.setCurrentIndex(0)
-                except:
+                except Exception:
                     pass
             else:
                 input_type.setCurrentIndex(len(items) - 1)
@@ -8590,10 +8658,10 @@ class PeakfinderWindow(EQDockWidget):
             currRowCount = self.table.rowCount()
             self.table.insertRow(currRowCount)
             self.table.setItem(
-                currRowCount, 0, QTableWidgetItem(f'{x:{config["flag_xformatfloat"]}}')
+                currRowCount, 0, QTableWidgetItem(f"{x:{config["flag_xformatfloat"]}}")
             )
             self.table.setItem(
-                currRowCount, 1, QTableWidgetItem(f'{y:{config["flag_xformatfloat"]}}')
+                currRowCount, 1, QTableWidgetItem(f"{y:{config["flag_xformatfloat"]}}")
             )
         self.table.resizeColumnsToContents()
         self.table.setHidden(False)
@@ -8620,7 +8688,7 @@ class PeakfinderWindow(EQDockWidget):
         for idx in self.table.selectionModel().selectedIndexes():
             row_number = idx.row()
 
-        if type(row_number) == int and len(self.peaks) > row_number:
+        if isinstance(row_number, int) and len(self.peaks) > row_number:
             xmin, xmax = self.plot_widget.xrange
             width = xmax - xmin
             xcenter = self.peaks[row_number, 0]
@@ -8772,7 +8840,7 @@ class CmdWindow(EQDockWidget):
     @staticmethod
     @cmd_locked
     def run_pipe(index=None):
-        if index == None:
+        if index is None:
             index = config["cmd_current"]
 
         if len(config["cmd_commands"]) == 0:
@@ -8783,7 +8851,7 @@ class CmdWindow(EQDockWidget):
 
         title, command, exp_rr, cat_rr, lin_rr = config["cmd_commands"][index]
 
-        if command == None:
+        if command is None:
             notify_warning.emit(
                 "No Pipe command specified, therefore no Pipe process was started."
             )
@@ -8845,7 +8913,7 @@ def Lorentzian(derivative, x, x0, amp, fwhm):
         return [0 if i != x0 else np.inf for i in x]
 
     if derivative == 0:
-        ys = amp * gamma**2 / ((gamma**2 + (x - x0) ** 2))
+        ys = amp * gamma**2 / (gamma**2 + (x - x0) ** 2)
     elif derivative == 1:
         ys = (
             (-amp * gamma**3 * 16 / 9 * np.sqrt(3))
@@ -8876,22 +8944,28 @@ def Voigt(derivative, x, x0, amp, fwhm_gauss, fwhm_lorentz):
     w0 = special.wofz((1j * gamma) / (sigma * np.sqrt(2)))
 
     if derivative == 0:
-        tmp = lambda x, x0, wz, sigma, gamma: np.real(wz) / (sigma * np.sqrt(2 * np.pi))
+
+        def tmp(x, x0, wz, sigma, gamma):
+            return np.real(wz) / (sigma * np.sqrt(2 * np.pi))
     elif derivative == 1:
-        tmp = (
-            lambda x, x0, wz, sigma, gamma: 1
-            / (sigma**3 * np.sqrt(2 * np.pi))
-            * (gamma * np.imag(wz) - (x - x0) * np.real(wz))
-        )
-    elif derivative == 2:
-        tmp = (
-            lambda x, x0, wz, sigma, gamma: 1
-            / (sigma**5 * np.sqrt(2 * np.pi))
-            * (
-                gamma * (2 * (x - x0) * np.imag(wz) - sigma * np.sqrt(2 / np.pi))
-                + (gamma**2 + sigma**2 - (x - x0) ** 2) * np.real(wz)
+
+        def tmp(x, x0, wz, sigma, gamma):
+            return (
+                1
+                / (sigma**3 * np.sqrt(2 * np.pi))
+                * (gamma * np.imag(wz) - (x - x0) * np.real(wz))
             )
-        )
+    elif derivative == 2:
+
+        def tmp(x, x0, wz, sigma, gamma):
+            return (
+                1
+                / (sigma**5 * np.sqrt(2 * np.pi))
+                * (
+                    gamma * (2 * (x - x0) * np.imag(wz) - sigma * np.sqrt(2 / np.pi))
+                    + (gamma**2 + sigma**2 - (x - x0) ** 2) * np.real(wz)
+                )
+            )
     else:
         raise NotImplementedError(
             "Only the zeroth, first, and second derivatives of a Gaussian are implemented."
@@ -8950,7 +9024,7 @@ def fit_pgopher(xs, ys, peakdirection, fit_xs):
 def fit_polynom(xs, ys, peakdirection, fit_xs, rank):
     try:
         popt = np.polyfit(xs, ys, rank)
-    except Exception as E:
+    except Exception:
         popt = np.polyfit(xs, ys, rank)
     polynom = np.poly1d(popt)
     fit_ys = polynom(fit_xs)
@@ -8977,7 +9051,7 @@ def fit_polynom_multirank(xs, ys, peakdirection, fit_xs, maxrank):
     for rank in range(maxrank):
         try:
             popt = np.polyfit(xs, ys, rank)
-        except Exception as E:
+        except Exception:
             popt = np.polyfit(xs, ys, rank)
         polynom = np.poly1d(popt)
         fit_ys = polynom(xs)
@@ -9043,17 +9117,22 @@ def fit_lineshape(
         if profilname != "Voigt"
         else [[xmin, amp_min, wmin, wmin], [xmax, amp_max, wmax, wmax]]
     )
-    function = lambda *x: lineshape(profilname, derivative, *x)
+
+    def function(*x):
+        return lineshape(profilname, derivative, *x)
 
     if offset:
-        function = lambda *x: lineshape(profilname, derivative, *x[:-1]) + x[-1]
+
+        def function(*x):
+            return lineshape(profilname, derivative, *x[:-1]) + x[-1]
+
         p0.append(ymean)
         bounds[0].append(ymin)
         bounds[1].append(ymax)
 
     try:
         popt, pcov = optimize.curve_fit(function, xs, ys, p0=p0, bounds=bounds)
-    except Exception as E:
+    except Exception:
         popt, pcov = optimize.curve_fit(function, xs, ys, p0=p0, bounds=bounds)
     perr = np.sqrt(np.diag(pcov))
     fit_ys = function(fit_xs, *popt)
@@ -9093,9 +9172,10 @@ def get_fitfunction(fitmethod, offset=False, **kwargs):
             "Lorentz 2nd Derivative": ("Lorentz", 2),
             "Voigt 2nd Derivative": ("Voigt", 2),
         }[fitmethod]
-        fit_function = lambda *args, kwargs=kwargs: fit_lineshape(
-            *args, profilname, derivative, offset, **kwargs
-        )
+
+        def fit_function(*args, kwargs=kwargs):
+            return fit_lineshape(*args, profilname, derivative, offset, **kwargs)
+
     return fit_function
 
 
@@ -9345,7 +9425,6 @@ def bin_data(dataframe, binwidth, range):
     # 	dataframe = dataframe.loc[dataframe.sort_values("y").drop_duplicates(("bin", "filename"), keep="last").sort_values(["x"]).index]
     # return(dataframe)
 
-    length = len(dataframe)
     dataframe.loc[:, "bin"] = (dataframe.loc[:, "x"] - range[0]) // binwidth
 
     if "y" not in dataframe:
@@ -9424,7 +9503,7 @@ def except_hook(cls, exception, traceback):
     try:
         NewAssignments.get_instance().save_backup()
         notify_error.emit(f"{exception}\n{''.join(tb.format_tb(traceback))}")
-    except Exception as E:
+    except Exception:
         pass
 
 
@@ -9492,26 +9571,28 @@ class LevelSelector(SeriesSelector):
 
         layout = QGridLayout()
 
-        create_qn = lambda: QQ(
-            QSpinBox,
-            minWidth=60,
-            maxWidth=60,
-            range=(None, None),
-            visible=False,
-            singlestep=1,
-            change=lambda x: self.changed(),
-        )
+        def create_qn():
+            return QQ(
+                QSpinBox,
+                minWidth=60,
+                maxWidth=60,
+                range=(None, None),
+                visible=False,
+                singlestep=1,
+                change=lambda x: self.changed(),
+            )
 
         self.qns = [create_qn() for _ in range(self.n_qns)]
 
-        create_widget = lambda widget, kwargs: QQ(
-            widget,
-            minWidth=40,
-            maxWidth=40,
-            visible=False,
-            change=lambda x: self.changed(),
-            **kwargs,
-        )
+        def create_widget(widget, kwargs):
+            return QQ(
+                widget,
+                minWidth=40,
+                maxWidth=40,
+                visible=False,
+                change=lambda x: self.changed(),
+                **kwargs,
+            )
 
         self.incr = [
             create_widget(QCheckBox, {"text": "Inc"}) for _ in range(self.n_qns)
@@ -9846,7 +9927,7 @@ class ASAPAx(LWPAx):
         if self.qns is not None and self.egy_df is not None:
             query = " and ".join(
                 [
-                    f"(qnu{i+1} == {qn} and qnl{i+1} == 0)"
+                    f"(qnu{i + 1} == {qn} and qnl{i + 1} == 0)"
                     for i, qn in enumerate(self.qns)
                 ]
             )
@@ -9854,7 +9935,9 @@ class ASAPAx(LWPAx):
             lin_positions = lin_tmp["x"].to_numpy()
             lin_colors = lin_tmp["color"].to_numpy()
 
-            query = " and ".join([f"qn{i+1} == {qn}" for i, qn in enumerate(self.qns)])
+            query = " and ".join(
+                [f"qn{i + 1} == {qn}" for i, qn in enumerate(self.qns)]
+            )
             vals = self.egy_df.query(query)["egy"].to_numpy()
             egy_val = vals[0] if len(vals) else 0
 
@@ -9889,7 +9972,7 @@ class ASAPAx(LWPAx):
             qns_dict = self.create_qns_dict()
             query = " and ".join(
                 [
-                    f"(qnu{i+1} == {qn} and qnl{i+1} == 0)"
+                    f"(qnu{i + 1} == {qn} and qnl{i + 1} == 0)"
                     for i, qn in enumerate(self.qns)
                 ]
             )
@@ -9898,7 +9981,7 @@ class ASAPAx(LWPAx):
         else:
             qnstring = ""
             qns_dict = {
-                f"qn{ul}{i+1}": 0 for ul in "ul" for i in range(config["series_qns"])
+                f"qn{ul}{i + 1}": 0 for ul in "ul" for i in range(config["series_qns"])
             }
 
         vars = {
@@ -9948,14 +10031,16 @@ class ASAPAx(LWPAx):
         qns_dict = (
             {}
             if not complete
-            else {f"qn{ul}{i+1}": pyckett.SENTINEL for ul in "ul" for i in range(N_QNS)}
+            else {
+                f"qn{ul}{i + 1}": pyckett.SENTINEL for ul in "ul" for i in range(N_QNS)
+            }
         )
         if self.qns is None:
             return qns_dict
 
         for i, qn in enumerate(self.qns):
-            qns_dict[f"qnu{i+1}"] = qn
-            qns_dict[f"qnl{i+1}"] = 0
+            qns_dict[f"qnu{i + 1}"] = qn
+            qns_dict[f"qnl{i + 1}"] = 0
         return qns_dict
 
     def on_range(self, xmin, xmax):
@@ -10001,7 +10086,9 @@ class ASAPAx(LWPAx):
         egy_df = self.__class__.egy_df
         egy_val = 0
         if egy_df is not None:
-            query = " and ".join([f"qn{i+1} == {qn}" for i, qn in enumerate(self.qns)])
+            query = " and ".join(
+                [f"qn{i + 1} == {qn}" for i, qn in enumerate(self.qns)]
+            )
             vals = egy_df.query(query)["egy"].to_numpy()
             egy_val = vals[0] if len(vals) else 0
 
@@ -10049,12 +10136,12 @@ class ASAPAx(LWPAx):
             }
 
             for i in range(noq):
-                new_assignments[f"qnu{i+1}"] = entries[f"qnu{i+1}"]
-                new_assignments[f"qnl{i+1}"] = entries[f"qnl{i+1}"]
+                new_assignments[f"qnu{i + 1}"] = entries[f"qnu{i + 1}"]
+                new_assignments[f"qnl{i + 1}"] = entries[f"qnl{i + 1}"]
 
             for i in range(noq, N_QNS):
-                new_assignments[f"qnu{i+1}"] = pyckett.SENTINEL
-                new_assignments[f"qnl{i+1}"] = pyckett.SENTINEL
+                new_assignments[f"qnu{i + 1}"] = pyckett.SENTINEL
+                new_assignments[f"qnl{i + 1}"] = pyckett.SENTINEL
 
             NewAssignments.get_instance().add_rows(new_assignments)
 
@@ -10145,7 +10232,7 @@ class ASAPMenu(Menu):
         ]
 
         for i, view_action in enumerate(view_actions):
-            view_action.setShortcut(f"Shift+{i+2}")
+            view_action.setShortcut(f"Shift+{i + 2}")
 
         fitfunction_menu = QMenu("Choose Fit Function", parent=parent)
         self.fitfunction_actions = {}
@@ -10153,7 +10240,10 @@ class ASAPMenu(Menu):
         current_method = config["fit_fitmethod"]
         for method in ASAPAx.fit_methods:
             is_checked = method == current_method
-            callback = lambda _, method=method: self.set_fitmethod_gui(method)
+
+            def callback(_, method=method):
+                return self.set_fitmethod_gui(method)
+
             self.fitfunction_actions[method] = QQ(
                 QAction,
                 parent=parent,
@@ -10340,10 +10430,10 @@ class ASAPWidget(LWPWidget):
                 if normalizing_value is None:
                     normalizing_value = qn // diff
                 conditions_incr.append(
-                    f"((qn{ul}{i+1} - {qn-normalizing_value*diff})/{diff})"
+                    f"((qn{ul}{i + 1} - {qn - normalizing_value * diff})/{diff})"
                 )
             else:
-                conditions.append(f"(qn{ul}{i+1} == {qn})")
+                conditions.append(f"(qn{ul}{i + 1} == {qn})")
 
         if len(conditions_incr):
             conditions.append(" == ".join(conditions_incr))
@@ -10393,7 +10483,9 @@ class ASAPWidget(LWPWidget):
         exclude_width = config["asap_excludearoundassigned"]
         if exclude_width:
             already_assigned_peaks = LinFile.get_data()
-            query = " or ".join([f"qnl{i+1} != 0" for i in range(config["series_qns"])])
+            query = " or ".join(
+                [f"qnl{i + 1} != 0" for i in range(config["series_qns"])]
+            )
             already_assigned_peaks = already_assigned_peaks.query(query)
             already_assigned_peaks = already_assigned_peaks["x"].values
 
@@ -10460,7 +10552,6 @@ class ASAPWidget(LWPWidget):
         if n_correlated_transitions < 2:
             tot_xs = tot_ys = np.array([])
         else:
-
             if config["asap_scaletoexpints"]:
                 tot_ys /= total_calc_intensity / total_expcatfactor
 
@@ -10533,7 +10624,7 @@ class ASAPWidget(LWPWidget):
                 # Get the specific entries for each ax
                 for i_row in range(n_rows):
                     row_qns = qns + i_row * diffs
-                    cond = [f"(qn{ul}{i+1} == {qn})" for i, qn in enumerate(row_qns)]
+                    cond = [f"(qn{ul}{i + 1} == {qn})" for i, qn in enumerate(row_qns)]
                     condition = " & ".join(cond)
                     row_entries_all = entries.query(condition).copy()
 
@@ -10542,7 +10633,7 @@ class ASAPWidget(LWPWidget):
                             row_entries_all["use_for_cross_correlation"]
                         ]
                         ymax = row_entries["y"].max()
-                        ythreshold = ymax * config["asap_minrelratio"]
+                        ythreshold = ymax * config["asap_minrelratio"]  # noqa: F841
                         row_entries_all.loc[:, "use_for_cross_correlation"] = (
                             row_entries_all.eval(
                                 "(use_for_cross_correlation) & (y > @ythreshold)"
@@ -10752,7 +10843,7 @@ class ASAPDetailViewer(EQDockWidget):
             "fontsize": "small",
         }
         qns_labels = [
-            [f"qn{ul}{i+1}" for i in range(config["series_qns"])] for ul in "ul"
+            [f"qn{ul}{i + 1}" for i in range(config["series_qns"])] for ul in "ul"
         ]
 
         for ax, (i, row) in zip(axes, entries.iterrows()):
@@ -10815,7 +10906,7 @@ class ASAPDetailViewer(EQDockWidget):
             noq = config["series_qns"]
             query = " and ".join(
                 [
-                    f'qn{ul}{i+1} == {entry[f"qn{ul}{i+1}"]}'
+                    f"qn{ul}{i + 1} == {entry[f'qn{ul}{i + 1}']}"
                     for ul in "ul"
                     for i in range(noq)
                 ]
@@ -11127,7 +11218,7 @@ class ASAPSquaredWindow(EQDockWidget):
         threshold = config["asap_squaredthreshold"]
         rel_xs = np.arange(-width / 2, width / 2 + stepsize, stepsize)
 
-        qn_labels = [f"qn{ul}{i+1}" for ul in "ul" for i in range(self.noq)]
+        qn_labels = [f"qn{ul}{i + 1}" for ul in "ul" for i in range(self.noq)]
 
         predicted_positions = cat_df["x"].values
         predicted_positions = (
@@ -11209,7 +11300,9 @@ class ASAPSquaredWindow(EQDockWidget):
             notify_warning.emit("No cross-correlation data available.")
             return
 
-        columns = ["x", "dx"] + [f"qn{ul}{i+1}" for ul in "ul" for i in range(self.noq)]
+        columns = ["x", "dx"] + [
+            f"qn{ul}{i + 1}" for ul in "ul" for i in range(self.noq)
+        ]
         new_assignments = pd.DataFrame(self.assignments, columns=columns)
         new_assignments["xpre"] = 0
         new_assignments["weight"] = 1
@@ -11223,8 +11316,8 @@ class ASAPSquaredWindow(EQDockWidget):
         )
 
         for i in range(self.noq, N_QNS):
-            new_assignments[f"qnu{i+1}"] = pyckett.SENTINEL
-            new_assignments[f"qnl{i+1}"] = pyckett.SENTINEL
+            new_assignments[f"qnu{i + 1}"] = pyckett.SENTINEL
+            new_assignments[f"qnl{i + 1}"] = pyckett.SENTINEL
 
         NewAssignments.get_instance().add_rows(new_assignments)
 
