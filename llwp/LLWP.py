@@ -3668,7 +3668,7 @@ class MainWindow(QMainWindow):
                 os.getcwd(),
             ]
             for folder in possible_folders:
-                iconpath = os.path.join(folder, "LLWP.svg")
+                iconpath = os.path.join(folder, f"{APP_TAG}.svg")
                 if os.path.isfile(iconpath):
                     break
 
