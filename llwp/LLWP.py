@@ -678,7 +678,7 @@ class PlotWidget(QWidget):
         else:
             width = self.xrange[1] - self.xrange[0]
             center = (tmp_ax.xrange[1] + tmp_ax.xrange[0]) / 2
-            self.xrange = (center - width/2, center + width/2)
+            self.xrange = (center - width / 2, center + width / 2)
 
         self.update_plot()
 
@@ -973,7 +973,6 @@ class NTimesBehavior(QObject):
     def click_n_times(self, n):
         for _ in range(n):
             self.widget.clicked.emit()
-        
 
 
 class QTableWidget(QTableWidget):
@@ -5082,7 +5081,11 @@ class AssignAllDialog(QDialog):
             )
         )
         buttons_layout.addWidget(
-            QQ(QPushButton, text="Update", change=lambda x: self.update_gui(reset_axes_to_skip=False))
+            QQ(
+                QPushButton,
+                text="Update",
+                change=lambda x: self.update_gui(reset_axes_to_skip=False),
+            )
         )
         buttons_layout.addWidget(
             QQ(QPushButton, text="Cancel", change=lambda x: self.close())
@@ -7057,8 +7060,8 @@ class ResidualsWindow(EQDockWidget):
         def show_context_menu(pos):
             menu = QMenu(yaxis_input)
             presets = {
-                'Obs-calc': 'x_lin - x_cat',
-                'Weighted Obs-calc': '(x_lin - x_cat) / error_lin',
+                "Obs-calc": "x_lin - x_cat",
+                "Weighted Obs-calc": "(x_lin - x_cat) / error_lin",
             }
 
             for label, text in presets.items():
@@ -7069,15 +7072,12 @@ class ResidualsWindow(EQDockWidget):
 
             menu.addSeparator()
             menu.addActions(yaxis_input.createStandardContextMenu().actions())
-
             menu.exec(yaxis_input.mapToGlobal(pos))
 
         yaxis_input.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         yaxis_input.customContextMenuRequested.connect(show_context_menu)
 
-        hlayout.addWidget(
-            yaxis_input
-        )
+        hlayout.addWidget(yaxis_input)
         hlayout.addWidget(QQ(QCheckBox, "residuals_blends", text="Blends"))
         hlayout.addWidget(
             QQ(QCheckBox, "residuals_autoscale", text="Autoscale on Update")
