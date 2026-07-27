@@ -7047,12 +7047,36 @@ class ResidualsWindow(EQDockWidget):
             )
         )
         hlayout.addWidget(QLabel("y-axis: "))
+        yaxis_input = QQ(
+            QLineEdit,
+            "residuals_yvariable",
+            placeholder="Choose the y-variable, e.g. x_lin-x_cat",
+        )
+
+        # Custom Context Menu for y-axis input
+        def show_context_menu(pos):
+            menu = QMenu(yaxis_input)
+            presets = {
+                'Obs-calc': 'x_lin - x_cat',
+                'Weighted Obs-calc': '(x_lin - x_cat) / error_lin',
+            }
+
+            for label, text in presets.items():
+                action = menu.addAction(label)
+                action.triggered.connect(
+                    lambda checked=False, t=text: yaxis_input.setText(t)
+                )
+
+            menu.addSeparator()
+            menu.addActions(yaxis_input.createStandardContextMenu().actions())
+
+            menu.exec(yaxis_input.mapToGlobal(pos))
+
+        yaxis_input.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        yaxis_input.customContextMenuRequested.connect(show_context_menu)
+
         hlayout.addWidget(
-            QQ(
-                QLineEdit,
-                "residuals_yvariable",
-                placeholder="Choose the y-variable, e.g. x_lin-x_cat",
-            )
+            yaxis_input
         )
         hlayout.addWidget(QQ(QCheckBox, "residuals_blends", text="Blends"))
         hlayout.addWidget(
