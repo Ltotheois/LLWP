@@ -108,6 +108,7 @@ from PyQt6.QtGui import (
     QAction,
     QColor,
     QCursor,
+    QGuiApplication,
     QIcon,
     QShortcut,
     QTextCursor,
@@ -517,6 +518,9 @@ class Config(dict):
                 else:
                     self[fullkey] = value
 
+        self.update_colors()
+
+    def update_colors(self):
         # Special case changing colors for better contrast
         for key, value in self.items():
             if key in self.initial_values and self.initial_values[key][1] == Color:
@@ -1115,8 +1119,8 @@ class FigureCanvas(FigureCanvas):
         self.wheelEvent = lambda event: event.ignore()
         # self.setStyleSheet('background-color: #00000000')
 
-        app = QApplication.instance()
-        app.styleHints().colorSchemeChanged.connect(self.update_theme)
+        gui_app = QGuiApplication.instance()
+        gui_app.styleHints().colorSchemeChanged.connect(self.update_theme)
         self.update_theme()
 
     def update_theme(self):
@@ -1126,9 +1130,13 @@ class FigureCanvas(FigureCanvas):
         figure = self.figure
 
         for ax in figure.get_axes():
-            ax.tick_params(color=textcolor, labelcolor=textcolor)
+            ax.tick_params(color=textcolor, labelcolor=textcolor, which="both")
             for spine in ax.spines.values():
                 spine.set_edgecolor(textcolor)
+
+            ax.xaxis.label.set_color(textcolor)
+            ax.yaxis.label.set_color(textcolor)
+            ax.title.set_color(textcolor)
 
         self.setStyleSheet(f"background-color: {background}")
         self.draw_idle()
@@ -1340,7 +1348,17 @@ class File:
         self.is_initialized = True
 
     def set_default_values(self, default_values={}):
-        self.color = default_values.get("color", config[self.default_color_key])
+        color = default_values.get("color", config[self.default_color_key])
+        normalized_color = matplotlib.colors.to_hex(color)
+
+        if is_dark_theme():
+            if normalized_color == "#000000":
+                color = "#ffffff"
+        else:
+            if normalized_color == "#ffffff":
+                color = "#000000"
+
+        self.color = color
         self.color_query = default_values.get("color_query")
         self.query = default_values.get("query")
         self.is_visible = default_values.get("visible", True)
@@ -1476,7 +1494,7 @@ class File:
 
     @classmethod
     def load_files_gui(cls):
-        filename, filter = QFileDialog.getOpenFileName(None, "Choose Project to load")
+        filename, _ = QFileDialog.getOpenFileName(None, "Choose Project to load")
         if not filename:
             return
 
@@ -1705,6 +1723,11 @@ class File:
         )
         color_picker = QQ(
             QToolButton, stylesheet=stylesheet, change=cls.gui_change_color_all
+        )
+
+        config.register(
+            cls.default_color_key,
+            lambda: cls.gui_change_color_all(config[cls.default_color_key]),
         )
 
         tmp_layout = QHBoxLayout()
@@ -4008,6 +4031,9 @@ class LLWP(QApplication):
             self.run_init_commands()
             self.debug_setup()
 
+        self.style_hints = QGuiApplication.instance().styleHints()
+        self.style_hints.colorSchemeChanged.connect(self.on_theme_change)
+
         sys.exit(self.exec())
 
     # Used to automatically reproduce behavior when testing
@@ -4027,6 +4053,24 @@ class LLWP(QApplication):
         #####
         pass
 
+    def on_theme_change(self):
+        self.update_matplotlib_theme()
+
+        config.update_colors()
+
+        is_dark = is_dark_theme()
+        for cls in (ExpFile, CatFile, LinFile):
+            for id in cls.ids:
+                file = cls.ids[id]
+                normalized_color = matplotlib.colors.to_hex(file.color)
+
+                if is_dark and normalized_color == "#000000":
+                    file.color = "#ffffff"
+                    file.apply_color()
+                elif not is_dark and normalized_color == "#ffffff":
+                    file.color = "#000000"
+                    file.apply_color()
+
     def run_init_commands(self):
         try:
             commands = config["commandlinedialog_commands"]
@@ -4041,7 +4085,7 @@ class LLWP(QApplication):
         config.register(
             "plot_fontdict", lambda: matplotlib.rc("font", **config["plot_fontdict"])
         )
-        self.styleHints().colorSchemeChanged.connect(self.update_matplotlib_theme)
+
         self.update_matplotlib_theme()
 
         mpl_style_filename = llwpfile(".mplstyle")
@@ -7472,7 +7516,9 @@ class BlendedLinesWindow(EQDockWidget):
 
         peaks = self.peaks.copy()
         profile = config["blendedlines_lineshape"]
-        profile, derivative = shorthand_fitfunction_name_to_profile_and_derivative[profile]
+        profile, derivative = shorthand_fitfunction_name_to_profile_and_derivative[
+            profile
+        ]
         polynomrank = config["blendedlines_polynom"] + 1
         fixedwidth = config["blendedlines_fixedwidth"]
         amplitude_direction = config["fit_peakdirection"]
@@ -9175,6 +9221,7 @@ shorthand_fitfunction_name_to_profile_and_derivative = {
     "Voigt 2nd Derivative": ("Voigt", 2),
 }
 
+
 def get_fitfunction(fitmethod, offset=False, **kwargs):
     fit_function = {
         "Pgopher": fit_pgopher,
@@ -9185,7 +9232,9 @@ def get_fitfunction(fitmethod, offset=False, **kwargs):
     }.get(fitmethod)
 
     if not fit_function:
-        profilname, derivative = shorthand_fitfunction_name_to_profile_and_derivative[fitmethod]
+        profilname, derivative = shorthand_fitfunction_name_to_profile_and_derivative[
+            fitmethod
+        ]
 
         def fit_function(*args, kwargs=kwargs):
             return fit_lineshape(*args, profilname, derivative, offset, **kwargs)
@@ -9276,7 +9325,7 @@ def symmetric_ticklabels(ticks):
 
 
 def is_dark_theme():
-    return QApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
+    return QGuiApplication.instance().styleHints().colorScheme() == Qt.ColorScheme.Dark
 
 
 def QQ(widgetclass, config_key=None, **kwargs):
