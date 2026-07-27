@@ -619,8 +619,9 @@ class PlotWidget(QWidget):
         super().__init__(parent)
 
         self.parent = parent
+        self.xrange = (-1, 1)
         self.gui()
-        self.from_current_plot()
+        self.from_current_plot(reset_width=True)
         self.span_selector = matplotlib.widgets.SpanSelector(
             self.ax, self.on_range, "horizontal", useblit=True, button=3
         )
@@ -643,7 +644,7 @@ class PlotWidget(QWidget):
             QQ(
                 QPushButton,
                 text="From Current Plot",
-                change=lambda x: self.from_current_plot(),
+                change=lambda x: self.from_current_plot(reset_width=True),
             )
         )
 
@@ -668,10 +669,16 @@ class PlotWidget(QWidget):
 
         self.request_redraw.connect(self.plotcanvas.draw_idle)
 
-    def from_current_plot(self):
+    def from_current_plot(self, reset_width=False):
         tmp_ax = mainwindow.lwpwidget.get_current_ax()
         self.index = (tmp_ax.row_i, tmp_ax.col_i)
-        self.xrange = tmp_ax.xrange
+
+        if reset_width:
+            self.xrange = tmp_ax.xrange
+        else:
+            width = self.xrange[1] - self.xrange[0]
+            center = (tmp_ax.xrange[1] + tmp_ax.xrange[0]) / 2
+            self.xrange = (center - width/2, center + width/2)
 
         self.update_plot()
 
@@ -938,8 +945,7 @@ class NTimesBehavior(QObject):
                 if not ok:
                     return True
 
-                for _ in range(i):
-                    self.widget.clicked.emit()
+                self.click_n_times(i)
                 return True
 
         return super().eventFilter(obj, event)
@@ -962,8 +968,12 @@ class NTimesBehavior(QObject):
             if not ok:
                 return
 
-        for _ in range(i):
+        self.click_n_times(i)
+
+    def click_n_times(self, n):
+        for _ in range(n):
             self.widget.clicked.emit()
+        
 
 
 class QTableWidget(QTableWidget):
@@ -4145,15 +4155,7 @@ class AssignBlendsDialog(QDialog):
         buttons_layout.addWidget(
             QQ(
                 QPushButton,
-                text="Assign All",
-                shortcut="Ctrl+Return",
-                change=lambda x: self.blendassign(),
-            )
-        )
-        buttons_layout.addWidget(
-            QQ(
-                QPushButton,
-                text="Assign Marked",
+                text="Assign Selected",
                 shortcut="Return",
                 change=lambda x: self.blendassign(False),
             )
@@ -4169,7 +4171,7 @@ class AssignBlendsDialog(QDialog):
         buttons_layout.addWidget(
             QQ(
                 QPushButton,
-                text="Unselect All",
+                text="Deselect All",
                 shortcut="Ctrl+U",
                 change=lambda x: self.set_all(False),
             )
@@ -5080,7 +5082,7 @@ class AssignAllDialog(QDialog):
             )
         )
         buttons_layout.addWidget(
-            QQ(QPushButton, text="Update", change=lambda x: self.update_gui())
+            QQ(QPushButton, text="Update", change=lambda x: self.update_gui(reset_axes_to_skip=False))
         )
         buttons_layout.addWidget(
             QQ(QPushButton, text="Cancel", change=lambda x: self.close())
