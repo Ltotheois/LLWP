@@ -369,7 +369,6 @@ class Config(dict):
         "residuals_autoscale": (True, bool),
         "residuals_blends": (False, bool),
         "blendedlines_lineshape": ("Gauss", str),
-        "blendedlines_derivative": (0, int),
         "blendedlines_transparency": (0.2, float),
         "blendedlines_maxfwhm": (10, float),
         "blendedlines_polynom": (0, int),
@@ -7382,7 +7381,7 @@ class BlendedLinesWindow(EQDockWidget):
             QQ(
                 QComboBox,
                 "blendedlines_lineshape",
-                items=("Gauss", "Lorentz", "Voigt"),
+                items=shorthand_fitfunction_name_to_profile_and_derivative.keys(),
                 minWidth=120,
             ),
             row_id,
@@ -7400,14 +7399,6 @@ class BlendedLinesWindow(EQDockWidget):
             ),
             row_id,
             3,
-        )
-
-        row_id += 1
-        tmplayout.addWidget(QQ(QLabel, text="Derivative: "), row_id, 0)
-        tmplayout.addWidget(
-            QQ(QSpinBox, "blendedlines_derivative", range=(0, 2), minWidth=120),
-            row_id,
-            1,
         )
 
         row_id += 1
@@ -7481,11 +7472,11 @@ class BlendedLinesWindow(EQDockWidget):
 
         peaks = self.peaks.copy()
         profile = config["blendedlines_lineshape"]
-        derivative = config["blendedlines_derivative"]
+        profile, derivative = shorthand_fitfunction_name_to_profile_and_derivative[profile]
         polynomrank = config["blendedlines_polynom"] + 1
         fixedwidth = config["blendedlines_fixedwidth"]
         amplitude_direction = config["fit_peakdirection"]
-        now = 2 if profile == "Voigt" else 1
+        now = 2 if profile.startswith("Voigt") else 1
         noa = 2 + now * (not fixedwidth)
 
         def fitfunction(x, *args, fixedwidth=fixedwidth):
@@ -7660,7 +7651,6 @@ class BlendedLinesWindow(EQDockWidget):
             opt_param,
             err_param,
             profile,
-            derivative,
             noa,
             now,
             xcenter,
@@ -7733,7 +7723,6 @@ class BlendedLinesWindow(EQDockWidget):
             opt_param,
             err_param,
             function,
-            derivative,
             noa,
             now,
             self.center,
@@ -7742,7 +7731,6 @@ class BlendedLinesWindow(EQDockWidget):
         ) = self.params
         fit_values = {
             "function": function,
-            "derivative": derivative,
             "center": self.center,
             "baseline": list(baseline_args),
             "peaks": [],
@@ -9175,6 +9163,18 @@ def fit_lineshape(
     return results
 
 
+shorthand_fitfunction_name_to_profile_and_derivative = {
+    "Gauss": ("Gauss", 0),
+    "Lorentz": ("Lorentz", 0),
+    "Voigt": ("Voigt", 0),
+    "Gauss 1st Derivative": ("Gauss", 1),
+    "Lorentz 1st Derivative": ("Lorentz", 1),
+    "Voigt 1st Derivative": ("Voigt", 1),
+    "Gauss 2nd Derivative": ("Gauss", 2),
+    "Lorentz 2nd Derivative": ("Lorentz", 2),
+    "Voigt 2nd Derivative": ("Voigt", 2),
+}
+
 def get_fitfunction(fitmethod, offset=False, **kwargs):
     fit_function = {
         "Pgopher": fit_pgopher,
@@ -9185,17 +9185,7 @@ def get_fitfunction(fitmethod, offset=False, **kwargs):
     }.get(fitmethod)
 
     if not fit_function:
-        profilname, derivative = {
-            "Gauss": ("Gauss", 0),
-            "Lorentz": ("Lorentz", 0),
-            "Voigt": ("Voigt", 0),
-            "Gauss 1st Derivative": ("Gauss", 1),
-            "Lorentz 1st Derivative": ("Lorentz", 1),
-            "Voigt 1st Derivative": ("Voigt", 1),
-            "Gauss 2nd Derivative": ("Gauss", 2),
-            "Lorentz 2nd Derivative": ("Lorentz", 2),
-            "Voigt 2nd Derivative": ("Voigt", 2),
-        }[fitmethod]
+        profilname, derivative = shorthand_fitfunction_name_to_profile_and_derivative[fitmethod]
 
         def fit_function(*args, kwargs=kwargs):
             return fit_lineshape(*args, profilname, derivative, offset, **kwargs)
