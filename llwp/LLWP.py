@@ -3679,10 +3679,10 @@ class Menu:
         style_hints = QGuiApplication.instance().styleHints()
         if is_dark_theme():
             style_hints.setColorScheme(Qt.ColorScheme.Light)
-            self.toggle_theme_action.setText('Switch to dark mode')
+            self.toggle_theme_action.setText("Switch to dark mode")
         else:
             style_hints.setColorScheme(Qt.ColorScheme.Dark)
-            self.toggle_theme_action.setText('Switch to light mode')
+            self.toggle_theme_action.setText("Switch to light mode")
 
     def send_mail_to_author(self):
         webbrowser.open(f"mailto:bonah@ph1.uni-koeln.de?subject={APP_TAG}")
@@ -5247,8 +5247,6 @@ class AssignAllDialog(QDialog):
             self.axes_to_skip.difference_update(range(i_clicked_axis, n_rows))
 
         self.update_gui(reset_axes_to_skip=False)
-        
-
 
     def on_exit(self):
         self.__class__._instance = None
@@ -7216,12 +7214,19 @@ class ResidualsWindow(EQDockWidget):
         )
         buttonslayout.addStretch(1)
 
+        self.fit_df = None
+        self.fit_fname = None
+
     def get_residuals(self):
+        noq = config["series_qns"]
+        self.noq = noq
+
+        if self.fit_fname is not None:
+            return self.fit_df
+
         lin_df = LinFile.get_data()
         cat_df = CatFile.get_data()
 
-        noq = config["series_qns"]
-        self.noq = noq
         qns_visible = [f"qn{ul}{n + 1}" for ul in ("u", "l") for n in range(noq)]
         df = pd.merge(lin_df, cat_df, how="inner", on=qns_visible)
         df.rename(
@@ -7251,7 +7256,7 @@ class ResidualsWindow(EQDockWidget):
             )
             df["x_cat"] = df["x_lin"].map(lambda x: tmp_dict.get(x, x))
 
-        df["obs_calc"] = df["x_lin"] - df["x_cat"]
+        df["x_dev"] = df["x_lin"] - df["x_cat"]
         return df
 
     def plot_residuals(self):
@@ -7286,7 +7291,7 @@ class ResidualsWindow(EQDockWidget):
 
         self.df = df
 
-        yvariable = config["residuals_yvariable"].strip() or "obs_calc"
+        yvariable = config["residuals_yvariable"].strip() or "x_dev"
         xvariable = config["residuals_xvariable"].strip() or "x_lin"
         ys = df.eval(yvariable).to_numpy()
         xs = df.eval(xvariable).to_numpy()
@@ -7426,6 +7431,26 @@ class ResidualsWindow(EQDockWidget):
                                         lin, custom_freq_format=custom_freq_format
                                     )
                                 )
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        load_fit_file = menu.addAction("Load *.fit file instead")
+        update_fit_file = menu.addAction("Update *.fit file")
+        clear_fit_file = menu.addAction("Clear *.fit file")
+
+        action = menu.exec(self.mapToGlobal(event.pos()))
+        if action == load_fit_file:
+            filename, _ = QFileDialog.getOpenFileName(None, "Choose *.egy file")
+            if not filename:
+                return
+
+            self.fit_fname = filename
+            self.fit_df = pyckett.fit_to_df(filename)
+        elif action == update_fit_file:
+            self.fit_df = pyckett.fit_to_df(self.fit_fname)
+        elif action == clear_fit_file:
+            self.fit_fname = None
+            self.fit_df = None
 
 
 class BlendedLinesWindow(EQDockWidget):
@@ -10309,7 +10334,7 @@ class ASAPAx(LWPAx):
     @classmethod
     def load_egy_file(cls, filename=None):
         if not filename:
-            filename, filter = QFileDialog.getOpenFileName(None, "Choose *.egy file")
+            filename, _ = QFileDialog.getOpenFileName(None, "Choose *.egy file")
             if not filename:
                 return
 
