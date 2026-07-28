@@ -4897,6 +4897,7 @@ class AssignAllDialog(QDialog):
             self.axes_to_skip = set()
 
         n_qns = self.noq = config["series_qns"]
+        self.n_rows = config["plot_rows"]
 
         fit_width = config["assignall_fitwidth"]
         plot_width = config["assignall_plotwidth"]
