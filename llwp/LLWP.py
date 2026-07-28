@@ -4713,7 +4713,7 @@ class AssignAllDialog(QDialog):
         if reset_axes_to_skip:
             self.axes_to_skip = set()
 
-        n_rows = config["plot_rows"]
+        self.n_rows = config["plot_rows"]
         self.noq = config["series_qns"]
 
         fit_width = config["assignall_fitwidth"]
@@ -4774,7 +4774,7 @@ class AssignAllDialog(QDialog):
         for ax in self.fig.get_axes():
             self.fig.delaxes(ax)
         axs = self.fig.subplots(
-            n_rows, sharex=True, gridspec_kw={"hspace": 0, "wspace": 0}
+            self.n_rows, sharex=True, gridspec_kw={"hspace": 0, "wspace": 0}
         )
         self.axs = axs = axs[::-1]
 
@@ -4896,7 +4896,6 @@ class AssignAllDialog(QDialog):
         if reset_axes_to_skip:
             self.axes_to_skip = set()
 
-        n_rows = config["plot_rows"]
         n_qns = self.noq = config["series_qns"]
 
         fit_width = config["assignall_fitwidth"]
@@ -4915,7 +4914,7 @@ class AssignAllDialog(QDialog):
         # - give infinite number of n_rows to calc_references, throw out everything with zero
         # - problem is: user will not check the assignments anymore
         # - current decision: users have to actually look at lineshapes for fitting them all
-        positions, qns = refwidget.calc_references(n_rows, n_qns)
+        positions, qns = refwidget.calc_references(self.n_rows, n_qns)
         qn_labels = [f"qn{ul}{i + 1}" for ul in ("u", "l") for i in range(n_qns)]
 
         # Special case if we are limited to a certain *.lin file
@@ -4965,7 +4964,7 @@ class AssignAllDialog(QDialog):
         for ax in self.fig.get_axes():
             self.fig.delaxes(ax)
         axs = self.fig.subplots(
-            n_rows, sharex=True, gridspec_kw={"hspace": 0, "wspace": 0}
+            self.n_rows, sharex=True, gridspec_kw={"hspace": 0, "wspace": 0}
         )
         self.axs = axs = axs[::-1]
 
@@ -5090,10 +5089,12 @@ class AssignAllDialog(QDialog):
         self.setLayout(layout)
 
         self.fig = Figure(dpi=config["plot_dpi"])
-        self.cid = self.fig.canvas.mpl_connect("button_press_event", self.on_click)
 
         self.plotcanvas = FigureCanvas(self.fig)
         self.mpl_toolbar = NavigationToolbar2QT(self.plotcanvas, self)
+
+        self.cid = self.fig.canvas.mpl_connect("button_press_event", self.on_click)
+        self.plotcanvas.contextMenuEvent = self.show_context_menu
 
         layout.addWidget(self.plotcanvas, 1)
         layout.addWidget(self.mpl_toolbar)
@@ -5194,7 +5195,7 @@ class AssignAllDialog(QDialog):
     def on_click(self, event):
         clicked_axis = event.inaxes
 
-        if not clicked_axis:
+        if not clicked_axis or event.button != 1:
             return
 
         for i, ax in enumerate(self.axs):
@@ -5205,6 +5206,49 @@ class AssignAllDialog(QDialog):
                     self.axes_to_skip.add(i)
                 self.update_gui(reset_axes_to_skip=False)
                 return
+
+    def show_context_menu(self, event):
+        x, y = event.x(), event.y()
+        geometry = self.plotcanvas.geometry()
+        width, height = geometry.width(), geometry.height()
+        x_rel, y_rel = x / width, 1 - y / height
+
+        for i_clicked_axis, ax in enumerate(self.axs):
+            xmin, ymin, width, height = ax.get_position().bounds
+            if xmin <= x_rel <= xmin + width and ymin <= y_rel <= ymin + height:
+                break
+        else:
+            return
+
+        menu = QMenu(self)
+
+        ignore_all_above_action = menu.addAction("Ignore this line and all above")
+        add_all_below_action = menu.addAction("Add this line and all above")
+        menu.addSeparator()
+        ignore_all_action = menu.addAction("Ignore all")
+        add_all_action = menu.addAction("Add all")
+        menu.addSeparator()
+        ignore_all_below_action = menu.addAction("Ignore this line and all below")
+        add_all_above_action = menu.addAction("Add this line and all below")
+
+        action = menu.exec(self.plotcanvas.mapToGlobal(event.pos()))
+        n_rows = self.n_rows
+        if action == add_all_action:
+            self.axes_to_skip = set()
+        elif action == ignore_all_action:
+            self.axes_to_skip = set(range(0, n_rows))
+        elif action == ignore_all_above_action:
+            self.axes_to_skip.update(range(i_clicked_axis, n_rows))
+        elif action == ignore_all_below_action:
+            self.axes_to_skip.update(range(0, i_clicked_axis + 1))
+        elif action == add_all_above_action:
+            self.axes_to_skip.difference_update(range(0, i_clicked_axis + 1))
+        elif action == add_all_below_action:
+            self.axes_to_skip.difference_update(range(i_clicked_axis, n_rows))
+
+        self.update_gui(reset_axes_to_skip=False)
+        
+
 
     def on_exit(self):
         self.__class__._instance = None
