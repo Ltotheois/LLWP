@@ -3473,6 +3473,13 @@ class Menu:
             fitfunction_menu.addAction(self.fitfunction_actions[method])
         config.register("fit_fitmethod", self.on_fitfunction_changed)
 
+        self.toggle_theme_action = QQ(
+            QAction,
+            parent=parent,
+            text="Switch to light mode" if is_dark_theme() else "Switch to dark mode",
+            change=lambda _: self.toggle_layout_theme(),
+        )
+
         if sys.platform.startswith("win"):
             always_on_top_action = None
         else:
@@ -3599,6 +3606,8 @@ class Menu:
                 ),
                 always_on_top_action,
                 None,
+                self.toggle_theme_action,
+                None,
             ),
             "Modules": modules_actions,
             "Info": (
@@ -3665,6 +3674,15 @@ class Menu:
         except ValueError:
             notify_warning.emit("The entered value was not understood.")
             return
+
+    def toggle_layout_theme(self):
+        style_hints = QGuiApplication.instance().styleHints()
+        if is_dark_theme():
+            style_hints.setColorScheme(Qt.ColorScheme.Light)
+            self.toggle_theme_action.setText('Switch to dark mode')
+        else:
+            style_hints.setColorScheme(Qt.ColorScheme.Dark)
+            self.toggle_theme_action.setText('Switch to light mode')
 
     def send_mail_to_author(self):
         webbrowser.open(f"mailto:bonah@ph1.uni-koeln.de?subject={APP_TAG}")
@@ -10318,6 +10336,13 @@ class ASAPMenu(Menu):
             fitfunction_menu.addAction(self.fitfunction_actions[method])
         config.register("fit_fitmethod", self.on_fitfunction_changed)
 
+        self.toggle_theme_action = QQ(
+            QAction,
+            parent=parent,
+            text="Switch to light mode" if is_dark_theme() else "Switch to dark mode",
+            change=lambda _: self.toggle_layout_theme(),
+        )
+
         if sys.platform.startswith("win"):
             always_on_top_action = None
         else:
@@ -10415,6 +10440,8 @@ class ASAPMenu(Menu):
                     text="Docking",
                 ),
                 always_on_top_action,
+                None,
+                self.toggle_theme_action,
                 None,
             ),
             "Info": (
