@@ -7573,7 +7573,7 @@ class BlendedLinesWindow(EQDockWidget):
         tmp_layout = QHBoxLayout()
         layout.addLayout(tmp_layout)
         row = (
-            QQ(QPushButton, text="Del All", change=lambda x: self.del_peak(-1)),
+            QQ(QPushButton, text="Del All", change=lambda x: self.del_peak()),
             QQ(
                 QPushButton,
                 text="Update",
@@ -7610,16 +7610,16 @@ class BlendedLinesWindow(EQDockWidget):
         polynomrank = config["blendedlines_polynom"] + 1
         fixedwidth = config["blendedlines_fixedwidth"]
         amplitude_direction = config["fit_peakdirection"]
-        now = 2 if profile.startswith("Voigt") else 1
-        noa = 2 + now * (not fixedwidth)
+        number_of_widths = 2 if profile.startswith("Voigt") else 1
+        number_of_arguments = 2 + number_of_widths * (not fixedwidth)
 
         def fitfunction(x, *args, fixedwidth=fixedwidth):
-            return self.fitfunction(
+            return self.fitfunction_multiple_peaks(
                 x, profile, derivative, polynomrank, *args, fixedwidth=fixedwidth
             )
 
         def fitfunction_no_baseline(x, *args, fixedwidth=fixedwidth):
-            return self.fitfunction(
+            return self.fitfunction_multiple_peaks(
                 x, profile, derivative, 0, *args, fixedwidth=fixedwidth
             )
 
@@ -7693,9 +7693,9 @@ class BlendedLinesWindow(EQDockWidget):
             if fixedwidth and len(peaks):
                 ws = np.array(ws)
                 w0, wl, wu = ws[:, 0].mean(), ws[:, 1].min(), ws[:2].max()
-                p0.extend([w0] * now)
-                bounds[0].extend([wl] * now)
-                bounds[1].extend([wu] * now)
+                p0.extend([w0] * number_of_widths)
+                bounds[0].extend([wl] * number_of_widths)
+                bounds[1].extend([wu] * number_of_widths)
 
             p0.extend([0] * polynomrank)
             bounds[0].extend([-np.inf] * polynomrank)
@@ -7714,8 +7714,8 @@ class BlendedLinesWindow(EQDockWidget):
             res_ys = fitfunction(res_xs, *popt)
             res_exp_ys = fitfunction(exp_xs, *popt)
         else:
-            popt = [0] * (noa * len(peaks) + polynomrank + 2 * fixedwidth)
-            perr = [0] * (noa * len(peaks) + polynomrank + 2 * fixedwidth)
+            popt = [0] * (number_of_arguments * len(peaks) + polynomrank + 2 * fixedwidth)
+            perr = [0] * (number_of_arguments * len(peaks) + polynomrank + 2 * fixedwidth)
             res_xs = np.linspace(xmin, xmax, config["blendedlines_xpoints"])
             res_ys = res_xs * 0
             res_exp_ys = exp_xs * 0
@@ -7731,12 +7731,12 @@ class BlendedLinesWindow(EQDockWidget):
         err_param = []
 
         for i in range(len(peaks)):
-            tmp_params = list(popt[i * noa : (i + 1) * noa])
-            tmp_errors = list(perr[i * noa : (i + 1) * noa])
+            tmp_params = list(popt[i * number_of_arguments : (i + 1) * number_of_arguments])
+            tmp_errors = list(perr[i * number_of_arguments : (i + 1) * number_of_arguments])
 
             if fixedwidth:
-                tmp_params.extend(popt[-(polynomrank + now) : len(popt) - polynomrank])
-                tmp_errors.extend(perr[-(polynomrank + now) : len(popt) - polynomrank])
+                tmp_params.extend(popt[-(polynomrank + number_of_widths) : len(popt) - polynomrank])
+                tmp_errors.extend(perr[-(polynomrank + number_of_widths) : len(popt) - polynomrank])
 
             tmp_ys = fitfunction_no_baseline(res_xs, *tmp_params)
             tmp_ys += exp_mean
@@ -7785,8 +7785,8 @@ class BlendedLinesWindow(EQDockWidget):
             opt_param,
             err_param,
             profile,
-            noa,
-            now,
+            number_of_arguments,
+            number_of_widths,
             xcenter,
             baseline_args,
             rms_ys,
@@ -7814,38 +7814,35 @@ class BlendedLinesWindow(EQDockWidget):
         self.plot_widget.update_plot()
 
     def del_peak(self, i=None):
-        if i == -1:
+        if i is None:
             self.peaks = []
-        elif i is not None and isinstance(i, (int, float, np.integer, np.float64)):
+        else:
             if i in range(len(self.peaks)):
                 del self.peaks[int(i)]
-        else:
-            if len(self.peaks) != 0:
-                self.peaks.pop()
         self.plot_widget.update_plot()
 
-    def fitfunction(self, x, fun, der, bpr, *ps, fixedwidth=False):
-        noa = 2 + (1 + (fun == "Voigt")) * (not fixedwidth)
-        now = 2 if fun == "Voigt" else 1
+    def fitfunction_multiple_peaks(self, x, fun, der, baseline_polynom_rank, *ps, fixedwidth=False):
+        number_of_arguments = 2 + (1 + (fun == "Voigt")) * (not fixedwidth)  # number of arguments per peak
+        number_of_widths = 2 if fun == "Voigt" else 1                        # number of widths per peak
         res_ys = []
         param_peaks = ps
 
         # Baseline Polynom
-        if bpr > 0:
-            param_baseline = ps[-bpr:]
-            param_peaks = ps[:-bpr]
+        if baseline_polynom_rank > 0:
+            param_baseline = ps[-baseline_polynom_rank:]
+            param_peaks = ps[:-baseline_polynom_rank]
             xcenter = sum(self.plot_widget.xrange) / 2
 
             res_ys.append(np.polyval(param_baseline, x - xcenter))
 
         # Fixed Width
         if fixedwidth:
-            widths = param_peaks[-now:]
-            param_peaks = param_peaks[:-now]
+            widths = param_peaks[-number_of_widths:]
+            param_peaks = param_peaks[:-number_of_widths]
 
         # Peaks
-        for i in range(len(param_peaks) // noa):
-            tmp_params = list(param_peaks[i * noa : (i + 1) * noa])
+        for i in range(len(param_peaks) // number_of_arguments):
+            tmp_params = list(param_peaks[i * number_of_arguments : (i + 1) * number_of_arguments])
             if fixedwidth:
                 tmp_params.extend(widths)
             res_ys.append(lineshape(fun, der, x, *tmp_params))
@@ -7857,8 +7854,8 @@ class BlendedLinesWindow(EQDockWidget):
             opt_param,
             err_param,
             function,
-            noa,
-            now,
+            number_of_arguments,
+            number_of_widths,
             self.center,
             baseline_args,
             rms_ys,
@@ -7892,13 +7889,13 @@ class BlendedLinesWindow(EQDockWidget):
                 params[0],
                 params[1],
                 params[2] if function != "Lorentz" else 0,
-                params[1 + now] if function != "Gauss" else 0,
+                params[1 + number_of_widths] if function != "Gauss" else 0,
             )
             x_error, y_error, wg_error, wl_error = (
                 params_error[0],
                 params_error[1],
                 params_error[2] if function != "Lorentz" else 0,
-                params_error[1 + now] if function != "Gauss" else 0,
+                params_error[1 + number_of_widths] if function != "Gauss" else 0,
             )
 
             currRowCount = table.rowCount()

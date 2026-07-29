@@ -12,9 +12,9 @@ description = "LLWP is a fast, efficient and easy solution for exploring and ass
 readme = "README.md"
 requires-python = ">=3.7"
 dependencies = ['numpy', 'pandas', 'matplotlib', 'wrapt', 'pyckett >= 0.1.28', 'scipy', 'PyQt6']
+license = "GPL-3.0-only"
 classifiers = [
 	"Programming Language :: Python :: 3",
-	"License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
 	"Operating System :: OS Independent",
 ]
 keywords = ["LLWP", "Loomis-Wood Plots", "Spectroscopy"]
