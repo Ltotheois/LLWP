@@ -383,6 +383,7 @@ class Config(dict):
         "blendedlines_color_baseline": ("#f6fa14", Color),
         "blendedlines_autopositionpeaks": (True, bool),
         "blendedlines_matplotlibtoolbar": (True, bool),
+        "blendedlines_fidresolution": (0.05, float),
         "report_blends": (True, bool),
         "report_query": ("", str),
         "seriesfinder_start": ("", str),
@@ -7490,7 +7491,7 @@ class BlendedLinesWindow(EQDockWidget):
         self.peaks = []
         self.fit_values = None
         self.cid = None
-        self.fft_window_function = None
+        self.FID_window_function = None
 
         mainwidget = QWidget()
         self.setWidget(mainwidget)
@@ -7534,7 +7535,7 @@ class BlendedLinesWindow(EQDockWidget):
                 QComboBox,
                 "blendedlines_lineshape",
                 items=list(shorthand_fitfunction_name_to_profile_and_derivative.keys())
-                + ["FFT Fit"],
+                + ["FID Fit"],
                 minWidth=120,
             ),
             row_id,
@@ -7625,8 +7626,8 @@ class BlendedLinesWindow(EQDockWidget):
 
         peaks = self.peaks.copy()
         profile = config["blendedlines_lineshape"]
-        if profile == "FFT Fit":
-            self.fit_peaks_fft(plot_widget)
+        if profile == "FID Fit":
+            self.fit_peaks_FID(plot_widget)
             return
         profile, derivative = shorthand_fitfunction_name_to_profile_and_derivative[
             profile
@@ -7835,7 +7836,7 @@ class BlendedLinesWindow(EQDockWidget):
         plot_widget.update_plot_requested.emit()
 
     @QThread.threaded_d
-    def fit_peaks_fft(self, plot_widget, thread=None):
+    def fit_peaks_FID(self, plot_widget, thread=None):
         self.set_indicator_text.emit("<span style='color:#eda711;'>Working ...</span>")
 
         peaks = self.peaks.copy()
@@ -7850,7 +7851,7 @@ class BlendedLinesWindow(EQDockWidget):
         xrange = xmin, xmax = plot_widget.xrange
         xwidth = xmax - xmin
         xcenter = (xmin + xmax) / 2
-        xresolution = 0.05
+        xresolution = config['blendedlines_fidresolution']
 
         df_exp = ExpFile.get_data(xrange=xrange).copy()
         exp_xs = df_exp["x"].to_numpy()
@@ -7864,7 +7865,6 @@ class BlendedLinesWindow(EQDockWidget):
                     exp_ys_max = 1
             exp_ys = exp_ys / exp_ys_max
 
-            zf = 1
             dt = 1 / xwidth
             n_time = int(1 / dt / xresolution)
             ts = np.arange(n_time) * dt
@@ -7915,13 +7915,12 @@ class BlendedLinesWindow(EQDockWidget):
 
             def power_spectrum(ts, params, xcenter=0):
                 ys_fid = fid(ts, params, xcenter=xcenter)
-                nfft = n_time * zf
 
-                if self.fft_window_function is not None:
-                    ys_fid *= self.fft_window_function(ts)
+                if self.FID_window_function is not None:
+                    ys_fid *= self.FID_window_function(ts)
 
-                spec = np.fft.fftshift(np.fft.fft(ys_fid, nfft)) * dt
-                freq = np.fft.fftshift(np.fft.fftfreq(nfft, dt))
+                spec = np.fft.fftshift(np.fft.fft(ys_fid, n_time)) * dt
+                freq = np.fft.fftshift(np.fft.fftfreq(n_time, dt))
                 power = np.abs(spec)
 
                 freq += xcenter
@@ -7932,12 +7931,12 @@ class BlendedLinesWindow(EQDockWidget):
                 interp_ys = np.interp(exp_xs, fit_xs, fit_ys)
                 return interp_ys
 
-            def fitfunction_fft(exp_xs, *params, ts=ts, xcenter=xcenter):
+            def fitfunction_fid(exp_xs, *params, ts=ts, xcenter=xcenter):
                 return interp(exp_xs, ts, *params, xcenter=xcenter)
 
             wmax = config["blendedlines_maxfwhm"]
             w0 = min(wmax / 2, xwidth / 2)
-            ymax = np.max(exp_ys)
+            ymax = np.max(exp_ys) * exp_ys_max
 
             p0 = [w0] if fixedwidth else []
             bounds = [[0], [wmax]] if fixedwidth else [[], []]
@@ -7967,13 +7966,13 @@ class BlendedLinesWindow(EQDockWidget):
             thread.earlyreturn()
 
             popt, pcov = optimize.curve_fit(
-                fitfunction_fft, exp_xs, exp_ys, p0=p0, bounds=bounds
+                fitfunction_fid, exp_xs, exp_ys, p0=p0, bounds=bounds
             )
             perr = np.sqrt(np.diag(pcov))
 
             res_xs = np.linspace(xcenter - xwidth / 2, xcenter + xwidth / 2, 1000)
-            res_ys = fitfunction_fft(res_xs, *popt) * exp_ys_max
-            res_exp_ys = fitfunction_fft(exp_xs, *popt) * exp_ys_max
+            res_ys = fitfunction_fid(res_xs, *popt) * exp_ys_max
+            res_exp_ys = fitfunction_fid(exp_xs, *popt) * exp_ys_max
         else:
             popt, pcov = [], []
             res_xs = np.linspace(xmin, xmax, config["blendedlines_xpoints"])
@@ -8035,7 +8034,7 @@ class BlendedLinesWindow(EQDockWidget):
         self.params = (
             opt_param,
             err_param,
-            "FFT-Fit",
+            "FID-Fit",
             4,
             2,
             xcenter,
@@ -11920,9 +11919,9 @@ if __name__ == "__main__":
 # QShortcut('Ctrl+Shift+Y', mainwindow).activated.connect(lambda tmp_function=tmp_function: tmp_function(-1))
 
 
-## Define window function for FFT-fit
+## Define window function for FID-fit
 
-# def fft_window_function(ts):
+# def FID_window_function(ts):
 #     dt = ts[1] - ts[0]
 #     raise_time_points = int(2 / dt)
 #     fall_time_points = int(2 / dt)
@@ -11935,4 +11934,4 @@ if __name__ == "__main__":
 
 #     return(window_function)
 
-# BlendedLinesWindow.instance.fft_window_function = fft_window_function
+# BlendedLinesWindow.instance.FID_window_function = FID_window_function
