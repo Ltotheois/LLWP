@@ -6648,10 +6648,14 @@ class NewAssignmentsWindow(EQDockWidget):
         if self.new_assignments.get_new_assignments_df().empty:
             return
 
-        if config['flag_confirmdeleteall']:
+        if config["flag_confirmdeleteall"]:
             ConfirmDialog = QMessageBox()
-            ConfirmDialog.setText("Do you really want to delete all assignments?\n\n(If you misclicked, check the backup under \"~/.llwp/.lin\")")
-            ConfirmDialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            ConfirmDialog.setText(
+                'Do you really want to delete all assignments?\n\n(If you misclicked, check the backup under "~/.llwp/.lin")'
+            )
+            ConfirmDialog.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
 
             reply = ConfirmDialog.exec()
 
@@ -6659,7 +6663,6 @@ class NewAssignmentsWindow(EQDockWidget):
                 return
 
         self.delete(delete_all=True)
-
 
     def delete(self, delete_all=False):
         df = self.new_assignments.get_new_assignments_df()
@@ -7487,6 +7490,7 @@ class BlendedLinesWindow(EQDockWidget):
         self.peaks = []
         self.fit_values = None
         self.cid = None
+        self.fft_window_function = None
 
         mainwidget = QWidget()
         self.setWidget(mainwidget)
@@ -7529,7 +7533,8 @@ class BlendedLinesWindow(EQDockWidget):
             QQ(
                 QComboBox,
                 "blendedlines_lineshape",
-                items=list(shorthand_fitfunction_name_to_profile_and_derivative.keys()) + ['FFT Fit'],
+                items=list(shorthand_fitfunction_name_to_profile_and_derivative.keys())
+                + ["FFT Fit"],
                 minWidth=120,
             ),
             row_id,
@@ -7620,7 +7625,7 @@ class BlendedLinesWindow(EQDockWidget):
 
         peaks = self.peaks.copy()
         profile = config["blendedlines_lineshape"]
-        if profile == 'FFT Fit':
+        if profile == "FFT Fit":
             self.fit_peaks_fft(plot_widget)
             return
         profile, derivative = shorthand_fitfunction_name_to_profile_and_derivative[
@@ -7733,8 +7738,12 @@ class BlendedLinesWindow(EQDockWidget):
             res_ys = fitfunction(res_xs, *popt)
             res_exp_ys = fitfunction(exp_xs, *popt)
         else:
-            popt = [0] * (number_of_arguments * len(peaks) + polynomrank + 2 * fixedwidth)
-            perr = [0] * (number_of_arguments * len(peaks) + polynomrank + 2 * fixedwidth)
+            popt = [0] * (
+                number_of_arguments * len(peaks) + polynomrank + 2 * fixedwidth
+            )
+            perr = [0] * (
+                number_of_arguments * len(peaks) + polynomrank + 2 * fixedwidth
+            )
             res_xs = np.linspace(xmin, xmax, config["blendedlines_xpoints"])
             res_ys = res_xs * 0
             res_exp_ys = exp_xs * 0
@@ -7750,12 +7759,20 @@ class BlendedLinesWindow(EQDockWidget):
         err_param = []
 
         for i in range(len(peaks)):
-            tmp_params = list(popt[i * number_of_arguments : (i + 1) * number_of_arguments])
-            tmp_errors = list(perr[i * number_of_arguments : (i + 1) * number_of_arguments])
+            tmp_params = list(
+                popt[i * number_of_arguments : (i + 1) * number_of_arguments]
+            )
+            tmp_errors = list(
+                perr[i * number_of_arguments : (i + 1) * number_of_arguments]
+            )
 
             if fixedwidth:
-                tmp_params.extend(popt[-(polynomrank + number_of_widths) : len(popt) - polynomrank])
-                tmp_errors.extend(perr[-(polynomrank + number_of_widths) : len(popt) - polynomrank])
+                tmp_params.extend(
+                    popt[-(polynomrank + number_of_widths) : len(popt) - polynomrank]
+                )
+                tmp_errors.extend(
+                    perr[-(polynomrank + number_of_widths) : len(popt) - polynomrank]
+                )
 
             tmp_ys = fitfunction_no_baseline(res_xs, *tmp_params)
             tmp_ys += exp_mean
@@ -7822,7 +7839,7 @@ class BlendedLinesWindow(EQDockWidget):
         self.set_indicator_text.emit("<span style='color:#eda711;'>Working ...</span>")
 
         peaks = self.peaks.copy()
-        fixedwidth = config['blendedlines_fixedwidth']
+        fixedwidth = config["blendedlines_fixedwidth"]
         with plot_widget.plot_parts_lock:
             for part in plot_widget.plot_parts:
                 part.remove()
@@ -7840,6 +7857,13 @@ class BlendedLinesWindow(EQDockWidget):
         exp_ys = df_exp["y"].to_numpy()
 
         if len(peaks) and len(exp_xs):
+            exp_ys_max = 1
+            if len(exp_ys):
+                exp_ys_max = np.max(exp_ys)
+                if exp_ys_max <= 0:
+                    exp_ys_max = 1
+            exp_ys = exp_ys / exp_ys_max
+
             zf = 1
             dt = 1 / xwidth
             n_time = int(1 / dt / xresolution)
@@ -7857,33 +7881,48 @@ class BlendedLinesWindow(EQDockWidget):
                 ys_fid = np.zeros_like(ts, dtype=complex)
 
                 if fixedwidth:
-                    x0, y0 = params[idx:idx+delta_idx-1]
+                    x0, y0 = params[idx : idx + delta_idx - 1]
                 else:
-                    x0, y0, fwhm0 = params[idx:idx+delta_idx-1]
+                    x0, y0, fwhm0 = params[idx : idx + delta_idx - 1]
                 idx += delta_idx - 1
 
                 x0 = x0 - xcenter
-                ys_fid += y0 * np.pi * fwhm0 * np.exp(-ts * np.pi * fwhm0) * np.exp(2j*np.pi*x0*ts)
- 
+                ys_fid += (
+                    y0
+                    * np.pi
+                    * fwhm0
+                    * np.exp(-ts * np.pi * fwhm0)
+                    * np.exp(2j * np.pi * x0 * ts)
+                )
+
                 while idx < len(params):
                     if fixedwidth:
-                        x0, y0, phi0 = params[idx:idx+delta_idx]
+                        x0, y0, phi0 = params[idx : idx + delta_idx]
                     else:
-                        x0, y0, fwhm0, phi0 = params[idx:idx+delta_idx]
+                        x0, y0, fwhm0, phi0 = params[idx : idx + delta_idx]
 
                     x0 = x0 - xcenter
-                    ys_fid += y0 * np.pi * fwhm0 * np.exp(-ts * np.pi * fwhm0) * np.exp(2j*np.pi*x0*ts + phi0)
+                    ys_fid += (
+                        y0
+                        * np.pi
+                        * fwhm0
+                        * np.exp(-ts * np.pi * fwhm0)
+                        * np.exp(2j * np.pi * x0 * ts + phi0)
+                    )
                     idx += delta_idx
 
-                return(ys_fid)
+                return ys_fid
 
             def power_spectrum(ts, params, xcenter=0):
                 ys_fid = fid(ts, params, xcenter=xcenter)
                 nfft = n_time * zf
 
-                spec = np.fft.fftshift(np.fft.fft(ys_fid, nfft))
+                if self.fft_window_function is not None:
+                    ys_fid *= self.fft_window_function(ts)
+
+                spec = np.fft.fftshift(np.fft.fft(ys_fid, nfft)) * dt
                 freq = np.fft.fftshift(np.fft.fftfreq(nfft, dt))
-                power = np.abs(spec)**2
+                power = np.abs(spec)
 
                 freq += xcenter
                 return freq, power
@@ -7891,15 +7930,14 @@ class BlendedLinesWindow(EQDockWidget):
             def interp(exp_xs, ts, *params, xcenter=0):
                 fit_xs, fit_ys = power_spectrum(ts, params, xcenter=xcenter)
                 interp_ys = np.interp(exp_xs, fit_xs, fit_ys)
-                return(interp_ys)
-
+                return interp_ys
 
             def fitfunction_fft(exp_xs, *params, ts=ts, xcenter=xcenter):
                 return interp(exp_xs, ts, *params, xcenter=xcenter)
 
-
-            wmax = config['blendedlines_maxfwhm']
-            w0 = min(wmax/2, xwidth/2)
+            wmax = config["blendedlines_maxfwhm"]
+            w0 = min(wmax / 2, xwidth / 2)
+            ymax = np.max(exp_ys)
 
             p0 = [w0] if fixedwidth else []
             bounds = [[0], [wmax]] if fixedwidth else [[], []]
@@ -7908,24 +7946,34 @@ class BlendedLinesWindow(EQDockWidget):
                     x0 = xcenter + x_rel
                     if not xmin < x0 < xmax:
                         x0 = xcenter
-                
+
                 if not i:
                     p0.extend((x0, y0) if fixedwidth else (x0, y0, w0))
                     bounds[0].extend((xmin, 0) if fixedwidth else (xmin, 0, 0))
-                    bounds[1].extend((xmax, np.inf) if fixedwidth else (xmax, np.inf, wmax))
+                    bounds[1].extend(
+                        (xmax, 10 * ymax) if fixedwidth else (xmax, 10 * ymax, wmax)
+                    )
                 else:
                     p0.extend((x0, y0, 0) if fixedwidth else (x0, y0, w0, 0))
-                    bounds[0].extend((xmin, 0, -np.pi) if fixedwidth else (xmin, 0, 0, -np.pi))
-                    bounds[1].extend((xmax, np.inf, np.pi) if fixedwidth else (xmax, np.inf, wmax, np.pi))
+                    bounds[0].extend(
+                        (xmin, 0, -np.pi) if fixedwidth else (xmin, 0, 0, -np.pi)
+                    )
+                    bounds[1].extend(
+                        (xmax, 10 * ymax, np.pi)
+                        if fixedwidth
+                        else (xmax, 10 * ymax, wmax, np.pi)
+                    )
 
             thread.earlyreturn()
 
-            popt, pcov = optimize.curve_fit(fitfunction_fft, exp_xs, exp_ys, p0=p0, bounds=bounds)
+            popt, pcov = optimize.curve_fit(
+                fitfunction_fft, exp_xs, exp_ys, p0=p0, bounds=bounds
+            )
             perr = np.sqrt(np.diag(pcov))
 
-            res_xs = np.linspace(xcenter - xwidth/2, xcenter + xwidth/2, 1000)
-            res_ys = fitfunction_fft(res_xs, *popt)
-            res_exp_ys = fitfunction_fft(exp_xs, *popt)
+            res_xs = np.linspace(xcenter - xwidth / 2, xcenter + xwidth / 2, 1000)
+            res_ys = fitfunction_fft(res_xs, *popt) * exp_ys_max
+            res_exp_ys = fitfunction_fft(exp_xs, *popt) * exp_ys_max
         else:
             popt, pcov = [], []
             res_xs = np.linspace(xmin, xmax, config["blendedlines_xpoints"])
@@ -7939,15 +7987,16 @@ class BlendedLinesWindow(EQDockWidget):
         err_param = []
 
         if len(popt):
-
             if fixedwidth:
                 fwhm, x, y = popt[:3]
                 d_fwhm, d_x, d_y = perr[:3]
+                y, d_y = y * exp_ys_max, d_y * exp_ys_max
                 idx = 3
                 delta_idx = 3
             else:
                 x, y, fwhm = popt[:3]
                 d_x, d_y, d_fwhm = perr[:3]
+                y, d_y = y * exp_ys_max, d_y * exp_ys_max
                 idx = 3
                 delta_idx = 4
             opt_param.append((x, y, fwhm, 0))
@@ -7955,16 +8004,17 @@ class BlendedLinesWindow(EQDockWidget):
 
             while idx < len(popt):
                 if fixedwidth:
-                    x, y, phi = popt[idx:idx+delta_idx]
-                    d_x, d_y, d_phi = perr[idx:idx+delta_idx]
+                    x, y, phi = popt[idx : idx + delta_idx]
+                    d_x, d_y, d_phi = perr[idx : idx + delta_idx]
+                    y, d_y = y * exp_ys_max, d_y * exp_ys_max
                 else:
-                    x, y, fwhm, phi = popt[idx:idx+delta_idx]
-                    d_x, d_y, d_fwhm, d_phi = perr[idx:idx+delta_idx]
+                    x, y, fwhm, phi = popt[idx : idx + delta_idx]
+                    d_x, d_y, d_fwhm, d_phi = perr[idx : idx + delta_idx]
+                    y, d_y = y * exp_ys_max, d_y * exp_ys_max
                 opt_param.append((x, y, fwhm, phi))
                 err_param.append((d_x, d_y, d_fwhm, d_phi))
 
                 idx += delta_idx
-
 
         with plot_widget.plot_parts_lock:
             plot_widget.plot_parts.append(
@@ -7975,7 +8025,6 @@ class BlendedLinesWindow(EQDockWidget):
                 )
             )
 
-        
         baseline_args = []
 
         rms_ys = (
@@ -7986,7 +8035,7 @@ class BlendedLinesWindow(EQDockWidget):
         self.params = (
             opt_param,
             err_param,
-            'FFT-Fit',
+            "FFT-Fit",
             4,
             2,
             xcenter,
@@ -8026,9 +8075,13 @@ class BlendedLinesWindow(EQDockWidget):
                 del self.peaks[int(i)]
         self.plot_widget.update_plot()
 
-    def fitfunction_multiple_peaks(self, x, fun, der, baseline_polynom_rank, *ps, fixedwidth=False):
-        number_of_arguments = 2 + (1 + (fun == "Voigt")) * (not fixedwidth)  # number of arguments per peak
-        number_of_widths = 2 if fun == "Voigt" else 1                        # number of widths per peak
+    def fitfunction_multiple_peaks(
+        self, x, fun, der, baseline_polynom_rank, *ps, fixedwidth=False
+    ):
+        # number of arguments per peak
+        number_of_arguments = 2 + (1 + (fun == "Voigt")) * (not fixedwidth)
+        # number of width values per peak
+        number_of_widths = 2 if fun == "Voigt" else 1
         res_ys = []
         param_peaks = ps
 
@@ -8047,7 +8100,9 @@ class BlendedLinesWindow(EQDockWidget):
 
         # Peaks
         for i in range(len(param_peaks) // number_of_arguments):
-            tmp_params = list(param_peaks[i * number_of_arguments : (i + 1) * number_of_arguments])
+            tmp_params = list(
+                param_peaks[i * number_of_arguments : (i + 1) * number_of_arguments]
+            )
             if fixedwidth:
                 tmp_params.extend(widths)
             res_ys.append(lineshape(fun, der, x, *tmp_params))
@@ -11863,3 +11918,21 @@ if __name__ == "__main__":
 
 # QShortcut('Ctrl+Y', mainwindow).activated.connect(lambda tmp_function=tmp_function: tmp_function(1))
 # QShortcut('Ctrl+Shift+Y', mainwindow).activated.connect(lambda tmp_function=tmp_function: tmp_function(-1))
+
+
+## Define window function for FFT-fit
+
+# def fft_window_function(ts):
+#     dt = ts[1] - ts[0]
+#     raise_time_points = int(2 / dt)
+#     fall_time_points = int(2 / dt)
+
+#     window_function = np.ones(len(ts))
+#     if raise_time_points > 0:
+#         window_function[:raise_time_points] *= 0.5 * np.cos(np.pi * (np.arange(raise_time_points)/raise_time_points + 1.0)) + 0.5
+#     if fall_time_points > 0:
+#         window_function[-fall_time_points:] *= 0.5 * np.cos(np.pi * (np.arange(fall_time_points)/fall_time_points)) + 0.5
+
+#     return(window_function)
+
+# BlendedLinesWindow.instance.fft_window_function = fft_window_function
