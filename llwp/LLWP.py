@@ -89,6 +89,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMenu,
+    QMessageBox,
     QPushButton,
     QPlainTextEdit,
     QWidget,
@@ -358,6 +359,7 @@ class Config(dict):
         "flag_lincustomfreqformat": ("", str),
         "flag_allowdocking": (True, bool),
         "flag_docksalwaysontop": (True, bool),
+        "flag_confirmdeleteall": (True, bool),
         "commandlinedialog_commands": ([], list),
         "commandlinedialog_current": (0, int),
         "closebylines_catfstring": ("{x:12.4f} {qns} {ylog}", str),
@@ -6643,7 +6645,21 @@ class NewAssignmentsWindow(EQDockWidget):
         self.table.scrollToBottom()
 
     def delete_all(self):
+        if self.new_assignments.get_new_assignments_df().empty:
+            return
+
+        if config['flag_confirmdeleteall']:
+            ConfirmDialog = QMessageBox()
+            ConfirmDialog.setText("Do you really want to delete all assignments?\n\n(If you misclicked, check the backup under \"~/.llwp/.lin\")")
+            ConfirmDialog.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+            reply = ConfirmDialog.exec()
+
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
         self.delete(delete_all=True)
+
 
     def delete(self, delete_all=False):
         df = self.new_assignments.get_new_assignments_df()
@@ -7513,7 +7529,7 @@ class BlendedLinesWindow(EQDockWidget):
             QQ(
                 QComboBox,
                 "blendedlines_lineshape",
-                items=shorthand_fitfunction_name_to_profile_and_derivative.keys(),
+                items=list(shorthand_fitfunction_name_to_profile_and_derivative.keys()) + ['FFT Fit'],
                 minWidth=120,
             ),
             row_id,
@@ -7604,6 +7620,9 @@ class BlendedLinesWindow(EQDockWidget):
 
         peaks = self.peaks.copy()
         profile = config["blendedlines_lineshape"]
+        if profile == 'FFT Fit':
+            self.fit_peaks_fft(plot_widget)
+            return
         profile, derivative = shorthand_fitfunction_name_to_profile_and_derivative[
             profile
         ]
@@ -7793,6 +7812,192 @@ class BlendedLinesWindow(EQDockWidget):
         )
 
         thread.earlyreturn()
+
+        self.fill_table_requested.emit()
+        self.set_indicator_text.emit("Ready")
+        plot_widget.update_plot_requested.emit()
+
+    @QThread.threaded_d
+    def fit_peaks_fft(self, plot_widget, thread=None):
+        self.set_indicator_text.emit("<span style='color:#eda711;'>Working ...</span>")
+
+        peaks = self.peaks.copy()
+        fixedwidth = config['blendedlines_fixedwidth']
+        with plot_widget.plot_parts_lock:
+            for part in plot_widget.plot_parts:
+                part.remove()
+            plot_widget.plot_parts = []
+
+        thread.earlyreturn()
+
+        xrange = xmin, xmax = plot_widget.xrange
+        xwidth = xmax - xmin
+        xcenter = (xmin + xmax) / 2
+        xresolution = 0.05
+
+        df_exp = ExpFile.get_data(xrange=xrange).copy()
+        exp_xs = df_exp["x"].to_numpy()
+        exp_ys = df_exp["y"].to_numpy()
+
+        if len(peaks) and len(exp_xs):
+            zf = 1
+            dt = 1 / xwidth
+            n_time = int(1 / dt / xresolution)
+            ts = np.arange(n_time) * dt
+
+            def fid(ts, params, xcenter=0, fixedwidth=fixedwidth):
+                if fixedwidth:
+                    fwhm0 = params[0]
+                    idx = 1
+                    delta_idx = 3
+                else:
+                    idx = 0
+                    delta_idx = 4
+
+                ys_fid = np.zeros_like(ts, dtype=complex)
+
+                if fixedwidth:
+                    x0, y0 = params[idx:idx+delta_idx-1]
+                else:
+                    x0, y0, fwhm0 = params[idx:idx+delta_idx-1]
+                idx += delta_idx - 1
+
+                x0 = x0 - xcenter
+                ys_fid += y0 * np.pi * fwhm0 * np.exp(-ts * np.pi * fwhm0) * np.exp(2j*np.pi*x0*ts)
+ 
+                while idx < len(params):
+                    if fixedwidth:
+                        x0, y0, phi0 = params[idx:idx+delta_idx]
+                    else:
+                        x0, y0, fwhm0, phi0 = params[idx:idx+delta_idx]
+
+                    x0 = x0 - xcenter
+                    ys_fid += y0 * np.pi * fwhm0 * np.exp(-ts * np.pi * fwhm0) * np.exp(2j*np.pi*x0*ts + phi0)
+                    idx += delta_idx
+
+                return(ys_fid)
+
+            def power_spectrum(ts, params, xcenter=0):
+                ys_fid = fid(ts, params, xcenter=xcenter)
+                nfft = n_time * zf
+
+                spec = np.fft.fftshift(np.fft.fft(ys_fid, nfft))
+                freq = np.fft.fftshift(np.fft.fftfreq(nfft, dt))
+                power = np.abs(spec)**2
+
+                freq += xcenter
+                return freq, power
+
+            def interp(exp_xs, ts, *params, xcenter=0):
+                fit_xs, fit_ys = power_spectrum(ts, params, xcenter=xcenter)
+                interp_ys = np.interp(exp_xs, fit_xs, fit_ys)
+                return(interp_ys)
+
+
+            def fitfunction_fft(exp_xs, *params, ts=ts, xcenter=xcenter):
+                return interp(exp_xs, ts, *params, xcenter=xcenter)
+
+
+            wmax = config['blendedlines_maxfwhm']
+            w0 = min(wmax/2, xwidth/2)
+
+            p0 = [w0] if fixedwidth else []
+            bounds = [[0], [wmax]] if fixedwidth else [[], []]
+            for i, (x0, y0, x_rel) in enumerate(self.peaks):
+                if not xmin < x0 < xmax:
+                    x0 = xcenter + x_rel
+                    if not xmin < x0 < xmax:
+                        x0 = xcenter
+                
+                if not i:
+                    p0.extend((x0, y0) if fixedwidth else (x0, y0, w0))
+                    bounds[0].extend((xmin, 0) if fixedwidth else (xmin, 0, 0))
+                    bounds[1].extend((xmax, np.inf) if fixedwidth else (xmax, np.inf, wmax))
+                else:
+                    p0.extend((x0, y0, 0) if fixedwidth else (x0, y0, w0, 0))
+                    bounds[0].extend((xmin, 0, -np.pi) if fixedwidth else (xmin, 0, 0, -np.pi))
+                    bounds[1].extend((xmax, np.inf, np.pi) if fixedwidth else (xmax, np.inf, wmax, np.pi))
+
+            thread.earlyreturn()
+
+            popt, pcov = optimize.curve_fit(fitfunction_fft, exp_xs, exp_ys, p0=p0, bounds=bounds)
+            perr = np.sqrt(np.diag(pcov))
+
+            res_xs = np.linspace(xcenter - xwidth/2, xcenter + xwidth/2, 1000)
+            res_ys = fitfunction_fft(res_xs, *popt)
+            res_exp_ys = fitfunction_fft(exp_xs, *popt)
+        else:
+            popt, pcov = [], []
+            res_xs = np.linspace(xmin, xmax, config["blendedlines_xpoints"])
+            res_ys = res_xs * 0
+            res_exp_ys = exp_xs * 0
+
+        thread.earlyreturn()
+        ax = plot_widget.ax
+
+        opt_param = []
+        err_param = []
+
+        if len(popt):
+
+            if fixedwidth:
+                fwhm, x, y = popt[:3]
+                d_fwhm, d_x, d_y = perr[:3]
+                idx = 3
+                delta_idx = 3
+            else:
+                x, y, fwhm = popt[:3]
+                d_x, d_y, d_fwhm = perr[:3]
+                idx = 3
+                delta_idx = 4
+            opt_param.append((x, y, fwhm, 0))
+            err_param.append((d_x, d_y, d_fwhm, 0))
+
+            while idx < len(popt):
+                if fixedwidth:
+                    x, y, phi = popt[idx:idx+delta_idx]
+                    d_x, d_y, d_phi = perr[idx:idx+delta_idx]
+                else:
+                    x, y, fwhm, phi = popt[idx:idx+delta_idx]
+                    d_x, d_y, d_fwhm, d_phi = perr[idx:idx+delta_idx]
+                opt_param.append((x, y, fwhm, phi))
+                err_param.append((d_x, d_y, d_fwhm, d_phi))
+
+                idx += delta_idx
+
+
+        with plot_widget.plot_parts_lock:
+            plot_widget.plot_parts.append(
+                ax.scatter(
+                    [x[0] for x in opt_param],
+                    [0 for x in opt_param],
+                    color=config["blendedlines_color_points"],
+                )
+            )
+
+        
+        baseline_args = []
+
+        rms_ys = (
+            np.sqrt(np.sum((exp_ys - res_exp_ys) ** 2) / len(exp_ys))
+            if len(exp_ys)
+            else 0
+        )
+        self.params = (
+            opt_param,
+            err_param,
+            'FFT-Fit',
+            4,
+            2,
+            xcenter,
+            baseline_args,
+            rms_ys,
+        )
+
+        thread.earlyreturn()
+
+        plot_widget.fit_line.set_data(res_xs, res_ys)
+        plot_widget.fit_line.set_color(config["blendedlines_color_total"])
 
         self.fill_table_requested.emit()
         self.set_indicator_text.emit("Ready")
