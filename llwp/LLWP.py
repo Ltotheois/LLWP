@@ -7945,6 +7945,8 @@ class BlendedLinesWindow(EQDockWidget):
                     x0 = xcenter + x_rel
                     if not xmin < x0 < xmax:
                         x0 = xcenter
+                if not 0 < y0 < ymax * 10:
+                    y0 = ymax
 
                 if not i:
                     p0.extend((x0, y0) if fixedwidth else (x0, y0, w0))
