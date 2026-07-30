@@ -7936,7 +7936,7 @@ class BlendedLinesWindow(EQDockWidget):
 
             wmax = config["blendedlines_maxfwhm"]
             w0 = min(wmax / 2, xwidth / 2)
-            ymax = np.max(exp_ys) * exp_ys_max
+            ymax = 10
 
             p0 = [w0] if fixedwidth else []
             bounds = [[0], [wmax]] if fixedwidth else [[], []]
@@ -7945,14 +7945,15 @@ class BlendedLinesWindow(EQDockWidget):
                     x0 = xcenter + x_rel
                     if not xmin < x0 < xmax:
                         x0 = xcenter
-                if not 0 < y0 < ymax * 10:
-                    y0 = ymax
+                y0 = y0 / exp_ys_max
+                if not 0 < y0 < ymax:
+                    y0 = ymax / 2
 
                 if not i:
                     p0.extend((x0, y0) if fixedwidth else (x0, y0, w0))
                     bounds[0].extend((xmin, 0) if fixedwidth else (xmin, 0, 0))
                     bounds[1].extend(
-                        (xmax, 10 * ymax) if fixedwidth else (xmax, 10 * ymax, wmax)
+                        (xmax, ymax) if fixedwidth else (xmax, ymax, wmax)
                     )
                 else:
                     p0.extend((x0, y0, 0) if fixedwidth else (x0, y0, w0, 0))
@@ -7960,9 +7961,9 @@ class BlendedLinesWindow(EQDockWidget):
                         (xmin, 0, -np.pi) if fixedwidth else (xmin, 0, 0, -np.pi)
                     )
                     bounds[1].extend(
-                        (xmax, 10 * ymax, np.pi)
+                        (xmax, ymax, np.pi)
                         if fixedwidth
-                        else (xmax, 10 * ymax, wmax, np.pi)
+                        else (xmax, ymax, wmax, np.pi)
                     )
 
             thread.earlyreturn()
@@ -11925,8 +11926,8 @@ if __name__ == "__main__":
 
 # def FID_window_function(ts):
 #     dt = ts[1] - ts[0]
-#     raise_time_points = int(2 / dt)
-#     fall_time_points = int(2 / dt)
+#     raise_time_points = int(0.2 / dt)
+#     fall_time_points = int(0.2 / dt)
 
 #     window_function = np.ones(len(ts))
 #     if raise_time_points > 0:
