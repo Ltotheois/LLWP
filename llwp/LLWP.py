@@ -7491,7 +7491,7 @@ class BlendedLinesWindow(EQDockWidget):
         self.peaks = []
         self.fit_values = None
         self.cid = None
-        self.FID_window_function = None
+        self.FID_postprocessing_function = None
 
         mainwidget = QWidget()
         self.setWidget(mainwidget)
@@ -7916,8 +7916,8 @@ class BlendedLinesWindow(EQDockWidget):
             def power_spectrum(ts, params, xcenter=0):
                 ys_fid = fid(ts, params, xcenter=xcenter)
 
-                if self.FID_window_function is not None:
-                    ys_fid *= self.FID_window_function(ts)
+                if self.FID_postprocessing_function is not None:
+                    ts, ys_fid = self.FID_postprocessing_function(ts, ys_fid)
 
                 spec = np.fft.fftshift(np.fft.fft(ys_fid, n_time)) * dt
                 freq = np.fft.fftshift(np.fft.fftfreq(n_time, dt))
@@ -11922,9 +11922,13 @@ if __name__ == "__main__":
 # QShortcut('Ctrl+Shift+Y', mainwindow).activated.connect(lambda tmp_function=tmp_function: tmp_function(-1))
 
 
-## Define window function for FID-fit
+## Define postprocessing for FID-fit
 
-# def FID_window_function(ts):
+# BlendedLinesWindow.instance.FID_postprocessing_function = lambda ts, ys: (ts, ys * np.hanning(len(ts)))
+
+## Or with a custom function
+
+# def FID_postprocessing_function(ts, ys_fid):
 #     dt = ts[1] - ts[0]
 #     raise_time_points = int(0.2 / dt)
 #     fall_time_points = int(0.2 / dt)
@@ -11935,6 +11939,10 @@ if __name__ == "__main__":
 #     if fall_time_points > 0:
 #         window_function[-fall_time_points:] *= 0.5 * np.cos(np.pi * (np.arange(fall_time_points)/fall_time_points)) + 0.5
 
-#     return(window_function)
+#     ys = ys_fid * window_function
+#     return(ts, ys)
 
-# BlendedLinesWindow.instance.FID_window_function = FID_window_function
+# BlendedLinesWindow.instance.FID_postprocessing_function = FID_postprocessing_function
+
+
+
