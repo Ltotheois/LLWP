@@ -7326,7 +7326,12 @@ class ResidualsWindow(EQDockWidget):
             if xmin == xmax:
                 xmin -= 1
                 xmax += 1
-            self.ax.set_xlim([xmin, xmax])
+            self.ax.set_xlim(
+                [
+                    xmin - 0.02 * (xmax - xmin),
+                    xmax + 0.02 * (xmax - xmin),
+                ]
+            )
             ymin, ymax = np.min(ys), np.max(ys)
             if ymin == ymax:
                 ymin -= 1
@@ -7851,7 +7856,7 @@ class BlendedLinesWindow(EQDockWidget):
         xrange = xmin, xmax = plot_widget.xrange
         xwidth = xmax - xmin
         xcenter = (xmin + xmax) / 2
-        xresolution = config['blendedlines_fidresolution']
+        xresolution = config["blendedlines_fidresolution"]
 
         df_exp = ExpFile.get_data(xrange=xrange).copy()
         exp_xs = df_exp["x"].to_numpy()
@@ -7952,18 +7957,14 @@ class BlendedLinesWindow(EQDockWidget):
                 if not i:
                     p0.extend((x0, y0) if fixedwidth else (x0, y0, w0))
                     bounds[0].extend((xmin, 0) if fixedwidth else (xmin, 0, 0))
-                    bounds[1].extend(
-                        (xmax, ymax) if fixedwidth else (xmax, ymax, wmax)
-                    )
+                    bounds[1].extend((xmax, ymax) if fixedwidth else (xmax, ymax, wmax))
                 else:
                     p0.extend((x0, y0, 0) if fixedwidth else (x0, y0, w0, 0))
                     bounds[0].extend(
                         (xmin, 0, -np.pi) if fixedwidth else (xmin, 0, 0, -np.pi)
                     )
                     bounds[1].extend(
-                        (xmax, ymax, np.pi)
-                        if fixedwidth
-                        else (xmax, ymax, wmax, np.pi)
+                        (xmax, ymax, np.pi) if fixedwidth else (xmax, ymax, wmax, np.pi)
                     )
 
             thread.earlyreturn()
@@ -8508,7 +8509,9 @@ class SeriesfinderWindow(EQDockWidget):
             tmp_lin_df = LinFile.get_data().copy()
             tmp_lin_df.drop(columns=["x"] + qns_invisible, inplace=True)
 
-            tmp_cat_df = pd.merge(tmp_cat_df, tmp_lin_df, how="outer", on=qns_visible, indicator=True)
+            tmp_cat_df = pd.merge(
+                tmp_cat_df, tmp_lin_df, how="outer", on=qns_visible, indicator=True
+            )
             tmp_cat_df = tmp_cat_df[tmp_cat_df["_merge"] == "left_only"]
             unassigned = "without already assigned lines"
         else:
@@ -8782,7 +8785,12 @@ class EnergyLevelsWindow(EQDockWidget):
                 if xmin == xmax:
                     xmin -= 1
                     xmax += 1
-                self.ax.set_xlim([xmin, xmax])
+                self.ax.set_xlim(
+                    [
+                        xmin - 0.02 * (xmax - xmin),
+                        xmax + 0.02 * (xmax - xmin),
+                    ]
+                )
                 ymin, ymax = np.min(ys), np.max(ys)
                 if ymin == ymax:
                     ymin -= 1
@@ -11942,6 +11950,3 @@ if __name__ == "__main__":
 #     return(ts, ys)
 
 # BlendedLinesWindow.instance.FID_postprocessing_function = FID_postprocessing_function
-
-
-
