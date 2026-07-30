@@ -8506,11 +8506,10 @@ class SeriesfinderWindow(EQDockWidget):
 
         if config["seriesfinder_onlyunassigned"]:
             tmp_lin_df = LinFile.get_data().copy()
-            tmp_lin_df["DROP"] = True
             tmp_lin_df.drop(columns=["x"] + qns_invisible, inplace=True)
 
-            tmp_cat_df = pd.merge(tmp_cat_df, tmp_lin_df, how="outer", on=qns_visible)
-            tmp_cat_df = tmp_cat_df[not tmp_cat_df.DROP]
+            tmp_cat_df = pd.merge(tmp_cat_df, tmp_lin_df, how="outer", on=qns_visible, indicator=True)
+            tmp_cat_df = tmp_cat_df[tmp_cat_df["_merge"] == "left_only"]
             unassigned = "without already assigned lines"
         else:
             unassigned = "with already assigned lines"
