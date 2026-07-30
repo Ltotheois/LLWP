@@ -3770,8 +3770,8 @@ class MainWindow(QMainWindow):
             "Shift+s": lambda: WidthDialog.gui_set_width("-"),
             "Shift+a": lambda: OffsetDialog.gui_set_offset("-"),
             "Shift+d": lambda: OffsetDialog.gui_set_offset("+"),
-            "Ctrl+S": lambda: NewAssignments.get_instance().save_gui(),
-            "Ctrl+Space": lambda: AssignAllDialog.show_dialog(),
+            "Ctrl+s": lambda: NewAssignments.get_instance().save_gui(),
+            "Ctrl+Return": lambda: AssignAllDialog.show_dialog(),
             "Ctrl+Shift+k": lambda: ConsoleDialog.run_current_command(),
             "F11": lambda: self.togglefullscreen(),
         }
@@ -4744,6 +4744,8 @@ class AssignAllDialog(QDialog):
             eqy_query = " and ".join(
                 [f"(qn{i + 1} == {qn})" for i, qn in enumerate(qnus)]
             )
+            if ASAPAx.egy_df is None:
+                continue
             egy_offsets = ASAPAx.egy_df.query(eqy_query)["egy"].to_numpy()
             if len(egy_offsets) == 1:
                 pred_egy[i_row] = egy_offsets[0]
@@ -4769,7 +4771,7 @@ class AssignAllDialog(QDialog):
             offsets[i_row] = vals.mean() - pred_egy.get(i_row, 0)
 
         if len(offsets) < 1:
-            msg = "Please assign at least a single transition of the series (two subsequent would be great)."
+            msg = "Please assign at least a single transition of the series (two would be great)."
             notify_info.emit(msg)
             raise GUIAbortedError(msg)
 
@@ -11512,6 +11514,7 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
                 QPushButton,
                 text="Calculate Cross-Correlation",
                 change=lambda _: mainwindow.lwpwidget.calc_correlation_plots(),
+                shortcut="Ctrl+Shift+Return"
             )
         )
 
