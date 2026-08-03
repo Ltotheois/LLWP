@@ -7232,7 +7232,9 @@ class ResidualsWindow(EQDockWidget):
         buttonslayout.addStretch(1)
         self.update_button = QQ(QPushButton, text="Update", change=self.plot_residuals)
         self.update_button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.update_button.customContextMenuRequested.connect(self.fit_file_context_menu)
+        self.update_button.customContextMenuRequested.connect(
+            self.fit_file_context_menu
+        )
         buttonslayout.addWidget(self.update_button)
         buttonslayout.addWidget(
             QQ(QPushButton, text="Save", change=self.save_residuals)
@@ -10949,7 +10951,7 @@ class ASAPWidget(LWPWidget):
                 continue
 
             colors.update(dataframe["color"].unique())
-            
+
             interp_ys = np.interp(tot_xs, xs - ref_pos, ys, left=1, right=1)
 
             if exclude_width:
@@ -11523,7 +11525,7 @@ class ASAPSettingsWindow(ReferenceSeriesWindow):
                 QPushButton,
                 text="Calculate Cross-Correlation",
                 change=lambda _: mainwindow.lwpwidget.calc_correlation_plots(),
-                shortcut="Ctrl+Shift+Return"
+                shortcut="Ctrl+Shift+Return",
             )
         )
 
