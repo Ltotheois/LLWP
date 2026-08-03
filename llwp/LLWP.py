@@ -7231,6 +7231,8 @@ class ResidualsWindow(EQDockWidget):
         layout.addLayout(buttonslayout)
         buttonslayout.addStretch(1)
         self.update_button = QQ(QPushButton, text="Update", change=self.plot_residuals)
+        self.update_button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.update_button.customContextMenuRequested.connect(self.fit_file_context_menu)
         buttonslayout.addWidget(self.update_button)
         buttonslayout.addWidget(
             QQ(QPushButton, text="Save", change=self.save_residuals)
@@ -7464,13 +7466,13 @@ class ResidualsWindow(EQDockWidget):
                                     )
                                 )
 
-    def contextMenuEvent(self, event):
+    def fit_file_context_menu(self, pos):
         menu = QMenu(self)
         load_fit_file = menu.addAction("Load *.fit file instead")
         update_fit_file = menu.addAction("Update *.fit file")
         clear_fit_file = menu.addAction("Clear *.fit file")
 
-        action = menu.exec(self.mapToGlobal(event.pos()))
+        action = menu.exec(self.update_button.mapToGlobal(pos))
         if action == load_fit_file:
             filename, _ = QFileDialog.getOpenFileName(None, "Choose *.egy file")
             if not filename:
@@ -10929,8 +10931,6 @@ class ASAPWidget(LWPWidget):
             if min_index == max_index:
                 use_for_cross_correlation_mask.append(False)
                 continue
-            else:
-                use_for_cross_correlation_mask.append(True)
 
             # Here we have to pad by a little, otherwise the interpolation has to use the default values of 1
             # -> results in strong accidental cross-correlation signal at the upper and lower limit of the plot
@@ -10944,8 +10944,12 @@ class ASAPWidget(LWPWidget):
             xs = dataframe["x"]
             ys = dataframe["y"]
 
-            colors.update(dataframe["color"].unique())
+            if not len(xs):
+                use_for_cross_correlation_mask.append(False)
+                continue
 
+            colors.update(dataframe["color"].unique())
+            
             interp_ys = np.interp(tot_xs, xs - ref_pos, ys, left=1, right=1)
 
             if exclude_width:
@@ -10978,6 +10982,7 @@ class ASAPWidget(LWPWidget):
                 total_calc_intensity *= ref_int
                 total_expcatfactor /= config["asap_expcatfactor"]
 
+            use_for_cross_correlation_mask.append(True)
             tot_ys *= interp_ys
             n_correlated_transitions += 1
 
