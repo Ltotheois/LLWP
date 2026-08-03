@@ -7245,7 +7245,11 @@ class ResidualsWindow(EQDockWidget):
         self.noq = noq
 
         if self.fit_fname is not None:
-            return self.fit_df
+            tmp = self.fit_df
+            query = config["residuals_query"].strip()
+            if query:
+                tmp = tmp.query(query)
+            return tmp
 
         lin_df = LinFile.get_data()
         cat_df = CatFile.get_data()
