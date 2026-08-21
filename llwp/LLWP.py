@@ -7241,7 +7241,6 @@ class ResidualsWindow(EQDockWidget):
         )
         buttonslayout.addStretch(1)
 
-        self.fit_df = None
         self.fit_fname = None
 
     def get_residuals(self):
@@ -7249,7 +7248,7 @@ class ResidualsWindow(EQDockWidget):
         self.noq = noq
 
         if self.fit_fname is not None:
-            tmp = self.fit_df
+            tmp = pyckett.fit_to_df(self.fit_fname)
             query = config["residuals_query"].strip()
             if query:
                 tmp = tmp.query(query)
@@ -7470,23 +7469,20 @@ class ResidualsWindow(EQDockWidget):
 
     def fit_file_context_menu(self, pos):
         menu = QMenu(self)
-        load_fit_file = menu.addAction("Load *.fit file instead")
-        update_fit_file = menu.addAction("Update *.fit file")
-        clear_fit_file = menu.addAction("Clear *.fit file")
+
+        if self.fit_fname:
+            clear_fit_file = menu.addAction("Clear *.fit file")
+        else:
+            load_fit_file = menu.addAction("Load *.fit file instead")
 
         action = menu.exec(self.update_button.mapToGlobal(pos))
-        if action == load_fit_file:
+        if self.fit_fname and action == clear_fit_file:
+            self.fit_fname = None
+        if (not self.fit_fname) and action == load_fit_file:
             filename, _ = QFileDialog.getOpenFileName(None, "Choose *.egy file")
             if not filename:
                 return
-
             self.fit_fname = filename
-            self.fit_df = pyckett.fit_to_df(filename)
-        elif action == update_fit_file:
-            self.fit_df = pyckett.fit_to_df(self.fit_fname)
-        elif action == clear_fit_file:
-            self.fit_fname = None
-            self.fit_df = None
 
 
 class BlendedLinesWindow(EQDockWidget):
