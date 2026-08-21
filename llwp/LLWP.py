@@ -3720,6 +3720,11 @@ class MainWindow(QMainWindow):
                 os.getcwd(),
             ]
             for folder in possible_folders:
+                if sys.platform == 'darwin':
+                    iconpath = os.path.join(folder, f"{APP_TAG}Mac.png")
+                    if os.path.isfile(iconpath):
+                        break
+
                 iconpath = os.path.join(folder, f"{APP_TAG}.svg")
                 if os.path.isfile(iconpath):
                     break
@@ -7470,15 +7475,19 @@ class ResidualsWindow(EQDockWidget):
     def fit_file_context_menu(self, pos):
         menu = QMenu(self)
 
+        clear_fit_file = None
+        load_fit_file = None
+
+
         if self.fit_fname:
             clear_fit_file = menu.addAction("Clear *.fit file")
         else:
             load_fit_file = menu.addAction("Load *.fit file instead")
 
         action = menu.exec(self.update_button.mapToGlobal(pos))
-        if self.fit_fname and action == clear_fit_file:
+        if action == clear_fit_file:
             self.fit_fname = None
-        if (not self.fit_fname) and action == load_fit_file:
+        elif action == load_fit_file:
             filename, _ = QFileDialog.getOpenFileName(None, "Choose *.egy file")
             if not filename:
                 return
