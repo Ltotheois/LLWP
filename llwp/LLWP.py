@@ -410,6 +410,17 @@ class Config(dict):
         "energylevels_autoscale": (True, bool),
         "cmd_current": (0, int),
         "cmd_commands": ([], list),
+        "onsave_clearnewassignments": (True, bool),
+        "onsave_removeduplicates": (True, bool),
+        "onsave_sort": (True, bool),
+        "onsave_reloadlinfile": (True, bool),
+        "onsave_increaseparams": (True, bool),
+        "onsave_runspfit": (True, bool),
+        "onsave_runspcat": (True, bool),
+        "onsave_reloadcatfile": (True, bool),
+        "onsave_updateresiduals": (True, bool),
+        "onsave_consent": (False, bool),
+        "onsave_skipall": (True, bool),
         "assignall_fitwidth": (4, float),
         "assignall_plotwidth": (4, float),
         "assignall_maxfwhm": (1, float),
@@ -1795,7 +1806,7 @@ class File:
         return widgets.values()
 
     def gui_more_settings_dialog(self):
-        self.more_settings_dialog = FileAdditionalSettingsDialog.show_dialoag(self)
+        self.more_settings_dialog = FileAdditionalSettingsDialog.show_dialog(self)
 
     @classmethod
     def gui_change_color_all(cls, argument):
@@ -2295,6 +2306,7 @@ class NewAssignments(LinFile):
         notify_info.emit(
             f"The {len(self.new_assignments_df)} new assignments were saved to the file '{savepath}'."
         )
+        return savepath
 
     def save_backup(self):
         if not len(self.get_new_assignments_df()):
@@ -2323,7 +2335,7 @@ class FileAdditionalSettingsDialog(QDialog):
     open_dialogs = {}
 
     @classmethod
-    def show_dialoag(cls, file):
+    def show_dialog(cls, file):
         if file in cls.open_dialogs:
             dialog = cls.open_dialogs[file]
             dialog.done(0)
@@ -3720,7 +3732,7 @@ class MainWindow(QMainWindow):
                 os.getcwd(),
             ]
             for folder in possible_folders:
-                if sys.platform == 'darwin':
+                if sys.platform == "darwin":
                     iconpath = os.path.join(folder, f"{APP_TAG}Mac.png")
                     if os.path.isfile(iconpath):
                         break
@@ -6411,6 +6423,7 @@ class LogWindow(EQDockWidget):
             "info": "<span style='color:#0096FF;'>INFO</span>: ",
         }.get(style, "")
 
+        text = text.replace("\n", separator)
         text = f"{time_str}: {style_string}{text}{separator}"
         self.log_area.append(text)
         sb = self.log_area.verticalScrollBar()
@@ -6555,6 +6568,10 @@ class NewAssignmentsWindow(EQDockWidget):
     default_position = 2
     available_in = ["LLWP", "ASAP"]
 
+    saveactions_started = pyqtSignal()
+    saveactions_finished = pyqtSignal()
+    saveactions_request_delete_all = pyqtSignal()
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("New Assignments")
@@ -6568,9 +6585,12 @@ class NewAssignmentsWindow(EQDockWidget):
         new_assignments = self.new_assignments = NewAssignments.get_instance()
 
         widgets = self.widgets = {
-            "save": QQ(
-                QToolButton, text="Save", change=lambda x: new_assignments.save_gui()
+            "save_settings": QQ(
+                QToolButton,
+                text="⚙",
+                change=lambda x: OnSaveOptionsDialog.show_dialog(),
             ),
+            "save": QQ(QToolButton, text="Save", change=lambda x: self.save()),
             "delete": QQ(QToolButton, text="×", change=lambda x: self.delete()),
             "delete_all": QQ(
                 QToolButton, text="Del All", change=lambda x: self.delete_all()
@@ -6629,7 +6649,15 @@ class NewAssignmentsWindow(EQDockWidget):
         self.model.resize_columns()
 
         buttonsBox = QHBoxLayout()
-        for key in ("delete", "delete_all", "add_row", None, "save", "resize"):
+        for key in (
+            "delete",
+            "delete_all",
+            "add_row",
+            None,
+            "save_settings",
+            "save",
+            "resize",
+        ):
             (
                 buttonsBox.addWidget(widgets[key])
                 if key is not None
@@ -6648,15 +6676,161 @@ class NewAssignmentsWindow(EQDockWidget):
             )
         layout.addLayout(buttonsBox)
 
+        self.saveactions_request_delete_all.connect(
+            lambda: NewAssignmentsWindow.instance.delete_all(skipconfirmation=True)
+        )
+        self.saveactions_started.connect(
+            lambda: self.widgets["save_settings"].setStyleSheet(
+                "background-color: #0096FF"
+            )
+        )
+        self.saveactions_finished.connect(
+            lambda: self.widgets["save_settings"].setStyleSheet("")
+        )
+
     def scroll_bottom(self):
         self.table.selectRow(len(self.model.get_df()) - 1)
         self.table.scrollToBottom()
 
-    def delete_all(self):
+    def save(self):
+        savepath = self.new_assignments.save_gui()
+        if savepath is None or config["onsave_skipall"] or not config["onsave_consent"]:
+            return
+
+        self.save_actions(savepath)
+
+    @QThread.threaded_d
+    @status_d
+    def save_actions(self, savepath, thread=None):
+        self.saveactions_started.emit()
+
+        try:
+            threads = []
+            if config["onsave_clearnewassignments"]:
+                self.saveactions_request_delete_all.emit()
+
+            savepath = os.path.abspath(savepath)
+            basename, ext = os.path.splitext(savepath)
+            head, tail = os.path.split(basename)
+
+            message = ["SAVE ACTIONS: "]
+
+            lin_fname = savepath
+            if not os.path.exists(lin_fname):
+                lin = None
+                nlines_after = 99999
+                message.append("- The *.lin file could not be found")
+            else:
+                lin = pyckett.lin_to_df(lin_fname)
+
+                if config["onsave_removeduplicates"]:
+                    nlines_before = len(lin)
+                    qn_labels = [
+                        f"qn{ul}{i + 1}" for ul in "ul" for i in range(pyckett.QUANTA)
+                    ]
+                    lin = lin.drop_duplicates(subset=qn_labels, keep="last")
+                    nlines_after = len(lin)
+                    if nlines_before != nlines_after:
+                        message.append(
+                            f"- Removed {nlines_before - nlines_after} duplicates from the *.lin file"
+                        )
+
+                if config["onsave_sort"]:
+                    lin = lin.sort_values(["x", "error"])
+
+                with open(lin_fname, "w+") as file:
+                    file.write(pyckett.df_to_lin(lin))
+
+                if (
+                    config["onsave_reloadlinfile"]
+                    and not config["flag_autoreloadfiles"]
+                ):
+                    lin_file = LinFile.ids.get(lin_fname)
+                    if lin_file:
+                        lin_thread = lin_file.load_file()
+                        threads.append(lin_thread)
+
+            par_fname = basename + ".par"
+            if not os.path.exists(par_fname):
+                par = None
+                message.append("- The *.par file could not be found")
+            else:
+                par = pyckett.parvar_to_dict(par_fname)
+
+                if config["onsave_increaseparams"]:
+                    npar_before = par["NPAR"]
+                    nlines_before = par["NLINE"]
+                    npar_after = len(par["PARAMS"])
+                    par["NPAR"] = npar_after
+                    par["NLINE"] = nlines_after
+
+                    tmp_message = []
+                    if nlines_before != nlines_after:
+                        tmp_message.append(
+                            f"NLINE from {nlines_before} to {nlines_after}"
+                        )
+                    if npar_before != npar_after:
+                        tmp_message.append(f"NPAR from {npar_before} to {npar_after}")
+
+                    if tmp_message:
+                        tmp_message = " and ".join(tmp_message)
+                        message.append(f"- Changed {tmp_message} in the *.par file")
+
+                with open(par_fname, "w+") as file:
+                    file.write(pyckett.dict_to_parvar(par))
+
+            if config["onsave_runspfit"]:
+                try:
+                    spfit_output = pyckett.run_spfit(tail, wd=head)
+                    stats = pyckett.parse_fit_result(spfit_output)
+                    wrms_old = stats["wrms_old"]
+                    wrms = stats["wrms"]
+                    mw_rms = stats["mw_rms"]
+                    rejected_lines = stats["rejected_lines"]
+                    rejected_lines_string = (
+                        ""
+                        if not rejected_lines
+                        else f"; Rej. lines: {rejected_lines:.0f}"
+                    )
+                    message.append(
+                        f"- Ran SPFIT (MW RMS: {mw_rms * 1000:.2f} kHz; WRMS: {wrms_old:.2f} → {wrms:.2f}{rejected_lines_string})"
+                    )
+                except Exception as E:
+                    notify_warning.emit(f"Running SPFIT failed: {E}")
+                    message.append(f"- Running SPFIT failed: {E}")
+
+            if config["onsave_runspcat"]:
+                try:
+                    _ = pyckett.run_spcat(tail, wd=head)
+                    message.append("- Ran SPCAT")
+                except Exception as E:
+                    notify_warning.emit(f"Running SPCAT failed: {E}")
+                    message.append(f"- Running SPCAT failed: {E}")
+
+            if config["onsave_reloadcatfile"] and not config["flag_autoreloadfiles"]:
+                cat_fname = basename + ".cat"
+                cat_file = CatFile.ids.get(cat_fname)
+
+                if cat_file:
+                    cat_thread = cat_file.load_file()
+                    threads.append(cat_thread)
+
+            for t in threads:
+                t.wait()
+
+            if config["onsave_updateresiduals"]:
+                ResidualsWindow.instance.plot_residuals()
+
+            if len(message) > 1:
+                notify_info.emit("\n".join(message))
+        finally:
+            self.saveactions_finished.emit()
+
+    def delete_all(self, skipconfirmation=False):
         if self.new_assignments.get_new_assignments_df().empty:
             return
 
-        if config["flag_confirmdeleteall"]:
+        if (not skipconfirmation) and (config["flag_confirmdeleteall"]):
             ConfirmDialog = QMessageBox()
             ConfirmDialog.setText(
                 'Do you really want to delete all assignments?\n\n(If you misclicked, check the backup under "~/.llwp/.lin")'
@@ -6690,6 +6864,98 @@ class NewAssignmentsWindow(EQDockWidget):
         self.model.update()
         self.new_assignments.load_file()
         mainwindow.lwpwidget.set_data()
+
+
+class OnSaveOptionsDialog(QDialog):
+    open_instance = None
+
+    @classmethod
+    def show_dialog(cls):
+        if cls.open_instance:
+            cls.open_instance.done(0)
+            return
+        else:
+            dialog = cls()
+            cls.open_instance = dialog
+            dialog.show()
+            return dialog
+
+    def __init__(self):
+        super().__init__()
+
+        self.setModal(False)
+        self.setWindowTitle("On Save Actions")
+        self.finished.connect(self.on_exit)
+
+        self.layout = QVBoxLayout(margin=True)
+        self.setLayout(self.layout)
+
+        self.clear_assignments = QQ(
+            QCheckBox, "onsave_clearnewassignments", text="Clear new assignments"
+        )
+        self.remove_duplicates_widget = QQ(
+            QCheckBox,
+            "onsave_removeduplicates",
+            text="Remove duplicates from *.lin file.",
+        )
+        self.sort_assignments_widget = QQ(
+            QCheckBox, "onsave_sort", text="Sort assignments in *.lin file."
+        )
+        self.reload_linfile_widget = QQ(
+            QCheckBox, "onsave_reloadlinfile", text="Reload the *.lin file"
+        )
+        self.increase_params_widget = QQ(
+            QCheckBox,
+            "onsave_increaseparams",
+            text="Increase number of lines and parameters in *.lin file.",
+        )
+        self.run_spfit_widget = QQ(QCheckBox, "onsave_runspfit", text="Run SPFIT")
+        self.run_spcat_widget = QQ(QCheckBox, "onsave_runspcat", text="Run SPCAT")
+        self.reload_catfile_widget = QQ(
+            QCheckBox, "onsave_reloadcatfile", text="Reload the *.cat file"
+        )
+        self.update_residuals_widget = QQ(
+            QCheckBox, "onsave_updateresiduals", text="Update residuals"
+        )
+        self.consent_widget = QQ(
+            QCheckBox,
+            "onsave_consent",
+            text="I understand the potential consequences of these actions",
+        )
+        self.skip_all_widget = QQ(QCheckBox, "onsave_skipall", text="Skip all actions")
+
+        self.widgets = [
+            self.clear_assignments,
+            self.remove_duplicates_widget,
+            self.sort_assignments_widget,
+            self.reload_linfile_widget,
+            self.increase_params_widget,
+            self.run_spfit_widget,
+            self.run_spcat_widget,
+            self.reload_catfile_widget,
+            self.update_residuals_widget,
+        ]
+        self.update_active_state()
+        config.register(["onsave_skipall", "onsave_consent"], self.update_active_state)
+
+        for widget in self.widgets + [
+            None,
+            self.consent_widget,
+            None,
+            self.skip_all_widget,
+        ]:
+            if widget is None:
+                self.layout.addSpacing(10)
+            else:
+                self.layout.addWidget(widget)
+
+    def update_active_state(self):
+        enabled = (not config["onsave_skipall"]) and config["onsave_consent"]
+        for widget in self.widgets:
+            widget.setEnabled(enabled)
+
+    def on_exit(self, _=None):
+        self.__class__.open_instance = None
 
 
 class ConvolutionWindow(EQDockWidget):
@@ -7137,6 +7403,9 @@ class ResidualsWindow(EQDockWidget):
         "LLWP",
     ]
 
+    plotting_started = pyqtSignal()
+    plotting_finished = pyqtSignal()
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setWindowTitle("Residuals")
@@ -7235,7 +7504,9 @@ class ResidualsWindow(EQDockWidget):
         buttonslayout = QHBoxLayout()
         layout.addLayout(buttonslayout)
         buttonslayout.addStretch(1)
-        self.update_button = QQ(QPushButton, text="Update", change=self.plot_residuals)
+        self.update_button = QQ(
+            QPushButton, text="Update", change=lambda x: self.plot_residuals()
+        )
         self.update_button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.update_button.customContextMenuRequested.connect(
             self.fit_file_context_menu
@@ -7247,6 +7518,10 @@ class ResidualsWindow(EQDockWidget):
         buttonslayout.addStretch(1)
 
         self.fit_fname = None
+
+        self.plotting_started.connect(lambda: self.update_button.setDisabled(True))
+        self.plotting_finished.connect(lambda: self.update_button.setDisabled(False))
+        self.plotting_finished.connect(lambda: self.fig.canvas.draw_idle())
 
     def get_residuals(self):
         noq = config["series_qns"]
@@ -7294,68 +7569,59 @@ class ResidualsWindow(EQDockWidget):
         df["x_dev"] = df["x_lin"] - df["x_cat"]
         return df
 
-    def plot_residuals(self):
-        self.update_button.setDisabled(True)
-
+    @QThread.threaded_d
+    @status_d
+    def plot_residuals(self, thread=None):
         try:
-            thread = self.plot_residuals_core()
-            thread.wait()
+            message = []
+            df = self.get_residuals()
+            df["color"] = config["residuals_defaultcolor"]
+            message.append(f"Found {len(df)} entries matching your query.")
+
+            colorquerytext = config["residuals_colorinput"].split("\n")
+            for row in colorquerytext:
+                if row.strip():
+                    color, query = row.split(";")
+                    indices = df.query(query).index
+                    df.loc[indices, "color"] = color
+                    message.append(
+                        f"{len(indices)} lines are colored in <span style='color:{color};'>{color}</span>."
+                    )
+
+            self.df = df
+
+            yvariable = config["residuals_yvariable"].strip() or "x_dev"
+            xvariable = config["residuals_xvariable"].strip() or "x_lin"
+            ys = df.eval(yvariable).to_numpy()
+            xs = df.eval(xvariable).to_numpy()
+            colors = df["color"].to_numpy()
+            tuples = list(zip(xs, ys))
+            tuples = tuples if len(tuples) != 0 else [[None, None]]
+            self.points.set_offsets(tuples)
+            self.points.set_color(colors)
+            if len(xs) and config["residuals_autoscale"]:
+                xmin, xmax = np.min(xs), np.max(xs)
+                if xmin == xmax:
+                    xmin -= 1
+                    xmax += 1
+                self.ax.set_xlim(
+                    [
+                        xmin - 0.02 * (xmax - xmin),
+                        xmax + 0.02 * (xmax - xmin),
+                    ]
+                )
+                ymin, ymax = np.min(ys), np.max(ys)
+                if ymin == ymax:
+                    ymin -= 1
+                    ymax += 1
+                y_range = [ymin, ymax]
+                self.ax.set_ylim(
+                    y_range[0] - config["plot_ymargin"] * (y_range[1] - y_range[0]),
+                    y_range[1] + config["plot_ymargin"] * (y_range[1] - y_range[0]),
+                )
+            notify_info.emit("<br/>".join(message))
         except Exception:
             notify_warning.emit("There was an error in your Residuals window input")
-        finally:
-            self.fig.canvas.draw_idle()
-            self.update_button.setDisabled(False)
-
-    @QThread.threaded_d
-    def plot_residuals_core(self, thread=None):
-        message = []
-
-        df = self.get_residuals()
-        df["color"] = config["residuals_defaultcolor"]
-        message.append(f"Found {len(df)} entries matching your query.")
-
-        colorquerytext = config["residuals_colorinput"].split("\n")
-        for row in colorquerytext:
-            if row.strip():
-                color, query = row.split(";")
-                indices = df.query(query).index
-                df.loc[indices, "color"] = color
-                message.append(
-                    f"{len(indices)} lines are colored in <span style='color:{color};'>{color}</span>."
-                )
-
-        self.df = df
-
-        yvariable = config["residuals_yvariable"].strip() or "x_dev"
-        xvariable = config["residuals_xvariable"].strip() or "x_lin"
-        ys = df.eval(yvariable).to_numpy()
-        xs = df.eval(xvariable).to_numpy()
-        colors = df["color"].to_numpy()
-        tuples = list(zip(xs, ys))
-        tuples = tuples if len(tuples) != 0 else [[None, None]]
-        self.points.set_offsets(tuples)
-        self.points.set_color(colors)
-        if len(xs) and config["residuals_autoscale"]:
-            xmin, xmax = np.min(xs), np.max(xs)
-            if xmin == xmax:
-                xmin -= 1
-                xmax += 1
-            self.ax.set_xlim(
-                [
-                    xmin - 0.02 * (xmax - xmin),
-                    xmax + 0.02 * (xmax - xmin),
-                ]
-            )
-            ymin, ymax = np.min(ys), np.max(ys)
-            if ymin == ymax:
-                ymin -= 1
-                ymax += 1
-            y_range = [ymin, ymax]
-            self.ax.set_ylim(
-                y_range[0] - config["plot_ymargin"] * (y_range[1] - y_range[0]),
-                y_range[1] + config["plot_ymargin"] * (y_range[1] - y_range[0]),
-            )
-        notify_info.emit("<br/>".join(message))
 
     def save_residuals(self):
         df = self.get_residuals()
@@ -7477,7 +7743,6 @@ class ResidualsWindow(EQDockWidget):
 
         clear_fit_file = None
         load_fit_file = None
-
 
         if self.fit_fname:
             clear_fit_file = menu.addAction("Clear *.fit file")
@@ -8765,6 +9030,7 @@ class EnergyLevelsWindow(EQDockWidget):
             self.plot_energylevels()
 
     @QThread.threaded_d
+    @status_d
     def plot_energylevels(self, thread=None):
         self.plotting_started.emit()
 
