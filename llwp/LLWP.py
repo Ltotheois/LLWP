@@ -268,6 +268,7 @@ class Config(dict):
         "plot_offsetisrelative": (True, bool),
         "plot_rows": (5, int),
         "plot_cols": (1, int),
+        "plot_linmarker": ("*", str),
         "plot_widthexpression": ("", str),
         "plot_offsetexpression": ("", str),
         "plot_yscale": ("Per Plot", str),
@@ -679,10 +680,10 @@ class PlotWidget(QWidget):
             np.zeros(shape=(0, 2, 2)), colors=config["color_cat"], capstyle="round"
         )
         self.lin_coll = self.ax.scatter(
-            [], [], color=config["color_ref"], marker="*", zorder=100
+            [], [], color=config["color_ref"], marker=config["plot_linmarker"], zorder=100
         )
-        self.ax.add_collection(self.exp_coll)
-        self.ax.add_collection(self.cat_coll)
+        self.ax.add_collection(self.exp_coll, autolim=False)
+        self.ax.add_collection(self.cat_coll, autolim=False)
 
         self.request_redraw.connect(self.plotcanvas.draw_idle)
 
@@ -2566,12 +2567,12 @@ class LWPAx:
             np.zeros(shape=(0, 2, 2)), colors=config["color_cat"], capstyle="round"
         )
         self.lin_coll = ax.scatter(
-            [], [], color=config["color_ref"], marker="*", zorder=100
+            [], [], color=config["color_ref"], marker=config["plot_linmarker"], zorder=100
         )
 
         with matplotlib_lock:
-            ax.add_collection(self.exp_coll)
-            ax.add_collection(self.cat_coll)
+            ax.add_collection(self.exp_coll, autolim=False)
+            ax.add_collection(self.cat_coll, autolim=False)
 
             ax.yaxis.set_visible(False)
             if row_i:
@@ -2579,10 +2580,8 @@ class LWPAx:
             else:
                 ax.set_xticks([])
 
-    # @status_d
-    @QThread.threaded_d
     @drawplot_decorator.d
-    def update(self, thread=None):
+    def update(self):
         ax = self.ax
         ax.set_xlim(self.xrange)
 
@@ -2594,7 +2593,7 @@ class LWPAx:
             minindex, maxindex = self.indices[datatype]
             xmin, xmax = self.xrange
             with cls.lock:
-                dataframe = cls.df.iloc[minindex:maxindex].copy()
+                dataframe = cls.df.iloc[minindex:maxindex]
             bins = config["plot_bins"]
             nobinning = config["plot_skipbinning"]
             scaling = config["plot_yscale"]
@@ -3220,9 +3219,9 @@ class LWPWidget(QGroupBox):
 
         thread.earlyreturn()
 
-        indices = np.indices(axes.shape)
-        vectorized_ax_class = np.vectorize(self._ax_class, otypes=[object])
-        self.lwpaxes = vectorized_ax_class(axes, *indices)
+        self.lwpaxes = np.empty(axes.shape, dtype=object)
+        for i, j in np.ndindex(axes.shape):
+            self.lwpaxes[i, j] = self._ax_class(axes[i, j], i, j)
 
         thread.earlyreturn()
 
@@ -3336,7 +3335,6 @@ class LWPWidget(QGroupBox):
             notify_error.emit("Shape of LWPAxes is out of sync with requested values.")
             return
 
-        threads = []
         for i_row in range(n_rows):
             for i_col in range(n_cols):
                 ax = self.lwpaxes[i_row, i_col]
@@ -3350,12 +3348,7 @@ class LWPWidget(QGroupBox):
                     )
                     for label in ("exp", "cat", "lin")
                 }
-                threads.append(ax.update())
-
-        thread.earlyreturn()
-
-        for thread_ in threads:
-            thread_.wait()
+                ax.update()
 
     def get_current_ax(self):
         shape = self.lwpaxes.shape
@@ -10123,15 +10116,13 @@ def bin_data(dataframe, binwidth, range):
     # 	dataframe = dataframe.loc[dataframe.sort_values("y").drop_duplicates(("bin", "filename"), keep="last").sort_values(["x"]).index]
     # return(dataframe)
 
-    dataframe.loc[:, "bin"] = (dataframe.loc[:, "x"] - range[0]) // binwidth
+    bin_array = ((dataframe["x"].to_numpy() - range[0]) // binwidth).astype(np.int64)
+    value_column = "x" if "y" not in dataframe else "y"
 
-    if "y" not in dataframe:
-        index_ = dataframe.groupby(["bin", "filename"], observed=True)["x"].idxmax()
-    else:
-        index_ = dataframe.groupby(["bin", "filename"], observed=True)["y"].idxmax()
-
-    dataframe = dataframe.loc[index_]
-    return dataframe
+    index_ = dataframe.groupby(
+        [bin_array, dataframe["filename"]], observed=True
+    )[value_column].idxmax()
+    return dataframe.loc[index_.to_numpy()]
 
 
 def llwpfile(extension=""):
@@ -10539,11 +10530,11 @@ class ASAPAx(LWPAx):
             np.zeros(shape=(0, 2, 2)), colors=config["color_exp"], capstyle="round"
         )
         self.lin_coll = self.ax.scatter(
-            [], [], color=config["color_ref"], marker="*", zorder=100
+            [], [], color=config["color_ref"], marker=config["plot_linmarker"], zorder=100
         )
 
         with matplotlib_lock:
-            ax.add_collection(self.exp_coll)
+            ax.add_collection(self.exp_coll, autolim=False)
 
             ax.yaxis.set_visible(False)
             if row_i:
@@ -10580,10 +10571,8 @@ class ASAPAx(LWPAx):
             color = config["color_exp"]
         self.exp_coll.set(segments=segs, color=color)
 
-    # @status_d
-    @QThread.threaded_d
     @drawplot_decorator.d
-    def update(self, thread=None):
+    def update(self):
         ax = self.ax
 
         offset, width = config["plot_offset"], config["plot_width"]
@@ -11309,7 +11298,6 @@ class ASAPWidget(LWPWidget):
         width = config["plot_width"]
         stepsize = config["asap_stepsize"]
 
-        threads = []
         with matplotlib_lock:
             if self.lwpaxes.shape != (n_rows, n_cols):
                 notify_error.emit(
@@ -11371,7 +11359,7 @@ class ASAPWidget(LWPWidget):
                     ax.width = width
                     ax.stepsize = stepsize
                     ax.is_upper_state = state["is_upper_state"]
-                    threads.append(ax.update())
+                    ax.update()
 
                     thread.earlyreturn()
             # Edge cases of no reference tabs and too few tabs
@@ -11381,22 +11369,14 @@ class ASAPWidget(LWPWidget):
                     ax.entries = None
                     ax.qns = None
                     ax.corr_xs = ax.corr_ys = np.array([])
-                    threads.append(ax.update())
-
-            thread.earlyreturn()
-            for thread_ in threads:
-                thread_.wait()
+                    ax.update()
 
     @QThread.threaded_d
     @status_d
     @drawplot_decorator.d
     def set_data(self, thread=None):
-        threads = []
         for asap_ax in self.lwpaxes.flatten():
-            threads.append(asap_ax.update())
-
-        for thread_ in threads:
-            thread_.wait()
+            asap_ax.update()
 
     def on_hover(self, event):
         x = event.xdata
@@ -11646,7 +11626,7 @@ class ASAPDetailViewer(EQDockWidget):
             ax.corr_ys = corr_ys
             ax.corr_col = corr_col
 
-            ax.update().wait()
+            ax.update()
             self.drawplot.emit()
             self.update_view(ax)
 
