@@ -1932,19 +1932,21 @@ class File:
         df = self.__class__.df
         mask = df["filename"] == self.filename_abs
 
-        df.loc[mask, "color"] = self.color
+        with self.lock:
+            df.loc[mask, "color"] = self.color
 
         # Color query
         if not self.color_query:
             self.clear_caches()
             return
 
-        for command in self.color_query.split("\n"):
-            if not command.strip():
-                continue
-            color, query = command.split(";")
-            indices = (df.loc[mask].query(query)).index
-            df.loc[indices, "color"] = color
+        with self.lock:
+            for command in self.color_query.split("\n"):
+                if not command.strip():
+                    continue
+                color, query = command.split(";")
+                indices = (df.loc[mask].query(query)).index
+                df.loc[indices, "color"] = color
         self.clear_caches()
 
     def toggle_visibility(self):
@@ -1967,14 +1969,15 @@ class File:
 
     def apply_visibility(self):
         df = self.__class__.df
-        mask = df["filename"] == self.filename_abs
+        with self.lock:
+            mask = df["filename"] == self.filename_abs
 
-        if self.is_visible and not self.query:
-            df.loc[mask, "visible"] = True
-        elif self.is_visible and self.query:
-            df.loc[mask, "visible"] = df.loc[mask].eval(self.query)
-        else:
-            df.loc[mask, "visible"] = False
+            if self.is_visible and not self.query:
+                df.loc[mask, "visible"] = True
+            elif self.is_visible and self.query:
+                df.loc[mask, "visible"] = df.loc[mask].eval(self.query)
+            else:
+                df.loc[mask, "visible"] = False
         self.clear_caches()
 
     def apply_transformation(self, col, transform, fallback_col):
