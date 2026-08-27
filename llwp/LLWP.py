@@ -414,6 +414,7 @@ class Config(dict):
         "onsave_clearnewassignments": (True, bool),
         "onsave_removeduplicates": (True, bool),
         "onsave_sort": (True, bool),
+        "onsave_sortkey": (["x", "error"], list),
         "onsave_reloadlinfile": (True, bool),
         "onsave_increaseparams": (True, bool),
         "onsave_runspfit": (True, bool),
@@ -875,15 +876,22 @@ class PlotWidget(QWidget):
             "s": lambda: self.move_plot("out"),
             "a": lambda: self.move_plot("left"),
             "d": lambda: self.move_plot("right"),
+
             "Shift+w": lambda: self.move_plot("sin"),
             "Shift+s": lambda: self.move_plot("sout"),
             "Shift+a": lambda: self.move_plot("sleft"),
             "Shift+d": lambda: self.move_plot("sright"),
+
             # We cannot use shortcuts that are also used in the menu bar here, as these are global shortcuts on MacOS, as the MenuBar is always active
             "Alt+w": lambda: self.change_index(0, +1),
             "Alt+s": lambda: self.change_index(0, -1),
             "Alt+a": lambda: self.change_index(1, -1),
             "Alt+d": lambda: self.change_index(1, +1),
+
+            "Alt+Up": lambda: self.change_index(0, +1),
+            "Alt+Down": lambda: self.change_index(0, -1),
+            "Alt+Left": lambda: self.change_index(1, -1),
+            "Alt+Right": lambda: self.change_index(1, +1),
         }
 
         for key, function in shortcuts_dict.items():
@@ -3519,6 +3527,14 @@ class Menu:
                     change=lambda _: File.reread_all(),
                     shortcut="Ctrl+R",
                     tooltip="Reread all Exp, Cat and Lin files",
+                ),
+                QQ(
+                    QAction,
+                    parent=parent,
+                    text="Reread Lin and Cat Files",
+                    change=lambda _: [x.reread_all() for x in (LinFile, CatFile)],
+                    shortcut="Ctrl+Alt+R",
+                    tooltip="Reread all Cat and Lin files",
                 ),
                 QQ(
                     QAction,
@@ -6580,13 +6596,14 @@ class NewAssignmentsWindow(EQDockWidget):
         # tooltip_append = "Append to file if checked or overwrite content if unchecked"
         new_assignments = self.new_assignments = NewAssignments.get_instance()
 
+        save_label = "Save && Update" if (not config["onsave_skipall"]) and config["onsave_consent"] else "Save"
         widgets = self.widgets = {
             "save_settings": QQ(
                 QToolButton,
                 text="⚙",
                 change=lambda x: OnSaveOptionsDialog.show_dialog(),
             ),
-            "save": QQ(QToolButton, text="Save", change=lambda x: self.save()),
+            "save": QQ(QToolButton, text=save_label, change=lambda x: self.save()),
             "delete": QQ(QToolButton, text="×", change=lambda x: self.delete()),
             "delete_all": QQ(
                 QToolButton, text="Del All", change=lambda x: self.delete_all()
@@ -6732,7 +6749,7 @@ class NewAssignmentsWindow(EQDockWidget):
                         )
 
                 if config["onsave_sort"]:
-                    lin = lin.sort_values(["x", "error"])
+                    lin = lin.sort_values(config["onsave_sortkey"])
 
                 with open(lin_fname, "w+") as file:
                     file.write(pyckett.df_to_lin(lin))
@@ -6892,10 +6909,10 @@ class OnSaveOptionsDialog(QDialog):
         self.remove_duplicates_widget = QQ(
             QCheckBox,
             "onsave_removeduplicates",
-            text="Remove duplicates from *.lin file.",
+            text="Remove duplicates from the *.lin file.",
         )
         self.sort_assignments_widget = QQ(
-            QCheckBox, "onsave_sort", text="Sort assignments in *.lin file."
+            QCheckBox, "onsave_sort", text="Sort assignments in the *.lin file."
         )
         self.reload_linfile_widget = QQ(
             QCheckBox, "onsave_reloadlinfile", text="Reload the *.lin file"
@@ -6903,7 +6920,7 @@ class OnSaveOptionsDialog(QDialog):
         self.increase_params_widget = QQ(
             QCheckBox,
             "onsave_increaseparams",
-            text="Increase number of lines and parameters in *.lin file.",
+            text="Increase number of lines and parameters in the *.par file.",
         )
         self.run_spfit_widget = QQ(QCheckBox, "onsave_runspfit", text="Run SPFIT")
         self.run_spcat_widget = QQ(QCheckBox, "onsave_runspcat", text="Run SPCAT")
@@ -6949,6 +6966,8 @@ class OnSaveOptionsDialog(QDialog):
         enabled = (not config["onsave_skipall"]) and config["onsave_consent"]
         for widget in self.widgets:
             widget.setEnabled(enabled)
+
+        NewAssignmentsWindow.instance.widgets["save"].setText("Save && Update" if enabled else "Save")
 
     def on_exit(self, _=None):
         self.__class__.open_instance = None
