@@ -7587,6 +7587,7 @@ class ResidualsWindow(EQDockWidget):
     @QThread.threaded_d
     @status_d
     def plot_residuals(self, thread=None):
+        self.plotting_started.emit()
         try:
             message = []
             df = self.get_residuals()
@@ -7637,6 +7638,9 @@ class ResidualsWindow(EQDockWidget):
             notify_info.emit("<br/>".join(message))
         except Exception:
             notify_warning.emit("There was an error in your Residuals window input")
+        finally:
+            self.plotting_finished.emit()
+
 
     def save_residuals(self):
         df = self.get_residuals()
