@@ -457,9 +457,8 @@ class Config(dict):
         self._grouped_callbacks_lock = threading.Lock()
         self.valuechanged = signal
         self.valuechanged.connect(self.callback)
-        self.callbacks = pd.DataFrame(
-            columns=["id", "key", "widget", "function"], dtype="object"
-        ).astype({"id": np.uint})
+        self.callbacks = []
+        self._next_widget_id = 1
 
     def __setitem__(self, key, value, widget=None):
         if self.get(key) != value:
@@ -469,11 +468,15 @@ class Config(dict):
     def callback(self, args):
         key, value, widget = args
         if widget:
-            callbacks = self.callbacks.query("key == @key and widget != @widget")[
-                "function"
-            ].values
+            callbacks = [
+                entry["function"]
+                for entry in self.callbacks
+                if entry["key"] == key and entry["widget"] != widget
+            ]
         else:
-            callbacks = self.callbacks.query("key == @key")["function"].values
+            callbacks = [
+                entry["function"] for entry in self.callbacks if entry["key"] == key
+            ]
 
         counter_value = self._group_callbacks_counter.get_value()
         if counter_value:
@@ -489,22 +492,20 @@ class Config(dict):
         for key in keys:
             # id is only needed for callback tied to widgets
             id = 0
-            df = self.callbacks
-            df.loc[len(df), ["id", "key", "function"]] = id, key, function
+            self.callbacks.append(
+                {"id": id, "key": key, "function": function, "widget": None}
+            )
 
     def register_widget(self, key, widget, function):
-        ids = set(self.callbacks["id"])
-        id = 1
-        while id in ids:
-            id += 1
-        df = self.callbacks
-        df.loc[len(df), ["id", "key", "function", "widget"]] = id, key, function, widget
+        id = self._next_widget_id
+        self._next_widget_id += 1
+        self.callbacks.append(
+            {"id": id, "key": key, "function": function, "widget": widget}
+        )
         widget.destroyed.connect(lambda x, id=id: self.unregister_widget(id))
 
     def unregister_widget(self, id):
-        self.callbacks.drop(
-            self.callbacks[self.callbacks["id"] == id].index, inplace=True
-        )
+        self.callbacks = [entry for entry in self.callbacks if entry["id"] != id]
 
     def load(self, fname=None):
         if fname is None:
@@ -1649,7 +1650,6 @@ class File:
                     dataframes.append(file.load_file_core())
                     filenames.append(file.filename_abs)
                 except Exception as E:
-                    raise E
                     exceptions[file.filename_abs] = str(E)
 
             data = pd.concat(dataframes)
@@ -2047,7 +2047,7 @@ class CatFile(File):
             data = pyckett.cat_to_df(self.filename_abs, sort=False)
         else:
             kwargs = config["flag_catformats"][self.extension].copy()
-            y_is_log = format.pop("y_is_log", False)
+            y_is_log = kwargs.pop("y_is_log", False)
 
             data = pd.read_fwf(self.filename_abs, **kwargs)
             data["filename"] = self.filename_abs
@@ -2084,11 +2084,10 @@ class CatFile(File):
         if not len(df):
             return
 
-        qnu_labels = [f"qnu{i + 1}" for i in range(N_QNS)]
-        noq = len(qnu_labels)
-        for i, qnu_label in enumerate(qnu_labels):
-            unique_values = df[qnu_label].unique()
-            if len(unique_values) == 1 and unique_values[0] == pyckett.SENTINEL:
+        active_qns = pyckett.get_active_qns(df, N_QNS)
+        noq = N_QNS
+        for i in range(N_QNS):
+            if not active_qns[f"qnu{i + 1}"]:
                 noq = i
                 break
 
@@ -3421,13 +3420,15 @@ class LWPWidget(QGroupBox):
 
 
 class Menu:
+    top_menu_labels = ("Files", "View", "Fit", "Plot", "Modules", "Info")
+    fitfunction_ax_class = LWPAx
+
     def __init__(self, parent, *args, **kwargs):
         mb = parent.menuBar()
 
         # Create top level menus
-        top_menu_labels = ("Files", "View", "Fit", "Plot", "Modules", "Info")
         self.top_menus = {}
-        for label in top_menu_labels:
+        for label in self.top_menu_labels:
             menu = mb.addMenu(f"{label}")
             self.top_menus[label] = menu
 
@@ -3438,44 +3439,20 @@ class Menu:
         toggleaction_config = ConfigWindow.instance.toggleViewAction()
         toggleaction_config.setShortcut("Shift+0")
 
-        toggleaction_convolution = ConvolutionWindow.instance.toggleViewAction()
-        toggleaction_convolution.setText("Sticks to Lineshape")
-        toggleaction_convolution.setToolTip(
-            "Choose a function to create a spectrum from stick data"
-        )
-
         toggleaction_credits = CreditsWindow.instance.toggleViewAction()
         toggleaction_credits.setText("Credits and License")
         toggleaction_credits.setToolTip("See the Credits and License")
 
-        view_actions = [
-            ReferenceSeriesWindow.instance.toggleViewAction(),
-            NewAssignmentsWindow.instance.toggleViewAction(),
-            CloseByLinesWindow.instance.toggleViewAction(),
-            LogWindow.instance.toggleViewAction(),
-        ]
+        view_actions = self.get_view_actions()
 
         for i, view_action in enumerate(view_actions):
             view_action.setShortcut(f"Shift+{i + 2}")
-
-        modules_actions = [
-            ResidualsWindow.instance.toggleViewAction(),
-            BlendedLinesWindow.instance.toggleViewAction(),
-            ReportWindow.instance.toggleViewAction(),
-            SeriesfinderWindow.instance.toggleViewAction(),
-            PeakfinderWindow.instance.toggleViewAction(),
-            EnergyLevelsWindow.instance.toggleViewAction(),
-            CmdWindow.instance.toggleViewAction(),
-        ]
-
-        for i, modules_action in enumerate(modules_actions):
-            modules_action.setShortcut(f"Ctrl+{i + 1}")
 
         fitfunction_menu = QMenu("Choose Fit Function", parent=parent)
         self.fitfunction_actions = {}
 
         current_method = config["fit_fitmethod"]
-        for method in LWPAx.fit_methods:
+        for method in self.fitfunction_ax_class.fit_methods:
             is_checked = method == current_method
 
             def callback(_, method=method):
@@ -3510,7 +3487,63 @@ class Menu:
                 text="Docks always on top",
             )
 
-        actions = {
+        actions = self.build_actions_dict(
+            parent,
+            toggleaction_files,
+            toggleaction_config,
+            toggleaction_credits,
+            view_actions,
+            fitfunction_menu,
+            always_on_top_action,
+        )
+
+        for label, menu in self.top_menus.items():
+            for widget in actions.get(label, []):
+                if widget is None:
+                    menu.addSeparator()
+                elif isinstance(widget, QAction):
+                    menu.addAction(widget)
+                else:
+                    menu.addMenu(widget)
+
+    def get_view_actions(self):
+        return [
+            ReferenceSeriesWindow.instance.toggleViewAction(),
+            NewAssignmentsWindow.instance.toggleViewAction(),
+            CloseByLinesWindow.instance.toggleViewAction(),
+            LogWindow.instance.toggleViewAction(),
+        ]
+
+    def build_actions_dict(
+        self,
+        parent,
+        toggleaction_files,
+        toggleaction_config,
+        toggleaction_credits,
+        view_actions,
+        fitfunction_menu,
+        always_on_top_action,
+    ):
+        toggleaction_convolution = ConvolutionWindow.instance.toggleViewAction()
+        toggleaction_convolution.setText("Sticks to Lineshape")
+        toggleaction_convolution.setToolTip(
+            "Choose a function to create a spectrum from stick data"
+        )
+
+        modules_actions = [
+            ResidualsWindow.instance.toggleViewAction(),
+            BlendedLinesWindow.instance.toggleViewAction(),
+            ReportWindow.instance.toggleViewAction(),
+            SeriesfinderWindow.instance.toggleViewAction(),
+            PeakfinderWindow.instance.toggleViewAction(),
+            EnergyLevelsWindow.instance.toggleViewAction(),
+            CmdWindow.instance.toggleViewAction(),
+        ]
+
+        for i, modules_action in enumerate(modules_actions):
+            modules_action.setShortcut(f"Ctrl+{i + 1}")
+
+        return {
             "Files": (
                 QQ(
                     QAction,
@@ -3655,15 +3688,6 @@ class Menu:
                 toggleaction_credits,
             ),
         }
-
-        for label, menu in self.top_menus.items():
-            for widget in actions.get(label, []):
-                if widget is None:
-                    menu.addSeparator()
-                elif isinstance(widget, QAction):
-                    menu.addAction(widget)
-                else:
-                    menu.addMenu(widget)
 
     def set_fitmethod_gui(self, method):
         if method == config["fit_fitmethod"]:
@@ -4865,7 +4889,7 @@ class AssignAllDialog(QDialog):
 
             kwargs = {"wmax": max_fwhm, "xs_weight_factor": 0}
             fit_xs = np.linspace(xmin, xmax, 1000)
-            fit_function = get_fitfunction(fitmethod, offset, kwargs=kwargs)
+            fit_function = get_fitfunction(fitmethod, offset, **kwargs)
 
             try:
                 fit_results = fit_function(
@@ -5042,7 +5066,7 @@ class AssignAllDialog(QDialog):
 
             kwargs = {"wmax": max_fwhm, "xs_weight_factor": 0}
             fit_xs = np.linspace(xmin, xmax, 1000)
-            fit_function = get_fitfunction(fitmethod, offset, kwargs=kwargs)
+            fit_function = get_fitfunction(fitmethod, offset, **kwargs)
 
             try:
                 fit_results = fit_function(
@@ -8021,7 +8045,7 @@ class BlendedLinesWindow(EQDockWidget):
 
             if fixedwidth and len(peaks):
                 ws = np.array(ws)
-                w0, wl, wu = ws[:, 0].mean(), ws[:, 1].min(), ws[:2].max()
+                w0, wl, wu = ws[:, 0].mean(), ws[:, 1].min(), ws[:, 2].max()
                 p0.extend([w0] * number_of_widths)
                 bounds[0].extend([wl] * number_of_widths)
                 bounds[1].extend([wu] * number_of_widths)
@@ -8030,14 +8054,9 @@ class BlendedLinesWindow(EQDockWidget):
             bounds[0].extend([-np.inf] * polynomrank)
             bounds[1].extend([+np.inf] * polynomrank)
 
-            try:
-                popt, pcov = optimize.curve_fit(
-                    fitfunction, exp_xs, exp_ys, p0=p0, bounds=bounds
-                )
-            except Exception:
-                popt, pcov = optimize.curve_fit(
-                    fitfunction, exp_xs, exp_ys, p0=p0, bounds=bounds
-                )
+            popt, pcov = optimize.curve_fit(
+                fitfunction, exp_xs, exp_ys, p0=p0, bounds=bounds
+            )
             perr = np.sqrt(np.diag(pcov))
             res_xs = np.linspace(xmin, xmax, config["blendedlines_xpoints"])
             res_ys = fitfunction(res_xs, *popt)
@@ -10914,28 +10933,11 @@ class ASAPAx(LWPAx):
 
 
 class ASAPMenu(Menu):
-    def __init__(self, parent, *args, **kwargs):
-        mb = parent.menuBar()
+    top_menu_labels = ("Files", "View", "Fit", "Info")
+    fitfunction_ax_class = ASAPAx
 
-        # Create top level menus
-        top_menu_labels = ("Files", "View", "Fit", "Info")
-        self.top_menus = {}
-        for label in top_menu_labels:
-            menu = mb.addMenu(f"{label}")
-            self.top_menus[label] = menu
-
-        toggleaction_files = FileWindow.instance.toggleViewAction()
-        toggleaction_files.setText("Edit Files")
-        toggleaction_files.setShortcut("Shift+1")
-
-        toggleaction_config = ConfigWindow.instance.toggleViewAction()
-        toggleaction_config.setShortcut("Shift+0")
-
-        toggleaction_credits = CreditsWindow.instance.toggleViewAction()
-        toggleaction_credits.setText("Credits and License")
-        toggleaction_credits.setToolTip("See the Credits and License")
-
-        view_actions = [
+    def get_view_actions(self):
+        return [
             ASAPSettingsWindow.instance.toggleViewAction(),
             NewAssignmentsWindow.instance.toggleViewAction(),
             ASAPDetailViewer.instance.toggleViewAction(),
@@ -10944,49 +10946,17 @@ class ASAPMenu(Menu):
             CmdWindow.instance.toggleViewAction(),
         ]
 
-        for i, view_action in enumerate(view_actions):
-            view_action.setShortcut(f"Shift+{i + 2}")
-
-        fitfunction_menu = QMenu("Choose Fit Function", parent=parent)
-        self.fitfunction_actions = {}
-
-        current_method = config["fit_fitmethod"]
-        for method in ASAPAx.fit_methods:
-            is_checked = method == current_method
-
-            def callback(_, method=method):
-                return self.set_fitmethod_gui(method)
-
-            self.fitfunction_actions[method] = QQ(
-                QAction,
-                parent=parent,
-                text=f"{method}",
-                change=callback,
-                checkable=True,
-                value=is_checked,
-            )
-            fitfunction_menu.addAction(self.fitfunction_actions[method])
-        config.register("fit_fitmethod", self.on_fitfunction_changed)
-
-        self.toggle_theme_action = QQ(
-            QAction,
-            parent=parent,
-            text="Switch to light mode" if is_dark_theme() else "Switch to dark mode",
-            change=lambda _: self.toggle_layout_theme(),
-        )
-
-        if sys.platform.startswith("win"):
-            always_on_top_action = None
-        else:
-            always_on_top_action = QQ(
-                QAction,
-                "flag_docksalwaysontop",
-                checkable=True,
-                parent=parent,
-                text="Docks always on top",
-            )
-
-        actions = {
+    def build_actions_dict(
+        self,
+        parent,
+        toggleaction_files,
+        toggleaction_config,
+        toggleaction_credits,
+        view_actions,
+        fitfunction_menu,
+        always_on_top_action,
+    ):
+        return {
             "Files": (
                 QQ(
                     QAction,
@@ -11094,15 +11064,6 @@ class ASAPMenu(Menu):
                 toggleaction_credits,
             ),
         }
-
-        for label, menu in self.top_menus.items():
-            for widget in actions.get(label, []):
-                if widget is None:
-                    menu.addSeparator()
-                elif isinstance(widget, QAction):
-                    menu.addAction(widget)
-                else:
-                    menu.addMenu(widget)
 
 
 class ASAPWidget(LWPWidget):
