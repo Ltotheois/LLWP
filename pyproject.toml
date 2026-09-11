@@ -30,3 +30,6 @@ dev = [
 [project.scripts]
 llwp = "llwp:start_llwp"
 asap = "llwp:start_asap"
+
+[tool.setuptools]
+include_package_data = true
