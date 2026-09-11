@@ -682,7 +682,11 @@ class PlotWidget(QWidget):
             np.zeros(shape=(0, 2, 2)), colors=config["color_cat"], capstyle="round"
         )
         self.lin_coll = self.ax.scatter(
-            [], [], color=config["color_ref"], marker=config["plot_linmarker"], zorder=100
+            [],
+            [],
+            color=config["color_ref"],
+            marker=config["plot_linmarker"],
+            zorder=100,
         )
         self.ax.add_collection(self.exp_coll, autolim=False)
         self.ax.add_collection(self.cat_coll, autolim=False)
@@ -877,18 +881,15 @@ class PlotWidget(QWidget):
             "s": lambda: self.move_plot("out"),
             "a": lambda: self.move_plot("left"),
             "d": lambda: self.move_plot("right"),
-
             "Shift+w": lambda: self.move_plot("sin"),
             "Shift+s": lambda: self.move_plot("sout"),
             "Shift+a": lambda: self.move_plot("sleft"),
             "Shift+d": lambda: self.move_plot("sright"),
-
             # We cannot use shortcuts that are also used in the menu bar here, as these are global shortcuts on MacOS, as the MenuBar is always active
             "Alt+w": lambda: self.change_index(0, +1),
             "Alt+s": lambda: self.change_index(0, -1),
             "Alt+a": lambda: self.change_index(1, -1),
             "Alt+d": lambda: self.change_index(1, +1),
-
             "Alt+Up": lambda: self.change_index(0, +1),
             "Alt+Down": lambda: self.change_index(0, -1),
             "Alt+Left": lambda: self.change_index(1, -1),
@@ -2577,7 +2578,11 @@ class LWPAx:
             np.zeros(shape=(0, 2, 2)), colors=config["color_cat"], capstyle="round"
         )
         self.lin_coll = ax.scatter(
-            [], [], color=config["color_ref"], marker=config["plot_linmarker"], zorder=100
+            [],
+            [],
+            color=config["color_ref"],
+            marker=config["plot_linmarker"],
+            zorder=100,
         )
 
         with matplotlib_lock:
@@ -6620,7 +6625,11 @@ class NewAssignmentsWindow(EQDockWidget):
         # tooltip_append = "Append to file if checked or overwrite content if unchecked"
         new_assignments = self.new_assignments = NewAssignments.get_instance()
 
-        save_label = "Save && Update" if (not config["onsave_skipall"]) and config["onsave_consent"] else "Save"
+        save_label = (
+            "Save && Update"
+            if (not config["onsave_skipall"]) and config["onsave_consent"]
+            else "Save"
+        )
         widgets = self.widgets = {
             "save_settings": QQ(
                 QToolButton,
@@ -6991,7 +7000,9 @@ class OnSaveOptionsDialog(QDialog):
         for widget in self.widgets:
             widget.setEnabled(enabled)
 
-        NewAssignmentsWindow.instance.widgets["save"].setText("Save && Update" if enabled else "Save")
+        NewAssignmentsWindow.instance.widgets["save"].setText(
+            "Save && Update" if enabled else "Save"
+        )
 
     def on_exit(self, _=None):
         self.__class__.open_instance = None
@@ -7664,7 +7675,6 @@ class ResidualsWindow(EQDockWidget):
             notify_warning.emit("There was an error in your Residuals window input")
         finally:
             self.plotting_finished.emit()
-
 
     def save_residuals(self):
         df = self.get_residuals()
@@ -10164,9 +10174,9 @@ def bin_data(dataframe, binwidth, range):
     bin_array = ((dataframe["x"].to_numpy() - range[0]) // binwidth).astype(np.int64)
     value_column = "x" if "y" not in dataframe else "y"
 
-    index_ = dataframe.groupby(
-        [bin_array, dataframe["filename"]], observed=True
-    )[value_column].idxmax()
+    index_ = dataframe.groupby([bin_array, dataframe["filename"]], observed=True)[
+        value_column
+    ].idxmax()
     return dataframe.loc[index_.to_numpy()]
 
 
@@ -10575,7 +10585,11 @@ class ASAPAx(LWPAx):
             np.zeros(shape=(0, 2, 2)), colors=config["color_exp"], capstyle="round"
         )
         self.lin_coll = self.ax.scatter(
-            [], [], color=config["color_ref"], marker=config["plot_linmarker"], zorder=100
+            [],
+            [],
+            color=config["color_ref"],
+            marker=config["plot_linmarker"],
+            zorder=100,
         )
 
         with matplotlib_lock:
