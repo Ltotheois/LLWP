@@ -969,7 +969,7 @@ class NTimesBehavior(QObject):
                 event.button() == Qt.MouseButton.LeftButton
                 and event.modifiers() & Qt.KeyboardModifier.AltModifier
             ):
-                i, ok = QInputDialog.getInt(self.widget, "Repat how many times", "N: ")
+                i, ok = QInputDialog.getInt(self.widget, "Repeat how many times", "N: ")
                 if not ok:
                     return True
 
@@ -6029,6 +6029,12 @@ class ReferenceSelector(QTabWidget):
         self.values_changed.emit()
         mainwindow.lwpwidget.set_data()
 
+    def change_series_qns(self):
+        i, ok = QInputDialog.getInt(self, "Set Number of Quantum Numbers", "# Quantum Numbers: ")
+        if not ok:
+            return
+        config['series_qns'] = i
+        
     def contextMenuEvent(self, event):
         menu = QMenu(self)
         get_positions_action = menu.addAction("Copy Reference Positions")
@@ -6038,8 +6044,13 @@ class ReferenceSelector(QTabWidget):
 
         change_qns_templates = config["series_changeqnsactions"]
         change_qns_actions = {}
+        is_transition_active = (self.state["method"] == "Transition")
 
-        if self.state["method"] == "Transition" and len(change_qns_templates):
+        if is_transition_active:
+            menu.addSeparator()
+            change_series_qns_action = menu.addAction("Change number of quantum numbers")
+
+        if is_transition_active and len(change_qns_templates):
             menu.addSeparator()
 
             for label in change_qns_templates.keys():
@@ -6076,6 +6087,8 @@ class ReferenceSelector(QTabWidget):
             self.series_selector.change_qns_action(label)
         elif action == list_from_cat_trend_action:
             self.list_from_cat_trend()
+        elif is_transition_active and action == change_series_qns_action:
+            self.change_series_qns()
 
 
 class SeriesSelector(QWidget):
