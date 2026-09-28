@@ -3766,6 +3766,12 @@ class MainWindow(QMainWindow):
         config.register("flag_allowdocking", self.update_docking)
         config.register("flag_docksalwaysontop", self.update_docksalwaysontop)
 
+        self.setDockOptions(
+            QMainWindow.DockOption.AnimatedDocks
+            | QMainWindow.DockOption.AllowNestedDocks
+            | QMainWindow.DockOption.AllowTabbedDocks
+        )
+
         try:
             # Set LLWP logo as icon
             possible_folders = [
