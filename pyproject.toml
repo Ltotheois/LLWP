@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llwp"
-version = "2.1.0"
+version = "2.1.1"
 authors = [
   { name="Luis Bonah", email="bonah@ph1.uni-koeln.de" },
 ]
@@ -32,4 +32,4 @@ llwp = "llwp:start_llwp"
 asap = "llwp:start_asap"
 
 [tool.setuptools]
-include_package_data = true
+include-package-data = true
