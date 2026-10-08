@@ -919,9 +919,11 @@ matplotlib_lock = threading.RLock()
 ## Customized PyQt classes
 ##
 class QThread(QThread):
+    # Maps each function to the sequence number of its most recently created thread
     active_runnables = {}
     lock = threading.RLock()
     threads = set()
+    _sequence = AtomicCounter()
 
     @classmethod
     def threaded_d(cls, func):
@@ -932,26 +934,37 @@ class QThread(QThread):
 
         return wrapper
 
+    @classmethod
+    def _release_finished(cls):
+        # Python references are only dropped once Qt reports the thread as finished.
+        # Dropping them earlier (e.g. from the finished signal, which is emitted
+        # before the thread has fully stopped) can destroy a running QThread.
+        with cls.lock:
+            for thread in [t for t in cls.threads if t.isFinished()]:
+                thread.wait()
+                cls.threads.discard(thread)
+
     def __init__(self, function, *args, **kwargs):
         super().__init__()
         self.function, self.args, self.kwargs = function, args, kwargs
-        self.threads.add(self)
-        self.finished.connect(lambda x=self: self.threads.remove(x))
+        with self.lock:
+            self._release_finished()
+            # The sequence number is assigned at creation (not when the thread
+            # starts running), so the newest request always wins and the result
+            # does not depend on OS scheduling or on reused thread idents.
+            self.sequence = self._sequence.increase()
+            self.active_runnables[self.function] = self.sequence
+            self.threads.add(self)
 
     def earlyreturn(self):
-        if self.active_runnables[self.function] != self.thread_id:
+        if self.active_runnables.get(self.function) != self.sequence:
             raise EarlyReturnError
 
     def run(self):
         try:
-            with self.lock:
-                self.thread_id = threading.current_thread().ident
-                self.active_runnables[self.function] = self.thread_id
             self.function(*self.args, **self.kwargs, thread=self)
         except EarlyReturnError:
             pass
-        except Exception:
-            raise
 
 
 class NTimesBehavior(QObject):
