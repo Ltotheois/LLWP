@@ -2343,6 +2343,38 @@ class NewAssignments(LinFile):
                 file.write(pyckett.df_to_lin(df, custom_freq_format=custom_freq_format))
 
 
+def delete_assignments(assignments):
+    new_assignments = None
+    for lin_fname in assignments["filename"].unique():
+        to_delete = assignments[assignments["filename"] == lin_fname]
+        to_delete = to_delete[list(pyckett.lin_dtypes.keys())]
+
+        if lin_fname == "__newassignments__":
+            new_assignments = NewAssignments.get_instance()
+            lin = new_assignments.get_new_assignments_df().copy()
+        else:
+            lin = pyckett.lin_to_df(lin_fname, sort=False)
+
+        lin = pd.merge(lin, to_delete, how="left", indicator=True)
+        lin = lin[lin["_merge"] == "left_only"]
+        lin = lin.drop("_merge", axis="columns").reset_index(drop=True)
+
+        if lin_fname == "__newassignments__":
+            new_assignments.new_assignments_df = lin
+            new_assignments.load_file()
+
+            new_assignments_window = NewAssignmentsWindow.instance
+            new_assignments_window.model.update()
+        else:
+            # Saving the *.lin file after removing the transitions
+            # can overwrite custom formats for the x and error values
+            with open(lin_fname, "w+") as file:
+                custom_freq_format = config["flag_lincustomfreqformat"]
+                file.write(
+                    pyckett.df_to_lin(lin, custom_freq_format=custom_freq_format)
+                )
+
+
 class FileAdditionalSettingsDialog(QDialog):
     open_dialogs = {}
 
@@ -2561,6 +2593,7 @@ class LWPAx:
         self.indices = None
         self.annotation = None
         self.qns = None
+        self.lin_df = None
 
         with matplotlib_lock:
             self.span = matplotlib.widgets.SpanSelector(
@@ -2718,6 +2751,7 @@ class LWPAx:
                 self.cat_coll.set(segments=segs, colors=colors)
 
             elif datatype == "lin":
+                self.lin_df = dataframe
                 tuples = list(zip(xs, ys))
                 tuples = tuples if len(tuples) != 0 else [[None, None]]
                 colors = dataframe["color"].to_numpy()
@@ -3373,6 +3407,27 @@ class LWPWidget(QGroupBox):
         else:
             return self.lwpaxes[0, 0]
 
+    def get_assignments_at(self, lwpax, event):
+        """Return the assignments whose markers are under the cursor."""
+        lin_df = lwpax.lin_df
+        if lin_df is None or not len(lin_df):
+            return pd.DataFrame()
+
+        ratio = self.plotcanvas.device_pixel_ratio
+        height = self.plotcanvas.get_width_height(physical=True)[1]
+        mouseevent = matplotlib.backend_bases.MouseEvent(
+            "button_press_event",
+            self.plotcanvas,
+            event.x() * ratio,
+            height - event.y() * ratio,
+        )
+        contained, info = lwpax.lin_coll.contains(mouseevent)
+        if not contained:
+            return pd.DataFrame()
+
+        assignments = lin_df.iloc[info["ind"]].copy()
+        return assignments
+
     def contextMenuCanvas(self, event):
         x, y = event.x(), event.y()
         geometry = self.plotcanvas.geometry()
@@ -3394,8 +3449,20 @@ class LWPWidget(QGroupBox):
         open_blend_action = menu.addAction("Open in Blended Lines")
         fit_all_action = menu.addAction("Fit all")
 
+        assignments = self.get_assignments_at(lwpax, event)
+        delete_assignment_action = None
+        if len(assignments):
+            menu.addSeparator()
+            delete_assignment_action = menu.addAction(
+                f"Delete assignment{'s' if len(assignments) > 1 else ''}"
+            )
+
         action = menu.exec(self.plotcanvas.mapToGlobal(event.pos()))
-        if action == get_position_action:
+        if action is None:
+            return
+        if action == delete_assignment_action:
+            delete_assignments(assignments)
+        elif action == get_position_action:
             QApplication.clipboard().setText(str(lwpax.ref_position))
         elif action == get_qns_action:
             output_string = []
@@ -6030,11 +6097,13 @@ class ReferenceSelector(QTabWidget):
         mainwindow.lwpwidget.set_data()
 
     def change_series_qns(self):
-        i, ok = QInputDialog.getInt(self, "Set Number of Quantum Numbers", "# Quantum Numbers: ")
+        i, ok = QInputDialog.getInt(
+            self, "Set Number of Quantum Numbers", "# Quantum Numbers: "
+        )
         if not ok:
             return
-        config['series_qns'] = i
-        
+        config["series_qns"] = i
+
     def contextMenuEvent(self, event):
         menu = QMenu(self)
         get_positions_action = menu.addAction("Copy Reference Positions")
@@ -6044,11 +6113,13 @@ class ReferenceSelector(QTabWidget):
 
         change_qns_templates = config["series_changeqnsactions"]
         change_qns_actions = {}
-        is_transition_active = (self.state["method"] == "Transition")
+        is_transition_active = self.state["method"] == "Transition"
 
         if is_transition_active:
             menu.addSeparator()
-            change_series_qns_action = menu.addAction("Change number of quantum numbers")
+            change_series_qns_action = menu.addAction(
+                "Change number of quantum numbers"
+            )
 
         if is_transition_active and len(change_qns_templates):
             menu.addSeparator()
@@ -7763,52 +7834,12 @@ class ResidualsWindow(EQDockWidget):
                     mainwindow.raise_()
                     mainwindow.activateWindow()
                 elif action_to_perform == "deletefromfile":
-                    unique_lin_fnames = tmp_transitions["filename_lin"].unique()
-                    for lin_fname in unique_lin_fnames:
-                        if lin_fname == "__newassignments__":
-                            new_assignments = NewAssignments.get_instance()
-                            lin = new_assignments.get_new_assignments_df().copy()
-                        else:
-                            lin = pyckett.lin_to_df(lin_fname, sort=False)
-
-                        transitions_to_delete = tmp_transitions.query(
-                            "filename_lin == @lin_fname"
-                        )
-                        columns = {
-                            x: x.replace("_lin", "").replace("_x", "")
-                            for x in transitions_to_delete.columns
-                            if (x.endswith("_lin") or x.endswith("_x"))
-                        }
-                        transitions_to_delete = transitions_to_delete.rename(
-                            columns=columns
-                        )
-                        transitions_to_delete = transitions_to_delete[
-                            list(pyckett.lin_dtypes.keys())
-                        ]
-
-                        lin = pd.merge(
-                            lin, transitions_to_delete, how="left", indicator=True
-                        )
-                        lin = lin[lin["_merge"] == "left_only"]
-                        lin = lin.drop("_merge", axis="columns").reset_index(drop=True)
-
-                        if lin_fname == "__newassignments__":
-                            new_assignments.new_assignments_df = lin
-                            new_assignments.load_file()
-
-                            new_assignments_window = NewAssignmentsWindow.instance
-                            new_assignments_window.model.update()
-                            # new_assignments_window.model.resize_columns()
-                        else:
-                            # Saving the *.lin file after removing the transitions
-                            # can overwrite custom formats for the x and error values
-                            with open(lin_fname, "w+") as file:
-                                custom_freq_format = config["flag_lincustomfreqformat"]
-                                file.write(
-                                    pyckett.df_to_lin(
-                                        lin, custom_freq_format=custom_freq_format
-                                    )
-                                )
+                    columns = {
+                        x: x.replace("_lin", "").replace("_x", "")
+                        for x in tmp_transitions.columns
+                        if (x.endswith("_lin") or x.endswith("_x"))
+                    }
+                    delete_assignments(tmp_transitions.rename(columns=columns))
 
     def fit_file_context_menu(self, pos):
         menu = QMenu(self)
@@ -11836,10 +11867,22 @@ class ASAPSquaredWindow(EQDockWidget):
 
         tmp_layout = QHBoxLayout()
         tmp_layout.addWidget(QQ(QLabel, text="Width: "))
-        tmp_layout.addWidget(QQ(QDoubleSpinBoxFullPrec, "asap_squaredwidth", width=120))
+        tmp_layout.addWidget(
+            QQ(
+                QDoubleSpinBoxFullPrec,
+                "asap_squaredwidth",
+                width=120,
+                range=(None, None),
+            )
+        )
         tmp_layout.addWidget(QQ(QLabel, text="Stepsize: "))
         tmp_layout.addWidget(
-            QQ(QDoubleSpinBoxFullPrec, "asap_squaredstepsize", width=120)
+            QQ(
+                QDoubleSpinBoxFullPrec,
+                "asap_squaredstepsize",
+                width=120,
+                range=(None, None),
+            )
         )
         tmp_layout.addWidget(QQ(QLabel, text="Threshold: "))
         tmp_layout.addWidget(
