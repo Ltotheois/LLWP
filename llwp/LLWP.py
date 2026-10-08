@@ -357,6 +357,7 @@ class Config(dict):
         "flag_showseriesarrows": (True, bool),
         "flag_keeponlylastassignment": (False, bool),
         "flag_autoreloadfiles": (True, bool),
+        "flag_reloadlinafterdelete": (True, bool),
         "flag_lincustomfreqformat": ("", str),
         "flag_allowdocking": (True, bool),
         "flag_docksalwaysontop": (True, bool),
@@ -2373,6 +2374,15 @@ def delete_assignments(assignments):
                 file.write(
                     pyckett.df_to_lin(lin, custom_freq_format=custom_freq_format)
                 )
+
+            # Without the file watcher the file would not be updated otherwise
+            if (
+                config["flag_reloadlinafterdelete"]
+                and not config["flag_autoreloadfiles"]
+            ):
+                lin_file = LinFile.ids.get(lin_fname)
+                if lin_file:
+                    lin_file.load_file()
 
 
 class FileAdditionalSettingsDialog(QDialog):
