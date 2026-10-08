@@ -158,6 +158,10 @@ def status_d(func):
     return _wrapper
 
 
+# Guards all modifications of matplotlib artists as well as the rendering of the figures
+matplotlib_lock = threading.RLock()
+
+
 def lock_d(lock):
     @wrapt.decorator
     def _wrapper(wrapped, instance, args, kwargs):
@@ -707,6 +711,7 @@ class PlotWidget(QWidget):
 
         self.update_plot()
 
+    @lock_d(matplotlib_lock)
     def update_plot(self):
         scaling = config["plot_yscale"]
 
@@ -912,7 +917,6 @@ class PlotWidget(QWidget):
 
 
 drawplot_decorator = DynamicDecorator()
-matplotlib_lock = threading.RLock()
 
 
 ##
@@ -1153,6 +1157,21 @@ class Figure(Figure):
 
 
 class FigureCanvas(FigureCanvas):
+    # Rendering and painting run in the GUI thread, while worker threads modify the
+    # artists of the figure. Both have to hold the matplotlib_lock, otherwise the
+    # renderer might traverse artists that are removed at the same time.
+    def draw(self):
+        with matplotlib_lock:
+            super().draw()
+
+    def paintEvent(self, event):
+        with matplotlib_lock:
+            super().paintEvent(event)
+
+    def blit(self, *args, **kwargs):
+        with matplotlib_lock:
+            super().blit(*args, **kwargs)
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.wheelEvent = lambda event: event.ignore()
@@ -2652,6 +2671,7 @@ class LWPAx:
                 ax.set_xticks([])
 
     @drawplot_decorator.d
+    @lock_d(matplotlib_lock)
     def update(self):
         ax = self.ax
         ax.set_xlim(self.xrange)
@@ -2936,12 +2956,13 @@ class LWPAx:
 
     def fit_data(self, xmin, xmax):
         # Delete artists highlighting previous fit
-        if self.__class__.fit_vline is not None:
-            self.__class__.fit_vline.remove()
-            self.__class__.fit_vline = None
-        if self.__class__.fit_curve is not None:
-            self.__class__.fit_curve.remove()
-            self.__class__.fit_curve = None
+        with matplotlib_lock:
+            if self.__class__.fit_vline is not None:
+                self.__class__.fit_vline.remove()
+                self.__class__.fit_vline = None
+            if self.__class__.fit_curve is not None:
+                self.__class__.fit_curve.remove()
+                self.__class__.fit_curve = None
 
         # Fit the data
         xmiddle, xuncert, fit_xs, fit_ys = self.fit_peak(xmin, xmax)
@@ -2949,12 +2970,13 @@ class LWPAx:
             QApplication.clipboard().setText(str(xmiddle))
 
         # Highlight fit in plot
-        self.__class__.fit_curve = self.ax.plot(
-            fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1
-        )[0]
-        self.__class__.fit_vline = self.ax.axvline(
-            x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1
-        )
+        with matplotlib_lock:
+            self.__class__.fit_curve = self.ax.plot(
+                fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1
+            )[0]
+            self.__class__.fit_vline = self.ax.axvline(
+                x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1
+            )
 
         # Create assignment object
         new_assignment = {
@@ -3003,8 +3025,8 @@ class LWPAx:
             xmiddle, xuncert = fit_results["xmiddle"], fit_results["xuncert"]
             fit_xs, fit_ys = fit_results["fit_xs"], fit_results["fit_ys"]
         except Exception as E:
-            self.fitcurve = None
-            self.fitline = None
+            self.fit_curve = None
+            self.fit_line = None
             notify_error.emit(
                 f"The fitting failed with the following error message : {str(E)}"
             )
@@ -3337,7 +3359,7 @@ class LWPWidget(QGroupBox):
 
         for i_col in range(n_widgets):
             thread.earlyreturn()
-            if i_col > n_cols:
+            if i_col >= n_cols:
                 continue
 
             refwidget = tab_widget.widget(i_col)
@@ -3403,24 +3425,28 @@ class LWPWidget(QGroupBox):
         thread.earlyreturn()
 
         # Set the correct values to the LWPAxes
-        if self.lwpaxes.shape != (n_rows, n_cols):
-            notify_error.emit("Shape of LWPAxes is out of sync with requested values.")
-            return
+        # The lock makes sure that the axes are not replaced while they are updated
+        with matplotlib_lock:
+            if self.lwpaxes.shape != (n_rows, n_cols):
+                notify_error.emit(
+                    "Shape of LWPAxes is out of sync with requested values."
+                )
+                return
 
-        for i_row in range(n_rows):
-            for i_col in range(n_cols):
-                ax = self.lwpaxes[i_row, i_col]
-                ax.ref_position = positions[i_row, i_col]
-                ax.xrange = (xmins[i_row, i_col], xmaxs[i_row, i_col])
-                ax.qns = qns[i_row, i_col]
-                ax.indices = {
-                    label: (
-                        min_indices[label][i_row, i_col],
-                        max_indices[label][i_row, i_col],
-                    )
-                    for label in ("exp", "cat", "lin")
-                }
-                ax.update()
+            for i_row in range(n_rows):
+                for i_col in range(n_cols):
+                    ax = self.lwpaxes[i_row, i_col]
+                    ax.ref_position = positions[i_row, i_col]
+                    ax.xrange = (xmins[i_row, i_col], xmaxs[i_row, i_col])
+                    ax.qns = qns[i_row, i_col]
+                    ax.indices = {
+                        label: (
+                            min_indices[label][i_row, i_col],
+                            max_indices[label][i_row, i_col],
+                        )
+                        for label in ("exp", "cat", "lin")
+                    }
+                    ax.update()
 
     def get_current_ax(self):
         shape = self.lwpaxes.shape
@@ -7761,28 +7787,30 @@ class ResidualsWindow(EQDockWidget):
             colors = df["color"].to_numpy()
             tuples = list(zip(xs, ys))
             tuples = tuples if len(tuples) != 0 else [[None, None]]
-            self.points.set_offsets(tuples)
-            self.points.set_color(colors)
-            if len(xs) and config["residuals_autoscale"]:
-                xmin, xmax = np.min(xs), np.max(xs)
-                if xmin == xmax:
-                    xmin -= 1
-                    xmax += 1
-                self.ax.set_xlim(
-                    [
-                        xmin - 0.02 * (xmax - xmin),
-                        xmax + 0.02 * (xmax - xmin),
-                    ]
-                )
-                ymin, ymax = np.min(ys), np.max(ys)
-                if ymin == ymax:
-                    ymin -= 1
-                    ymax += 1
-                y_range = [ymin, ymax]
-                self.ax.set_ylim(
-                    y_range[0] - config["plot_ymargin"] * (y_range[1] - y_range[0]),
-                    y_range[1] + config["plot_ymargin"] * (y_range[1] - y_range[0]),
-                )
+            with matplotlib_lock:
+                self.points.set_offsets(tuples)
+                self.points.set_color(colors)
+                if len(xs) and config["residuals_autoscale"]:
+                    xmin, xmax = np.min(xs), np.max(xs)
+                    if xmin == xmax:
+                        xmin -= 1
+                        xmax += 1
+                    self.ax.set_xlim(
+                        [
+                            xmin - 0.02 * (xmax - xmin),
+                            xmax + 0.02 * (xmax - xmin),
+                        ]
+                    )
+                    ymin, ymax = np.min(ys), np.max(ys)
+                    if ymin == ymax:
+                        ymin -= 1
+                        ymax += 1
+                    y_range = [ymin, ymax]
+                    self.ax.set_ylim(
+                        y_range[0] - config["plot_ymargin"] * (y_range[1] - y_range[0]),
+                        y_range[1] + config["plot_ymargin"] * (y_range[1] - y_range[0]),
+                    )
+
             notify_info.emit("<br/>".join(message))
         except Exception:
             notify_warning.emit("There was an error in your Residuals window input")
@@ -7918,7 +7946,6 @@ class BlendedLinesWindow(EQDockWidget):
                     [], [], color=config["blendedlines_color_total"]
                 )[0]
                 self.plot_parts = []
-                self.plot_parts_lock = threading.Lock()
                 self.update_plot_requested.connect(super().update_plot)
 
             def update_plot(self):
@@ -8059,7 +8086,7 @@ class BlendedLinesWindow(EQDockWidget):
                 x, profile, derivative, 0, *args, fixedwidth=fixedwidth
             )
 
-        with plot_widget.plot_parts_lock:
+        with matplotlib_lock:
             for part in plot_widget.plot_parts:
                 part.remove()
             plot_widget.plot_parts = []
@@ -8159,8 +8186,9 @@ class BlendedLinesWindow(EQDockWidget):
 
         ax = plot_widget.ax
 
-        plot_widget.fit_line.set_data(res_xs, res_ys)
-        plot_widget.fit_line.set_color(config["blendedlines_color_total"])
+        with matplotlib_lock:
+            plot_widget.fit_line.set_data(res_xs, res_ys)
+            plot_widget.fit_line.set_color(config["blendedlines_color_total"])
 
         opt_param = []
         err_param = []
@@ -8184,7 +8212,7 @@ class BlendedLinesWindow(EQDockWidget):
             tmp_ys = fitfunction_no_baseline(res_xs, *tmp_params)
             tmp_ys += exp_mean
 
-            with plot_widget.plot_parts_lock:
+            with matplotlib_lock:
                 plot_widget.plot_parts.append(
                     ax.plot(
                         res_xs,
@@ -8197,7 +8225,7 @@ class BlendedLinesWindow(EQDockWidget):
             opt_param.append(tmp_params)
             err_param.append(tmp_errors)
 
-        with plot_widget.plot_parts_lock:
+        with matplotlib_lock:
             plot_widget.plot_parts.append(
                 ax.scatter(
                     [x[0] for x in opt_param],
@@ -8208,7 +8236,7 @@ class BlendedLinesWindow(EQDockWidget):
 
         if polynomrank > 0 and config["blendedlines_showbaseline"]:
             baseline_args = popt[-polynomrank:]
-            with plot_widget.plot_parts_lock:
+            with matplotlib_lock:
                 plot_widget.plot_parts.append(
                     ax.plot(
                         res_xs,
@@ -8247,7 +8275,7 @@ class BlendedLinesWindow(EQDockWidget):
 
         peaks = self.peaks.copy()
         fixedwidth = config["blendedlines_fixedwidth"]
-        with plot_widget.plot_parts_lock:
+        with matplotlib_lock:
             for part in plot_widget.plot_parts:
                 part.remove()
             plot_widget.plot_parts = []
@@ -8420,7 +8448,7 @@ class BlendedLinesWindow(EQDockWidget):
 
                 idx += delta_idx
 
-        with plot_widget.plot_parts_lock:
+        with matplotlib_lock:
             plot_widget.plot_parts.append(
                 ax.scatter(
                     [x[0] for x in opt_param],
@@ -8449,8 +8477,9 @@ class BlendedLinesWindow(EQDockWidget):
 
         thread.earlyreturn()
 
-        plot_widget.fit_line.set_data(res_xs, res_ys)
-        plot_widget.fit_line.set_color(config["blendedlines_color_total"])
+        with matplotlib_lock:
+            plot_widget.fit_line.set_data(res_xs, res_ys)
+            plot_widget.fit_line.set_color(config["blendedlines_color_total"])
 
         self.fill_table_requested.emit()
         self.set_indicator_text.emit("Ready")
@@ -9180,28 +9209,29 @@ class EnergyLevelsWindow(EQDockWidget):
             colors = df["color"].to_numpy()
             tuples = list(zip(xs, ys))
             tuples = tuples if len(tuples) != 0 else [[None, None]]
-            self.points.set_offsets(tuples)
-            self.points.set_color(colors)
-            if len(xs) and config["energylevels_autoscale"]:
-                xmin, xmax = np.min(xs), np.max(xs)
-                if xmin == xmax:
-                    xmin -= 1
-                    xmax += 1
-                self.ax.set_xlim(
-                    [
-                        xmin - 0.02 * (xmax - xmin),
-                        xmax + 0.02 * (xmax - xmin),
-                    ]
-                )
-                ymin, ymax = np.min(ys), np.max(ys)
-                if ymin == ymax:
-                    ymin -= 1
-                    ymax += 1
-                y_range = [ymin, ymax]
-                self.ax.set_ylim(
-                    y_range[0] - config["plot_ymargin"] * (y_range[1] - y_range[0]),
-                    y_range[1] + config["plot_ymargin"] * (y_range[1] - y_range[0]),
-                )
+            with matplotlib_lock:
+                self.points.set_offsets(tuples)
+                self.points.set_color(colors)
+                if len(xs) and config["energylevels_autoscale"]:
+                    xmin, xmax = np.min(xs), np.max(xs)
+                    if xmin == xmax:
+                        xmin -= 1
+                        xmax += 1
+                    self.ax.set_xlim(
+                        [
+                            xmin - 0.02 * (xmax - xmin),
+                            xmax + 0.02 * (xmax - xmin),
+                        ]
+                    )
+                    ymin, ymax = np.min(ys), np.max(ys)
+                    if ymin == ymax:
+                        ymin -= 1
+                        ymax += 1
+                    y_range = [ymin, ymax]
+                    self.ax.set_ylim(
+                        y_range[0] - config["plot_ymargin"] * (y_range[1] - y_range[0]),
+                        y_range[1] + config["plot_ymargin"] * (y_range[1] - y_range[0]),
+                    )
         except Exception:
             notify_error.emit("There was an error in your Energy Levels window inputs")
             raise
@@ -9280,6 +9310,7 @@ class PeakfinderWindow(EQDockWidget):
                     [], [], color=config["peakfinder_peakcolor"], marker="*"
                 )
 
+            @lock_d(matplotlib_lock)
             def update_plot(self):
                 xmin, xmax = self.xrange
                 tuples = list(filter(lambda x: xmin < x[0] < xmax, self.parent.peaks))
@@ -9304,7 +9335,7 @@ class PeakfinderWindow(EQDockWidget):
         layout.addLayout(tmp_layout)
 
         self.run_button = QQ(
-            QPushButton, text="Run Peakfinder", change=lambda: self.find_peaks()
+            QPushButton, text="Run Peakfinder", change=lambda: self.on_run_clicked()
         )
         tmp_layout.addWidget(self.run_button)
         tmp_layout.addWidget(
@@ -9428,11 +9459,15 @@ class PeakfinderWindow(EQDockWidget):
         config["peakfinder_kwargs"] = kwargs
         return kwargs.copy()
 
+    def on_run_clicked(self):
+        self.run_button.setEnabled(False)
+        kwargs = self.get_kwargs()
+        self.find_peaks(kwargs)
+
     @QThread.threaded_d
     @peak_locked
-    def find_peaks(self, thread=None):
+    def find_peaks(self, kwargs, thread=None):
         self.peakfinding_started.emit()
-        kwargs = self.get_kwargs()
 
         if "frequency" in kwargs:
             val = kwargs["frequency"]
@@ -10704,6 +10739,7 @@ class ASAPAx(LWPAx):
         self.exp_coll.set(segments=segs, color=color)
 
     @drawplot_decorator.d
+    @lock_d(matplotlib_lock)
     def update(self):
         ax = self.ax
 
@@ -10873,12 +10909,13 @@ class ASAPAx(LWPAx):
             return
 
         # Delete artists highlighting previous fit
-        if self.__class__.fit_vline is not None:
-            self.__class__.fit_vline.remove()
-            self.__class__.fit_vline = None
-        if self.__class__.fit_curve is not None:
-            self.__class__.fit_curve.remove()
-            self.__class__.fit_curve = None
+        with matplotlib_lock:
+            if self.__class__.fit_vline is not None:
+                self.__class__.fit_vline.remove()
+                self.__class__.fit_vline = None
+            if self.__class__.fit_curve is not None:
+                self.__class__.fit_curve.remove()
+                self.__class__.fit_curve = None
 
         if onclick:
             xmiddle = xmin
@@ -10887,14 +10924,16 @@ class ASAPAx(LWPAx):
         else:
             # Fit the data
             xmiddle, xuncert, fit_xs, fit_ys = self.fit_peak(xmin, xmax)
-            self.__class__.fit_curve = self.ax.plot(
-                fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1
-            )[0]
+            with matplotlib_lock:
+                self.__class__.fit_curve = self.ax.plot(
+                    fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1
+                )[0]
 
         # Highlight fit in plot
-        self.__class__.fit_vline = self.ax.axvline(
-            x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1
-        )
+        with matplotlib_lock:
+            self.__class__.fit_vline = self.ax.axvline(
+                x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1
+            )
 
         # Emit signal for detail viewer
         self.x_fit = xmiddle
@@ -10991,8 +11030,8 @@ class ASAPAx(LWPAx):
             fit_xs, fit_ys = fit_results["fit_xs"], fit_results["fit_ys"]
 
         except Exception as E:
-            self.fitcurve = None
-            self.fitline = None
+            self.fit_curve = None
+            self.fit_line = None
             notify_error.emit(
                 f"The fitting failed with the following error message : {str(E)}"
             )
@@ -11346,12 +11385,13 @@ class ASAPWidget(LWPWidget):
     @status_d
     @drawplot_decorator.d
     def calc_correlation_plots(self, thread=None):
-        if self._ax_class.fit_vline is not None:
-            self._ax_class.fit_vline.remove()
-            self._ax_class.fit_vline = None
-        if self._ax_class.fit_curve is not None:
-            self._ax_class.fit_curve.remove()
-            self._ax_class.fit_curve = None
+        with matplotlib_lock:
+            if self._ax_class.fit_vline is not None:
+                self._ax_class.fit_vline.remove()
+                self._ax_class.fit_vline = None
+            if self._ax_class.fit_curve is not None:
+                self._ax_class.fit_curve.remove()
+                self._ax_class.fit_curve = None
 
         if not hasattr(ASAPSettingsWindow, "instance"):
             return
@@ -11381,7 +11421,7 @@ class ASAPWidget(LWPWidget):
 
             for i_col in range(n_widgets):
                 thread.earlyreturn()
-                if i_col > n_cols:
+                if i_col >= n_cols:
                     continue
 
                 refwidget = tab_widget.widget(i_col)
@@ -11969,12 +12009,15 @@ class ASAPSquaredWindow(EQDockWidget):
         self.noq = config["series_qns"]
         assignments = []
 
-        for ax in self.fig.get_axes():
-            self.fig.delaxes(ax)
-        self.ax = self.fig.subplots()
-        self.span_selector = matplotlib.widgets.SpanSelector(
-            self.ax, self.on_range, "horizontal", useblit=True
-        )
+        with matplotlib_lock:
+            for ax in self.fig.get_axes():
+                self.fig.delaxes(ax)
+            self.fit_vline = None
+            self.fit_curve = None
+            self.ax = self.fig.subplots()
+            self.span_selector = matplotlib.widgets.SpanSelector(
+                self.ax, self.on_range, "horizontal", useblit=True
+            )
 
         width = config["asap_squaredwidth"] or config["plot_width"]
         stepsize = config["asap_squaredstepsize"] or config["asap_stepsize"]
@@ -12042,9 +12085,10 @@ class ASAPSquaredWindow(EQDockWidget):
                 tot_ys /= ys_max
                 log_y_max += np.log10(ys_max)
 
-        self.ax.plot(rel_xs, tot_ys, color=config["color_exp"])
-        if config["asap_squaredplotlog"]:
-            self.ax.set_yscale("log")
+        with matplotlib_lock:
+            self.ax.plot(rel_xs, tot_ys, color=config["color_exp"])
+            if config["asap_squaredplotlog"]:
+                self.ax.set_yscale("log")
 
         self.data = np.vstack((rel_xs, tot_ys)).T
         self.drawplot.emit()
@@ -12115,12 +12159,13 @@ class ASAPSquaredWindow(EQDockWidget):
     @status_d
     def fit_data(self, xmin, xmax, thread=None):
         # Delete artists highlighting previous fit
-        if self.fit_vline is not None:
-            self.fit_vline.remove()
-            self.fit_vline = None
-        if self.fit_curve is not None:
-            self.fit_curve.remove()
-            self.fit_curve = None
+        with matplotlib_lock:
+            if self.fit_vline is not None:
+                self.fit_vline.remove()
+                self.fit_vline = None
+            if self.fit_curve is not None:
+                self.fit_curve.remove()
+                self.fit_curve = None
 
         if self.data is None:
             notify_warning.emit("No cross-correlation data available.")
@@ -12153,8 +12198,8 @@ class ASAPSquaredWindow(EQDockWidget):
                     f"The following parameters were determined: \n{popt=}\n{perr=}"
                 )
         except Exception as E:
-            self.fitcurve = None
-            self.fitline = None
+            self.fit_curve = None
+            self.fit_vline = None
             notify_error.emit(
                 f"The fitting failed with the following error message : {str(E)}"
             )
@@ -12164,12 +12209,13 @@ class ASAPSquaredWindow(EQDockWidget):
             self.clipboard_requested.emit(str(xmiddle))
 
         # Highlight fit in plot
-        self.fit_curve = self.ax.plot(
-            fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1
-        )[0]
-        self.fit_vline = self.ax.axvline(
-            x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1
-        )
+        with matplotlib_lock:
+            self.fit_curve = self.ax.plot(
+                fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1
+            )[0]
+            self.fit_vline = self.ax.axvline(
+                x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1
+            )
         self.xmiddle = xmiddle
         self.xuncert = xuncert
 
