@@ -2786,7 +2786,7 @@ class LWPAx:
 
                 else:
                     segs = np.array(((xs, xs), (ys * 0, ys))).T
-                    colors = dataframe["color"].to_numpy()
+                    colors = dataframe["color"].to_numpy().copy()
 
                     mask = xs == self.ref_position
                     colors[mask] = config["color_ref"]
