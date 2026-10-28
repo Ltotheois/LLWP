@@ -50,6 +50,9 @@ class Param:
     default, bounds: Initial guess and bounds for parameters without a role.
     first_line_value: If set, the parameter is fixed to this value for the first line
                 and only fitted for the others (e.g. a phase relative to the first line).
+    in_kernel:  The parameter without a role is also an input of the convolution kernel
+                (parameters with the role "width" always are). Its `default` is the
+                start value in the convolution window.
     """
 
     name: str
@@ -60,6 +63,7 @@ class Param:
     default: float = 0.0
     bounds: tuple = (-np.inf, np.inf)
     first_line_value: float = None
+    in_kernel: bool = False
 
 
 @dataclass
@@ -385,7 +389,7 @@ class ParametricLineshape(FitMethod):
     # Convolution
     @classmethod
     def kernel_params(cls):
-        return [p for p in cls.params if p.role == "width"]
+        return [p for p in cls.params if p.role == "width" or p.in_kernel]
 
     def kernel(self, xs, amplitude, **widths):
         values = []
@@ -395,7 +399,7 @@ class ParametricLineshape(FitMethod):
             elif param.role == "amplitude":
                 values.append(amplitude)
             else:
-                values.append(widths[param.name])
+                values.append(widths.get(param.name, param.default))
         return self.profile(xs, *values)
 
     # Parameter handling

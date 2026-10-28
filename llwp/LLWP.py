@@ -7287,7 +7287,9 @@ class ConvolutionWindow(EQDockWidget):
                     continue
                 label = QQ(QLabel, text=f"{param.label}: ")
                 input_ = QQ(QDoubleSpinBox, range=(None, None))
-                input_.setValue(config["convolution_widths"].get(param.name, 1))
+                input_.setValue(
+                    config["convolution_widths"].get(param.name, param.default or 1)
+                )
                 input_.valueChanged.connect(
                     lambda value, key=param.name: self.on_width_changed(key, value)
                 )
@@ -7396,7 +7398,7 @@ class ConvolutionWindow(EQDockWidget):
                 )
 
                 widths = {
-                    p.name: config["convolution_widths"].get(p.name, 1)
+                    p.name: config["convolution_widths"].get(p.name, p.default or 1)
                     for p in method.kernel_params()
                 }
                 kernel = method(derivative).kernel(kernel_xs, amplitude, **widths)
