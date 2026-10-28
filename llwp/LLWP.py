@@ -641,6 +641,8 @@ class Geometry:
         geometry = cls.get(key)
         if geometry:
             widget.setGeometry(geometry)
+        else:
+            widget.setGeometry(100, 100, 800, 600)
 
 
 class PlotWidget(QWidget):
