@@ -53,7 +53,9 @@ import webbrowser
 import pyckett
 
 from functools import lru_cache
-from scipy import optimize, special, signal
+from scipy import signal
+
+from .fitmethods import FitMethod, FIDLineshape  # noqa: F401
 
 from PyQt6.QtCore import (
     pyqtSignal,
@@ -304,8 +306,7 @@ class Config(dict):
         "convolution_derivative": (0, int),
         "convolution_amplitude": (1, float),
         "convolution_function": ("Off", str),
-        "convolution_widthgauss": (1, float),
-        "convolution_widthlorentz": (1, float),
+        "convolution_widths": ({"fwhm_gauss": 1.0, "fwhm_lorentz": 1.0}, dict),
         "series_currenttab": (0, int),
         "series_references": ([], list),
         "series_blendwidth": (0, float),
@@ -2610,20 +2611,10 @@ class FileAdditionalSettingsDialog(QDialog):
 class LWPAx:
     fit_vline = None
     fit_curve = None
-    fit_methods = (
-        "Pgopher",
-        "Polynom",
-        "MultiPolynom",
-        "Gauss",
-        "Lorentz",
-        "Voigt",
-        "Gauss 1st Derivative",
-        "Lorentz 1st Derivative",
-        "Voigt 1st Derivative",
-        "Gauss 2nd Derivative",
-        "Lorentz 2nd Derivative",
-        "Voigt 2nd Derivative",
-    )
+
+    @classmethod
+    def get_fit_methods(cls):
+        return FitMethod.labels("can_fit_single")
 
     def __init__(self, ax, row_i, col_i):
         self.ax = ax
@@ -3011,7 +3002,8 @@ class LWPAx:
         peakdirection = config["fit_peakdirection"]
         fitmethod = config["fit_fitmethod"]
 
-        if (len(exp_xs) == 0) or ((len(exp_xs) < 2) and fitmethod != "Pgopher"):
+        fit_method = get_fitmethod(fitmethod)
+        if (len(exp_xs) == 0) or (len(exp_xs) < fit_method.min_points):
             notify_error.emit(
                 "The data could not be fit as there were too few points selected."
             )
@@ -3020,10 +3012,10 @@ class LWPAx:
             )
 
         try:
-            fit_function = get_fitfunction(fitmethod, config["fit_offset"])
-            fit_results = fit_function(exp_xs, exp_ys, peakdirection, fit_xs)
-            xmiddle, xuncert = fit_results["xmiddle"], fit_results["xuncert"]
-            fit_xs, fit_ys = fit_results["fit_xs"], fit_results["fit_ys"]
+            fit_results = fit_method.fit_single(exp_xs, exp_ys, peakdirection, fit_xs)
+            fit_method.remember(fit_results.values)
+            xmiddle, xuncert = fit_results.xmiddle, fit_results.xuncert
+            fit_xs, fit_ys = fit_results.fit_xs, fit_results.fit_ys
         except Exception as E:
             self.fit_curve = None
             self.fit_line = None
@@ -3573,7 +3565,7 @@ class Menu:
         self.fitfunction_actions = {}
 
         current_method = config["fit_fitmethod"]
-        for method in self.fitfunction_ax_class.fit_methods:
+        for method in self.fitfunction_ax_class.get_fit_methods():
             is_checked = method == current_method
 
             def callback(_, method=method):
@@ -4906,7 +4898,6 @@ class AssignAllDialog(QDialog):
 
         peakdirection = config["fit_peakdirection"]
         fitmethod = config["fit_fitmethod"]
-        offset = config["fit_offset"]
 
         asap_axes = mainwindow.lwpwidget.lwpaxes[:, self.i_col]
         positions = np.zeros(asap_axes.shape)
@@ -5016,17 +5007,17 @@ class AssignAllDialog(QDialog):
 
             kwargs = {"wmax": max_fwhm, "xs_weight_factor": 0}
             fit_xs = np.linspace(xmin, xmax, 1000)
-            fit_function = get_fitfunction(fitmethod, offset, **kwargs)
+            fit_method = get_fitmethod(fitmethod, **kwargs)
 
             try:
-                fit_results = fit_function(
+                fit_results = fit_method.fit_single(
                     exp_xs,
                     exp_ys,
                     peakdirection,
                     fit_xs,
                 )
-                xmiddle, xuncert = fit_results["xmiddle"], fit_results["xuncert"]
-                fit_xs, fit_ys = fit_results["fit_xs"], fit_results["fit_ys"]
+                xmiddle, xuncert = fit_results.xmiddle, fit_results.xuncert
+                fit_xs, fit_ys = fit_results.fit_xs, fit_results.fit_ys
             except Exception as E:
                 notify_warning.emit(
                     f"Error when trying to fit row {i_row}. Error reads '{E}'."
@@ -5091,7 +5082,6 @@ class AssignAllDialog(QDialog):
 
         peakdirection = config["fit_peakdirection"]
         fitmethod = config["fit_fitmethod"]
-        offset = config["fit_offset"]
 
         tab_widget = ReferenceSeriesWindow.instance.tab
         refwidget = tab_widget.widget(self.i_col)
@@ -5193,17 +5183,17 @@ class AssignAllDialog(QDialog):
 
             kwargs = {"wmax": max_fwhm, "xs_weight_factor": 0}
             fit_xs = np.linspace(xmin, xmax, 1000)
-            fit_function = get_fitfunction(fitmethod, offset, **kwargs)
+            fit_method = get_fitmethod(fitmethod, **kwargs)
 
             try:
-                fit_results = fit_function(
+                fit_results = fit_method.fit_single(
                     exp_xs,
                     exp_ys,
                     peakdirection,
                     fit_xs,
                 )
-                xmiddle, xuncert = fit_results["xmiddle"], fit_results["xuncert"]
-                fit_xs, fit_ys = fit_results["fit_xs"], fit_results["fit_ys"]
+                xmiddle, xuncert = fit_results.xmiddle, fit_results.xuncert
+                fit_xs, fit_ys = fit_results.fit_xs, fit_results.fit_ys
             except Exception as E:
                 notify_warning.emit(
                     f"Error when trying to fit row {i_row}. Error reads '{E}'."
@@ -7165,7 +7155,9 @@ class ConvolutionWindow(EQDockWidget):
         mainwidget.setLayout(self.general_layout)
         row_i = 0
 
-        options = ("Off", "Gauss", "Lorentz", "Voigt", "Custom")
+        options = (
+            ["Off", CURRENT_FIT_FUNCTION] + FitMethod.convolution_names() + ["Custom"]
+        )
         self.selection_box = QQ(QComboBox, "convolution_function", options=options)
         self.selection_box_label = QQ(QLabel, text="Function: ")
         self.general_layout.addWidget(self.selection_box_label, row_i, 0)
@@ -7207,28 +7199,37 @@ class ConvolutionWindow(EQDockWidget):
 
         row_i += 1
 
-        self.width_gauss_input = QQ(
-            QDoubleSpinBox, "convolution_widthgauss", range=(None, None)
-        )
-        self.width_gauss_label = QQ(QLabel, text="Width Gauss: ")
-        self.general_layout.addWidget(self.width_gauss_label, row_i, 0)
-        self.general_layout.addWidget(self.width_gauss_input, row_i, 1)
-
-        row_i += 1
-
-        self.width_lorentz_input = QQ(
-            QDoubleSpinBox, "convolution_widthlorentz", range=(None, None)
-        )
-        self.width_lorentz_label = QQ(QLabel, text="Width Lorentz: ")
-        self.general_layout.addWidget(self.width_lorentz_label, row_i, 0)
-        self.general_layout.addWidget(self.width_lorentz_input, row_i, 1)
-
-        row_i += 1
+        # One input for each width parameter that is used by a lineshape, shared between lineshapes
+        self.width_widgets = {}
+        for name in FitMethod.convolution_names():
+            for param in FitMethod.registry[name].kernel_params():
+                if param.name in self.width_widgets:
+                    continue
+                label = QQ(QLabel, text=f"{param.label}: ")
+                input_ = QQ(QDoubleSpinBox, range=(None, None))
+                input_.setValue(config["convolution_widths"].get(param.name, 1))
+                input_.valueChanged.connect(
+                    lambda value, key=param.name: self.on_width_changed(key, value)
+                )
+                self.general_layout.addWidget(label, row_i, 0)
+                self.general_layout.addWidget(input_, row_i, 1)
+                self.width_widgets[param.name] = (label, input_)
+                row_i += 1
 
         self.custom_kernel_input = QQ(QPlainTextEdit)
         self.custom_kernel_label = QQ(QLabel, text="Custom Kernel: ")
         self.general_layout.addWidget(self.custom_kernel_label, row_i, 0)
         self.general_layout.addWidget(self.custom_kernel_input, row_i, 1)
+
+        row_i += 1
+
+        self.take_fit_button = QQ(
+            QPushButton,
+            text="Take Widths From Last Fit",
+            tooltip="Use the widths of the last fit of a line (main window or Blended Lines)",
+            change=lambda _: self.take_from_last_fit(),
+        )
+        self.general_layout.addWidget(self.take_fit_button, row_i, 0, 1, 2)
 
         row_i += 1
 
@@ -7247,13 +7248,53 @@ class ConvolutionWindow(EQDockWidget):
             "convolution_kernelwidth",
             "convolution_derivative",
             "convolution_amplitude",
-            "convolution_widthgauss",
-            "convolution_widthlorentz",
+            "convolution_widths",
         )
         config.register(keys, self.on_change)
         config.register("convolution_function", self.update_gui)
+        config.register("fit_fitmethod", self.on_fit_function_changed)
 
         self.update_gui()
+
+    def get_method(self):
+        """Returns the lineshape class and derivative to use or None if there is none."""
+        function = config["convolution_function"]
+        if function == CURRENT_FIT_FUNCTION:
+            try:
+                method, derivative = FitMethod.resolve(config["fit_fitmethod"])
+            except NotImplementedError:
+                return None
+            return (method, derivative) if method.can_convolve else None
+        if function in FitMethod.registry:
+            return FitMethod.registry[function], config["convolution_derivative"]
+        return None
+
+    def on_fit_function_changed(self):
+        if config["convolution_function"] == CURRENT_FIT_FUNCTION:
+            self.update_gui()
+            self.on_change()
+
+    def take_from_last_fit(self):
+        last_fit = FitMethod.last_fit
+        if last_fit is None:
+            notify_info.emit("There is no fit of a line yet to take the widths from.")
+            return
+
+        applied = []
+        with config:
+            for name, (_, input_) in self.width_widgets.items():
+                if name in last_fit.values:
+                    input_.setValue(last_fit.values[name])
+                    applied.append(name)
+
+        if applied:
+            notify_info.emit(
+                f"Took the width(s) {', '.join(applied)} from the last fit ({last_fit.label})."
+            )
+        else:
+            notify_info.emit(
+                f"The last fit ({last_fit.label}) did not determine any widths."
+            )
 
     def update_gui(self):
         function = config["convolution_function"]
@@ -7264,53 +7305,58 @@ class ConvolutionWindow(EQDockWidget):
         self.kernelwidth_input.setVisible(function not in ("Off", "Custom"))
         self.kernelwidth_label.setVisible(function not in ("Off", "Custom"))
 
-        self.derivative_input.setVisible(function != "Off")
-        self.derivative_label.setVisible(function != "Off")
+        show_derivative = function not in ("Off", CURRENT_FIT_FUNCTION)
+        self.derivative_input.setVisible(show_derivative)
+        self.derivative_label.setVisible(show_derivative)
 
         self.amplitude_input.setVisible(function != "Off")
         self.amplitude_label.setVisible(function != "Off")
 
-        self.width_gauss_input.setVisible(function in ("Gauss", "Voigt"))
-        self.width_gauss_label.setVisible(function in ("Gauss", "Voigt"))
-
-        self.width_lorentz_input.setVisible(function in ("Lorentz", "Voigt"))
-        self.width_lorentz_label.setVisible(function in ("Lorentz", "Voigt"))
+        used_widths = set()
+        method = self.get_method()
+        if method is not None:
+            used_widths = {p.name for p in method[0].kernel_params()}
+        self.take_fit_button.setVisible(function not in ("Off", "Custom"))
+        for name, (label, input_) in self.width_widgets.items():
+            label.setVisible(name in used_widths)
+            input_.setVisible(name in used_widths)
 
         self.custom_kernel_input.setVisible(function == "Custom")
         self.custom_kernel_label.setVisible(function == "Custom")
 
         self.update_button.setVisible(function == "Custom")
 
+    def on_width_changed(self, name, value):
+        config["convolution_widths"] = {**config["convolution_widths"], name: value}
+
     def on_change(self):
         function = config["convolution_function"]
 
         if function == "Off":
             kernel = []
-        elif function in ("Gauss", "Lorentz", "Voigt"):
-            stepwidth = config["convolution_stepwidth"]
-            kernelwidth = config["convolution_kernelwidth"]
-            derivative = config["convolution_derivative"]
-            amplitude = config["convolution_amplitude"]
+        elif function != "Custom":
+            method = self.get_method()
+            if method is None:
+                notify_warning.emit(
+                    f"The fit function {config['fit_fitmethod']} cannot be used to create a kernel."
+                )
+                kernel = []
+            else:
+                method, derivative = method
+                stepwidth = config["convolution_stepwidth"]
+                kernelwidth = config["convolution_kernelwidth"]
+                amplitude = config["convolution_amplitude"]
 
-            number_of_points = kernelwidth // (2 * stepwidth)
-            kernel_xs = np.arange(-number_of_points, +number_of_points + 1) * stepwidth
+                number_of_points = kernelwidth // (2 * stepwidth)
+                kernel_xs = (
+                    np.arange(-number_of_points, +number_of_points + 1) * stepwidth
+                )
 
-            if function == "Gauss":
-                width = config["convolution_widthgauss"]
-                kernel = lineshape("Gauss", derivative, kernel_xs, 0, amplitude, width)
-            elif function == "Lorentz":
-                width = config["convolution_widthlorentz"]
-                kernel = lineshape(
-                    "Lorentz", derivative, kernel_xs, 0, amplitude, width
-                )
-            else:  # Voigt
-                widths = (
-                    config["convolution_widthgauss"],
-                    config["convolution_widthlorentz"],
-                )
-                kernel = lineshape(
-                    "Voigt", derivative, kernel_xs, 0, amplitude, *widths
-                )
+                widths = {
+                    p.name: config["convolution_widths"].get(p.name, 1)
+                    for p in method.kernel_params()
+                }
+                kernel = method(derivative).kernel(kernel_xs, amplitude, **widths)
         else:  # Custom Kernel
             tmp = self.custom_kernel_input.toPlainText().strip()
             if not tmp:
@@ -7930,7 +7976,7 @@ class BlendedLinesWindow(EQDockWidget):
         self.peaks = []
         self.fit_values = None
         self.cid = None
-        self.FID_postprocessing_function = None
+        self.result = None
 
         mainwidget = QWidget()
         self.setWidget(mainwidget)
@@ -7972,8 +8018,7 @@ class BlendedLinesWindow(EQDockWidget):
             QQ(
                 QComboBox,
                 "blendedlines_lineshape",
-                items=list(shorthand_fitfunction_name_to_profile_and_derivative.keys())
-                + ["FID Fit"],
+                items=[CURRENT_FIT_FUNCTION] + FitMethod.labels("can_fit_multi"),
                 minWidth=120,
             ),
             row_id,
@@ -8002,7 +8047,12 @@ class BlendedLinesWindow(EQDockWidget):
         )
 
         tmplayout.addWidget(
-            QQ(QCheckBox, "blendedlines_fixedwidth", text="All Same Width"),
+            QQ(
+                QCheckBox,
+                "blendedlines_fixedwidth",
+                text="All Same Width",
+                tooltip="Use the same value for the widths of all lines",
+            ),
             row_id,
             2,
             1,
@@ -8055,6 +8105,14 @@ class BlendedLinesWindow(EQDockWidget):
         self.cid = self.plot_widget.plotcanvas.mpl_connect(
             "button_press_event", lambda event: self.add_peak(event)
         )
+        config.register(
+            "fit_fitmethod",
+            lambda: (
+                self.plot_widget.update_plot()
+                if config["blendedlines_lineshape"] == CURRENT_FIT_FUNCTION
+                else None
+            ),
+        )
         self.fill_table_requested.connect(self.fill_table)
         self.plot_widget.from_current_plot()
 
@@ -8063,28 +8121,12 @@ class BlendedLinesWindow(EQDockWidget):
         self.set_indicator_text.emit("<span style='color:#eda711;'>Working ...</span>")
 
         peaks = self.peaks.copy()
-        profile = config["blendedlines_lineshape"]
-        if profile == "FID Fit":
-            self.fit_peaks_FID(plot_widget)
+        method = get_fitmethod(resolve_fit_label(config["blendedlines_lineshape"]))
+        if not method.can_fit_multi:
+            self.set_indicator_text.emit(
+                f"<span style='color:#eda711;'>{method.label} cannot fit multiple lines.</span>"
+            )
             return
-        profile, derivative = shorthand_fitfunction_name_to_profile_and_derivative[
-            profile
-        ]
-        polynomrank = config["blendedlines_polynom"] + 1
-        fixedwidth = config["blendedlines_fixedwidth"]
-        amplitude_direction = config["fit_peakdirection"]
-        number_of_widths = 2 if profile.startswith("Voigt") else 1
-        number_of_arguments = 2 + number_of_widths * (not fixedwidth)
-
-        def fitfunction(x, *args, fixedwidth=fixedwidth):
-            return self.fitfunction_multiple_peaks(
-                x, profile, derivative, polynomrank, *args, fixedwidth=fixedwidth
-            )
-
-        def fitfunction_no_baseline(x, *args, fixedwidth=fixedwidth):
-            return self.fitfunction_multiple_peaks(
-                x, profile, derivative, 0, *args, fixedwidth=fixedwidth
-            )
 
         with matplotlib_lock:
             for part in plot_widget.plot_parts:
@@ -8094,8 +8136,6 @@ class BlendedLinesWindow(EQDockWidget):
         thread.earlyreturn()
 
         xrange = xmin, xmax = plot_widget.xrange
-        xwidth = xmax - xmin
-        xcenter = (xmin + xmax) / 2
 
         df_exp = ExpFile.get_data(xrange=xrange).copy()
         exp_xs = df_exp["x"].to_numpy()
@@ -8103,86 +8143,29 @@ class BlendedLinesWindow(EQDockWidget):
 
         thread.earlyreturn()
 
-        xs = []
-        ys = []
-        ws = []
-        exp_mean = 0
-        if len(exp_ys) and (polynomrank + len(peaks)):
-            if config["blendedlines_autopositionpeaks"]:
-                exp_mean = exp_ys.mean()
-
-            yptp = 4 * (np.amax(exp_ys) - np.amin(exp_ys))
-            w0 = xwidth
-            wmax = config["blendedlines_maxfwhm"] or w0
-            amp_min, amp_max = -3 * yptp, 3 * yptp
-            if amplitude_direction < 0:
-                amp_max = 0
-            if amplitude_direction > 0:
-                amp_min = 0
-
-            for peak in peaks:
-                x, y, x_rel = peak
-
-                if not xmin < x < xmax:
-                    x = xcenter + x_rel
-                    if not xmin < x < xmax:
-                        x = xcenter
-                    y = yptp * np.sign(amplitude_direction)
-                elif not amp_min < y < amp_max:
-                    y = yptp * np.sign(amplitude_direction)
-
-                xs.append((x, *xrange))
-                ys.append((y, amp_min, amp_max))
-                ws.append((wmax / 10, 0, wmax))
-
-            p0 = []
-            bounds = [[], []]
-            for x, y, w in zip(xs, ys, ws):
-                tmp_p0 = [z[0] for z in (x, y, w, w)]
-                tmp_b0 = [z[1] for z in (x, y, w, w)]
-                tmp_b1 = [z[2] for z in (x, y, w, w)]
-
-                if fixedwidth:
-                    slice_ = slice(2)
-                elif profile == "Voigt":
-                    slice_ = slice(4)
-                else:
-                    slice_ = slice(3)
-
-                p0.extend(tmp_p0[slice_])
-                bounds[0].extend(tmp_b0[slice_])
-                bounds[1].extend(tmp_b1[slice_])
-
-            if fixedwidth and len(peaks):
-                ws = np.array(ws)
-                w0, wl, wu = ws[:, 0].mean(), ws[:, 1].min(), ws[:, 2].max()
-                p0.extend([w0] * number_of_widths)
-                bounds[0].extend([wl] * number_of_widths)
-                bounds[1].extend([wu] * number_of_widths)
-
-            p0.extend([0] * polynomrank)
-            bounds[0].extend([-np.inf] * polynomrank)
-            bounds[1].extend([+np.inf] * polynomrank)
-
-            popt, pcov = optimize.curve_fit(
-                fitfunction, exp_xs, exp_ys, p0=p0, bounds=bounds
-            )
-            perr = np.sqrt(np.diag(pcov))
-            res_xs = np.linspace(xmin, xmax, config["blendedlines_xpoints"])
-            res_ys = fitfunction(res_xs, *popt)
-            res_exp_ys = fitfunction(exp_xs, *popt)
-        else:
-            popt = [0] * (
-                number_of_arguments * len(peaks) + polynomrank + 2 * fixedwidth
-            )
-            perr = [0] * (
-                number_of_arguments * len(peaks) + polynomrank + 2 * fixedwidth
-            )
-            res_xs = np.linspace(xmin, xmax, config["blendedlines_xpoints"])
-            res_ys = res_xs * 0
-            res_exp_ys = exp_xs * 0
+        result = method.fit_multi(
+            exp_xs,
+            exp_ys,
+            peaks,
+            xrange,
+            baseline_rank=config["blendedlines_polynom"],
+            shared=config["blendedlines_fixedwidth"],
+            wmax=config["blendedlines_maxfwhm"],
+            peakdirection=config["fit_peakdirection"],
+        )
+        res_xs = np.linspace(xmin, xmax, config["blendedlines_xpoints"])
+        res_ys = result.evaluate(res_xs)
 
         thread.earlyreturn()
+
+        # Lines of a fit without baseline are shown shifted by the mean of the data
+        exp_mean = 0
+        if (
+            config["blendedlines_autopositionpeaks"]
+            and method.supports_baseline
+            and not result.empty
+        ):
+            exp_mean = exp_ys.mean()
 
         ax = plot_widget.ax
 
@@ -8190,296 +8173,40 @@ class BlendedLinesWindow(EQDockWidget):
             plot_widget.fit_line.set_data(res_xs, res_ys)
             plot_widget.fit_line.set_color(config["blendedlines_color_total"])
 
-        opt_param = []
-        err_param = []
-
-        for i in range(len(peaks)):
-            tmp_params = list(
-                popt[i * number_of_arguments : (i + 1) * number_of_arguments]
-            )
-            tmp_errors = list(
-                perr[i * number_of_arguments : (i + 1) * number_of_arguments]
-            )
-
-            if fixedwidth:
-                tmp_params.extend(
-                    popt[-(polynomrank + number_of_widths) : len(popt) - polynomrank]
-                )
-                tmp_errors.extend(
-                    perr[-(polynomrank + number_of_widths) : len(popt) - polynomrank]
-                )
-
-            tmp_ys = fitfunction_no_baseline(res_xs, *tmp_params)
-            tmp_ys += exp_mean
-
-            with matplotlib_lock:
+            for i in range(len(result.lines)):
                 plot_widget.plot_parts.append(
                     ax.plot(
                         res_xs,
-                        tmp_ys,
+                        result.evaluate_line(res_xs, i) + exp_mean,
                         color=config["blendedlines_color_total"],
                         alpha=config["blendedlines_transparency"],
                     )[0]
                 )
 
-            opt_param.append(tmp_params)
-            err_param.append(tmp_errors)
-
-        with matplotlib_lock:
+            marker_xs = [result.center(i) for i in range(len(result.lines))]
+            marker_ys = [
+                (result.amplitude(i) + exp_mean) if method.markers_at_amplitude else 0
+                for i in range(len(result.lines))
+            ]
             plot_widget.plot_parts.append(
                 ax.scatter(
-                    [x[0] for x in opt_param],
-                    [x[1] + exp_mean for x in opt_param],
-                    color=config["blendedlines_color_points"],
+                    marker_xs, marker_ys, color=config["blendedlines_color_points"]
                 )
             )
 
-        if polynomrank > 0 and config["blendedlines_showbaseline"]:
-            baseline_args = popt[-polynomrank:]
-            with matplotlib_lock:
+            if len(result.baseline) and config["blendedlines_showbaseline"]:
                 plot_widget.plot_parts.append(
                     ax.plot(
                         res_xs,
-                        np.polyval(baseline_args, res_xs - xcenter),
+                        result.evaluate_baseline(res_xs),
                         color=config["blendedlines_color_baseline"],
                     )[0]
                 )
-        else:
-            baseline_args = []
 
-        rms_ys = (
-            np.sqrt(np.sum((exp_ys - res_exp_ys) ** 2) / len(exp_ys))
-            if len(exp_ys)
-            else 0
-        )
-        self.params = (
-            opt_param,
-            err_param,
-            profile,
-            number_of_arguments,
-            number_of_widths,
-            xcenter,
-            baseline_args,
-            rms_ys,
-        )
+        self.result = result
+        method.remember(result.mean_values())
 
         thread.earlyreturn()
-
-        self.fill_table_requested.emit()
-        self.set_indicator_text.emit("Ready")
-        plot_widget.update_plot_requested.emit()
-
-    @QThread.threaded_d
-    def fit_peaks_FID(self, plot_widget, thread=None):
-        self.set_indicator_text.emit("<span style='color:#eda711;'>Working ...</span>")
-
-        peaks = self.peaks.copy()
-        fixedwidth = config["blendedlines_fixedwidth"]
-        with matplotlib_lock:
-            for part in plot_widget.plot_parts:
-                part.remove()
-            plot_widget.plot_parts = []
-
-        thread.earlyreturn()
-
-        xrange = xmin, xmax = plot_widget.xrange
-        xwidth = xmax - xmin
-        xcenter = (xmin + xmax) / 2
-        xresolution = config["blendedlines_fidresolution"]
-
-        df_exp = ExpFile.get_data(xrange=xrange).copy()
-        exp_xs = df_exp["x"].to_numpy()
-        exp_ys = df_exp["y"].to_numpy()
-
-        if len(peaks) and len(exp_xs):
-            exp_ys_max = 1
-            if len(exp_ys):
-                exp_ys_max = np.max(exp_ys)
-                if exp_ys_max <= 0:
-                    exp_ys_max = 1
-            exp_ys = exp_ys / exp_ys_max
-
-            dt = 1 / xwidth
-            n_time = int(1 / dt / xresolution)
-            ts = np.arange(n_time) * dt
-
-            def fid(ts, params, xcenter=0, fixedwidth=fixedwidth):
-                if fixedwidth:
-                    fwhm0 = params[0]
-                    idx = 1
-                    delta_idx = 3
-                else:
-                    idx = 0
-                    delta_idx = 4
-
-                ys_fid = np.zeros_like(ts, dtype=complex)
-
-                if fixedwidth:
-                    x0, y0 = params[idx : idx + delta_idx - 1]
-                else:
-                    x0, y0, fwhm0 = params[idx : idx + delta_idx - 1]
-                idx += delta_idx - 1
-
-                x0 = x0 - xcenter
-                ys_fid += (
-                    y0
-                    * np.pi
-                    * fwhm0
-                    * np.exp(-ts * np.pi * fwhm0)
-                    * np.exp(2j * np.pi * x0 * ts)
-                )
-
-                while idx < len(params):
-                    if fixedwidth:
-                        x0, y0, phi0 = params[idx : idx + delta_idx]
-                    else:
-                        x0, y0, fwhm0, phi0 = params[idx : idx + delta_idx]
-
-                    x0 = x0 - xcenter
-                    ys_fid += (
-                        y0
-                        * np.pi
-                        * fwhm0
-                        * np.exp(-ts * np.pi * fwhm0)
-                        * np.exp(2j * np.pi * x0 * ts + phi0)
-                    )
-                    idx += delta_idx
-
-                return ys_fid
-
-            def power_spectrum(ts, params, xcenter=0):
-                ys_fid = fid(ts, params, xcenter=xcenter)
-
-                if self.FID_postprocessing_function is not None:
-                    ts, ys_fid = self.FID_postprocessing_function(ts, ys_fid)
-
-                spec = np.fft.fftshift(np.fft.fft(ys_fid, n_time)) * dt
-                freq = np.fft.fftshift(np.fft.fftfreq(n_time, dt))
-                power = np.abs(spec)
-
-                freq += xcenter
-                return freq, power
-
-            def interp(exp_xs, ts, *params, xcenter=0):
-                fit_xs, fit_ys = power_spectrum(ts, params, xcenter=xcenter)
-                interp_ys = np.interp(exp_xs, fit_xs, fit_ys)
-                return interp_ys
-
-            def fitfunction_fid(exp_xs, *params, ts=ts, xcenter=xcenter):
-                return interp(exp_xs, ts, *params, xcenter=xcenter)
-
-            wmax = config["blendedlines_maxfwhm"]
-            w0 = min(wmax / 2, xwidth / 2)
-            ymax = 10
-
-            p0 = [w0] if fixedwidth else []
-            bounds = [[0], [wmax]] if fixedwidth else [[], []]
-            for i, (x0, y0, x_rel) in enumerate(self.peaks):
-                if not xmin < x0 < xmax:
-                    x0 = xcenter + x_rel
-                    if not xmin < x0 < xmax:
-                        x0 = xcenter
-                y0 = y0 / exp_ys_max
-                if not 0 < y0 < ymax:
-                    y0 = ymax / 2
-
-                if not i:
-                    p0.extend((x0, y0) if fixedwidth else (x0, y0, w0))
-                    bounds[0].extend((xmin, 0) if fixedwidth else (xmin, 0, 0))
-                    bounds[1].extend((xmax, ymax) if fixedwidth else (xmax, ymax, wmax))
-                else:
-                    p0.extend((x0, y0, 0) if fixedwidth else (x0, y0, w0, 0))
-                    bounds[0].extend(
-                        (xmin, 0, -np.pi) if fixedwidth else (xmin, 0, 0, -np.pi)
-                    )
-                    bounds[1].extend(
-                        (xmax, ymax, np.pi) if fixedwidth else (xmax, ymax, wmax, np.pi)
-                    )
-
-            thread.earlyreturn()
-
-            popt, pcov = optimize.curve_fit(
-                fitfunction_fid, exp_xs, exp_ys, p0=p0, bounds=bounds
-            )
-            perr = np.sqrt(np.diag(pcov))
-
-            res_xs = np.linspace(xcenter - xwidth / 2, xcenter + xwidth / 2, 1000)
-            res_ys = fitfunction_fid(res_xs, *popt) * exp_ys_max
-            res_exp_ys = fitfunction_fid(exp_xs, *popt) * exp_ys_max
-        else:
-            popt, pcov = [], []
-            res_xs = np.linspace(xmin, xmax, config["blendedlines_xpoints"])
-            res_ys = res_xs * 0
-            res_exp_ys = exp_xs * 0
-
-        thread.earlyreturn()
-        ax = plot_widget.ax
-
-        opt_param = []
-        err_param = []
-
-        if len(popt):
-            if fixedwidth:
-                fwhm, x, y = popt[:3]
-                d_fwhm, d_x, d_y = perr[:3]
-                y, d_y = y * exp_ys_max, d_y * exp_ys_max
-                idx = 3
-                delta_idx = 3
-            else:
-                x, y, fwhm = popt[:3]
-                d_x, d_y, d_fwhm = perr[:3]
-                y, d_y = y * exp_ys_max, d_y * exp_ys_max
-                idx = 3
-                delta_idx = 4
-            opt_param.append((x, y, fwhm, 0))
-            err_param.append((d_x, d_y, d_fwhm, 0))
-
-            while idx < len(popt):
-                if fixedwidth:
-                    x, y, phi = popt[idx : idx + delta_idx]
-                    d_x, d_y, d_phi = perr[idx : idx + delta_idx]
-                    y, d_y = y * exp_ys_max, d_y * exp_ys_max
-                else:
-                    x, y, fwhm, phi = popt[idx : idx + delta_idx]
-                    d_x, d_y, d_fwhm, d_phi = perr[idx : idx + delta_idx]
-                    y, d_y = y * exp_ys_max, d_y * exp_ys_max
-                opt_param.append((x, y, fwhm, phi))
-                err_param.append((d_x, d_y, d_fwhm, d_phi))
-
-                idx += delta_idx
-
-        with matplotlib_lock:
-            plot_widget.plot_parts.append(
-                ax.scatter(
-                    [x[0] for x in opt_param],
-                    [0 for x in opt_param],
-                    color=config["blendedlines_color_points"],
-                )
-            )
-
-        baseline_args = []
-
-        rms_ys = (
-            np.sqrt(np.sum((exp_ys - res_exp_ys) ** 2) / len(exp_ys))
-            if len(exp_ys)
-            else 0
-        )
-        self.params = (
-            opt_param,
-            err_param,
-            "FID-Fit",
-            4,
-            2,
-            xcenter,
-            baseline_args,
-            rms_ys,
-        )
-
-        thread.earlyreturn()
-
-        with matplotlib_lock:
-            plot_widget.fit_line.set_data(res_xs, res_ys)
-            plot_widget.fit_line.set_color(config["blendedlines_color_total"])
 
         self.fill_table_requested.emit()
         self.set_indicator_text.emit("Ready")
@@ -8508,88 +8235,33 @@ class BlendedLinesWindow(EQDockWidget):
                 del self.peaks[int(i)]
         self.plot_widget.update_plot()
 
-    def fitfunction_multiple_peaks(
-        self, x, fun, der, baseline_polynom_rank, *ps, fixedwidth=False
-    ):
-        # number of arguments per peak
-        number_of_arguments = 2 + (1 + (fun == "Voigt")) * (not fixedwidth)
-        # number of width values per peak
-        number_of_widths = 2 if fun == "Voigt" else 1
-        res_ys = []
-        param_peaks = ps
-
-        # Baseline Polynom
-        if baseline_polynom_rank > 0:
-            param_baseline = ps[-baseline_polynom_rank:]
-            param_peaks = ps[:-baseline_polynom_rank]
-            xcenter = sum(self.plot_widget.xrange) / 2
-
-            res_ys.append(np.polyval(param_baseline, x - xcenter))
-
-        # Fixed Width
-        if fixedwidth:
-            widths = param_peaks[-number_of_widths:]
-            param_peaks = param_peaks[:-number_of_widths]
-
-        # Peaks
-        for i in range(len(param_peaks) // number_of_arguments):
-            tmp_params = list(
-                param_peaks[i * number_of_arguments : (i + 1) * number_of_arguments]
-            )
-            if fixedwidth:
-                tmp_params.extend(widths)
-            res_ys.append(lineshape(fun, der, x, *tmp_params))
-
-        return np.sum(res_ys, axis=0)
-
     def fill_table(self):
-        (
-            opt_param,
-            err_param,
-            function,
-            number_of_arguments,
-            number_of_widths,
-            self.center,
-            baseline_args,
-            rms_ys,
-        ) = self.params
+        result = self.result
+        method = result.method
+        params = method.params
+        self.center = result.xcenter
+        center_name = method.param_with_role("center").name
+
         fit_values = {
-            "function": function,
+            "function": method.label,
             "center": self.center,
-            "baseline": list(baseline_args),
+            "baseline": list(result.baseline),
             "peaks": [],
-            "RMS": rms_ys,
+            "RMS": result.rms,
             "datetime": time.strftime("%d.%m.%Y %H:%M:%S", time.localtime()),
         }
 
-        opt_param.sort(key=lambda x: x[0])
         table = self.table
         table.setRowCount(0)
-        table.setColumnCount(7)
+        table.setColumnCount(len(params) + 3)
         table.setHorizontalHeaderLabels(
-            [
-                "Action",
-                "Frequency",
-                "Amplitude",
-                "FWHM Gauss",
-                "FWHM Lorentz",
-                "Other QNs",
-                "Delete",
-            ]
+            ["Action"] + [p.label for p in params] + ["Other QNs", "Delete"]
         )
-        for params, params_error in zip(opt_param, err_param):
-            x, y, wg, wl = (
-                params[0],
-                params[1],
-                params[2] if function != "Lorentz" else 0,
-                params[1 + number_of_widths] if function != "Gauss" else 0,
-            )
-            x_error, y_error, wg_error, wl_error = (
-                params_error[0],
-                params_error[1],
-                params_error[2] if function != "Lorentz" else 0,
-                params_error[1 + number_of_widths] if function != "Gauss" else 0,
-            )
+
+        order = sorted(range(len(result.lines)), key=result.center)
+        for index in order:
+            values, errors = result.lines[index], result.errors[index]
+            x, x_error = values[center_name], errors[center_name]
 
             currRowCount = table.rowCount()
             table.insertRow(currRowCount)
@@ -8602,21 +8274,17 @@ class BlendedLinesWindow(EQDockWidget):
                     change=lambda x, xpos=x, error=x_error: self.assign(xpos, error),
                 ),
             )
-            table.setItem(
-                currRowCount, 1, QTableWidgetItem(f"{x:{config['flag_xformatfloat']}}")
-            )
-            table.setItem(
-                currRowCount, 2, QTableWidgetItem(f"{y:{config['flag_xformatfloat']}}")
-            )
-            table.setItem(
-                currRowCount, 3, QTableWidgetItem(f"{wg:{config['flag_xformatfloat']}}")
-            )
-            table.setItem(
-                currRowCount, 4, QTableWidgetItem(f"{wl:{config['flag_xformatfloat']}}")
-            )
+            for j, param in enumerate(params):
+                table.setItem(
+                    currRowCount,
+                    1 + j,
+                    QTableWidgetItem(
+                        f"{values[param.name]:{config['flag_xformatfloat']}}"
+                    ),
+                )
             table.setCellWidget(
                 currRowCount,
-                5,
+                1 + len(params),
                 QQ(
                     QPushButton,
                     text="Assign other QNs",
@@ -8627,7 +8295,7 @@ class BlendedLinesWindow(EQDockWidget):
             )
             table.setCellWidget(
                 currRowCount,
-                6,
+                2 + len(params),
                 QQ(
                     QPushButton,
                     text="Delete",
@@ -8636,8 +8304,8 @@ class BlendedLinesWindow(EQDockWidget):
             )
             fit_values["peaks"].append(
                 {
-                    "values": (x, y, wg, wl),
-                    "errors": (x_error, y_error, wg_error, wl_error),
+                    "values": {k: float(v) for k, v in values.items()},
+                    "errors": {k: float(v) for k, v in errors.items()},
                 }
             )
         self.fit_values = fit_values
@@ -9729,308 +9397,24 @@ class CmdWindow(EQDockWidget):
 ##
 ## Global Functions
 ##
-def Gaussian(derivative, x, x0, amp, fwhm):
-    sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
-    if sigma == 0:
-        return [0 if i != x0 else np.inf for i in x]
-
-    if derivative == 0:
-        ys = amp * np.exp(-((x - x0) ** 2) / (2 * sigma**2))
-    elif derivative == 1:
-        ys = (
-            -amp
-            / (sigma * np.exp(-0.5))
-            * (x - x0)
-            * np.exp(-((x - x0) ** 2) / (2 * sigma**2))
-        )
-    elif derivative == 2:
-        ys = (
-            amp
-            * (1 - ((x - x0) / sigma) ** 2)
-            * np.exp(-((x - x0) ** 2) / (2 * sigma**2))
-        )
-    else:
-        raise NotImplementedError(
-            "Only the zeroth, first, and second derivatives of a Gaussian are implemented."
-        )
-    return ys
+# Entry in the function selections that follows the fit function chosen in the main window
+CURRENT_FIT_FUNCTION = "Current Fit Function"
 
 
-def Lorentzian(derivative, x, x0, amp, fwhm):
-    gamma = fwhm / 2
-    if gamma == 0:
-        return [0 if i != x0 else np.inf for i in x]
-
-    if derivative == 0:
-        ys = amp * gamma**2 / (gamma**2 + (x - x0) ** 2)
-    elif derivative == 1:
-        ys = (
-            (-amp * gamma**3 * 16 / 9 * np.sqrt(3))
-            * (x - x0)
-            / ((x - x0) ** 2 + gamma**2) ** 2
-        )
-    elif derivative == 2:
-        ys = (
-            (amp * gamma**4)
-            * (gamma**2 - 3 * (x - x0) ** 2)
-            / ((x - x0) ** 2 + gamma**2) ** 3
-        )
-    else:
-        raise NotImplementedError(
-            "Only the zeroth, first, and second derivatives of a Gaussian are implemented."
-        )
-    return ys
+def resolve_fit_label(label):
+    return config["fit_fitmethod"] if label == CURRENT_FIT_FUNCTION else label
 
 
-def Voigt(derivative, x, x0, amp, fwhm_gauss, fwhm_lorentz):
-    sigma = fwhm_gauss / (2 * np.sqrt(2 * np.log(2)))
-    gamma = fwhm_lorentz / 2
-    if gamma == sigma == 0:
-        return [0 if i != x0 else np.inf for i in x]
-
-    z = (x - x0 + 1j * gamma) / (sigma * np.sqrt(2))
-    wz = special.wofz(z)
-    w0 = special.wofz((1j * gamma) / (sigma * np.sqrt(2)))
-
-    if derivative == 0:
-
-        def tmp(x, x0, wz, sigma, gamma):
-            return np.real(wz) / (sigma * np.sqrt(2 * np.pi))
-    elif derivative == 1:
-
-        def tmp(x, x0, wz, sigma, gamma):
-            return (
-                1
-                / (sigma**3 * np.sqrt(2 * np.pi))
-                * (gamma * np.imag(wz) - (x - x0) * np.real(wz))
-            )
-    elif derivative == 2:
-
-        def tmp(x, x0, wz, sigma, gamma):
-            return (
-                1
-                / (sigma**5 * np.sqrt(2 * np.pi))
-                * (
-                    gamma * (2 * (x - x0) * np.imag(wz) - sigma * np.sqrt(2 / np.pi))
-                    + (gamma**2 + sigma**2 - (x - x0) ** 2) * np.real(wz)
-                )
-            )
-    else:
-        raise NotImplementedError(
-            "Only the zeroth, first, and second derivatives of a Gaussian are implemented."
-        )
-
-    ys = tmp(x, x0, wz, sigma, gamma)
-    if derivative == 1:
-        xspan = max(sigma, gamma) * 2
-        tmp_xs = np.linspace(-xspan, +xspan, 1000)
-        ymax = np.max(tmp(tmp_xs, 0, w0, sigma, gamma))
-    else:
-        ymax = tmp(0, 0, w0, sigma, gamma)
-    if ymax == 0:
-        ymax = 1
-    ys *= amp / ymax
-
-    return ys
-
-
-def lineshape(shape, derivative, *args):
-    if shape == "Gauss":
-        lineshape_function = Gaussian
-    elif shape == "Lorentz":
-        lineshape_function = Lorentzian
-    elif shape == "Voigt":
-        lineshape_function = Voigt
-    else:
-        raise NotImplementedError(f"The lineshape {shape} is not implemented.")
-
-    ys = lineshape_function(derivative, *args)
-    return ys
-
-
-def fit_pgopher(xs, ys, peakdirection, fit_xs):
-    ymin, ymax = np.min(ys), np.max(ys)
-
-    if peakdirection < 0:
-        cutoff = ymin + (ymax - ymin) / 2
-        mask = ys <= cutoff
-    else:
-        cutoff = ymax - (ymax - ymin) / 2
-        mask = ys >= cutoff
-
-    fit_xs = xs[mask]
-    fit_ys = ys[mask] - ymin
-
-    results = {
-        "xmiddle": np.sum(fit_xs * fit_ys) / np.sum(fit_ys),
-        "xuncert": 0,
-        "fit_xs": fit_xs,
-        "fit_ys": fit_ys,
+def get_fitmethod(label, **kwargs):
+    """Creates the fit method with the given label, with its options taken from the config."""
+    options = {
+        "offset": config["fit_offset"],
+        "polynomrank": config["fit_polynomrank"],
+        "polynommaxrank": config["fit_polynommaxrank"],
+        "fid_resolution": config["blendedlines_fidresolution"],
     }
-    return results
-
-
-def fit_polynom(xs, ys, peakdirection, fit_xs, rank):
-    try:
-        popt = np.polyfit(xs, ys, rank)
-    except Exception:
-        popt = np.polyfit(xs, ys, rank)
-    polynom = np.poly1d(popt)
-    fit_ys = polynom(fit_xs)
-
-    if peakdirection < 0:
-        xmiddle = fit_xs[np.argmin(fit_ys)]
-    else:
-        xmiddle = fit_xs[np.argmax(fit_ys)]
-
-    results = {
-        "xmiddle": xmiddle,
-        "xuncert": 0,
-        "fit_xs": fit_xs,
-        "fit_ys": fit_ys,
-    }
-    return results
-
-
-def fit_polynom_multirank(xs, ys, peakdirection, fit_xs, maxrank):
-    best_rms = np.inf
-    best_rank = 0
-
-    maxrank = min(len(xs), maxrank)
-    for rank in range(maxrank):
-        try:
-            popt = np.polyfit(xs, ys, rank)
-        except Exception:
-            popt = np.polyfit(xs, ys, rank)
-        polynom = np.poly1d(popt)
-        fit_ys = polynom(xs)
-
-        rms = np.mean((fit_ys - ys) ** 2)
-        if rms < best_rms:
-            best_rms = rms
-            best_rank = rank
-
-    popt = np.polyfit(xs, ys, best_rank)
-    polynom = np.poly1d(popt)
-    fit_ys = polynom(fit_xs)
-
-    if peakdirection < 0:
-        xmiddle = fit_xs[np.argmin(fit_ys)]
-    else:
-        xmiddle = fit_xs[np.argmax(fit_ys)]
-
-    results = {
-        "xmiddle": xmiddle,
-        "xuncert": 0,
-        "fit_xs": fit_xs,
-        "fit_ys": fit_ys,
-    }
-    return results
-
-
-def fit_lineshape(
-    xs, ys, peakdirection, fit_xs, profilname, derivative, offset, **kwargs
-):
-    xmin, xmax = xs.min(), xs.max()
-    x0 = (xmin + xmax) / 2
-
-    xs_weight_factor = kwargs.get("xs_weight_factor", 4)
-    if xs_weight_factor:
-        ys_weighted = ys * np.exp(
-            -np.abs(np.abs(xs - x0) / (xmax - xmin)) * xs_weight_factor
-        )
-        x0 = (
-            xs[np.argmax(ys_weighted)]
-            if peakdirection >= 0
-            else xs[np.argmin(ys_weighted)]
-        )
-
-    ymin, ymax, ymean, yptp = ys.min(), ys.max(), ys.mean(), np.ptp(ys)
-    y0 = 0
-
-    w0 = kwargs.get("w0", (xmax - xmin) / 10)
-    wmin = kwargs.get("wmin", 0)
-    wmax = kwargs.get("wmax", (xmax - xmin))
-
-    amp_min, amp_max = -3 * yptp, 3 * yptp
-    if peakdirection < 0:
-        amp_max = 0
-        y0 = -yptp
-    if peakdirection > 0:
-        amp_min = 0
-        y0 = yptp
-
-    p0 = [x0, y0, w0] if profilname != "Voigt" else [x0, y0, w0, w0]
-    bounds = (
-        [[xmin, amp_min, wmin], [xmax, amp_max, wmax]]
-        if profilname != "Voigt"
-        else [[xmin, amp_min, wmin, wmin], [xmax, amp_max, wmax, wmax]]
-    )
-
-    def function(*x):
-        return lineshape(profilname, derivative, *x)
-
-    if offset:
-
-        def function(*x):
-            return lineshape(profilname, derivative, *x[:-1]) + x[-1]
-
-        p0.append(ymean)
-        bounds[0].append(ymin)
-        bounds[1].append(ymax)
-
-    try:
-        popt, pcov = optimize.curve_fit(function, xs, ys, p0=p0, bounds=bounds)
-    except Exception:
-        popt, pcov = optimize.curve_fit(function, xs, ys, p0=p0, bounds=bounds)
-    perr = np.sqrt(np.diag(pcov))
-    fit_ys = function(fit_xs, *popt)
-
-    xmiddle = popt[0]
-    xuncert = perr[0]
-
-    results = {
-        "xmiddle": xmiddle,
-        "xuncert": xuncert,
-        "fit_xs": fit_xs,
-        "fit_ys": fit_ys,
-        "popt": popt,
-        "perr": perr,
-    }
-    return results
-
-
-shorthand_fitfunction_name_to_profile_and_derivative = {
-    "Gauss": ("Gauss", 0),
-    "Lorentz": ("Lorentz", 0),
-    "Voigt": ("Voigt", 0),
-    "Gauss 1st Derivative": ("Gauss", 1),
-    "Lorentz 1st Derivative": ("Lorentz", 1),
-    "Voigt 1st Derivative": ("Voigt", 1),
-    "Gauss 2nd Derivative": ("Gauss", 2),
-    "Lorentz 2nd Derivative": ("Lorentz", 2),
-    "Voigt 2nd Derivative": ("Voigt", 2),
-}
-
-
-def get_fitfunction(fitmethod, offset=False, **kwargs):
-    fit_function = {
-        "Pgopher": fit_pgopher,
-        "Polynom": lambda *args: fit_polynom(*args, config["fit_polynomrank"]),
-        "MultiPolynom": lambda *args: fit_polynom_multirank(
-            *args, config["fit_polynommaxrank"]
-        ),
-    }.get(fitmethod)
-
-    if not fit_function:
-        profilname, derivative = shorthand_fitfunction_name_to_profile_and_derivative[
-            fitmethod
-        ]
-
-        def fit_function(*args, kwargs=kwargs):
-            return fit_lineshape(*args, profilname, derivative, offset, **kwargs)
-
-    return fit_function
+    options.update(kwargs)
+    return FitMethod.create(label, **options)
 
 
 def addemptyrow_inplace(df, model=None):
@@ -10335,10 +9719,23 @@ def exp_to_df(fname, n_bytes=4096, **kwargs):
 def restart():
     project_filename = llwpfile(".files")
     File.save_files(project_filename)
-    mainwindow.closeEvent()
     NewAssignments.get_instance().save_backup()
+    mainwindow.closeEvent()
     args = () if APP_TAG == "LLWP" else ("--ASAP",)
-    os.execl(sys.executable, sys.executable, __file__, project_filename, *args)
+
+    # Start as a module, as the file uses relative imports and cannot be run as a script.
+    # The directory containing the package is added to the path in case it is not installed.
+    package_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    paths = [package_dir] + [os.environ["PYTHONPATH"]] * ("PYTHONPATH" in os.environ)
+    os.environ["PYTHONPATH"] = os.pathsep.join(paths)
+    os.execl(
+        sys.executable,
+        sys.executable,
+        "-m",
+        __package__ or "llwp",
+        project_filename,
+        *args,
+    )
 
 
 def except_hook(cls, exception, traceback):
@@ -10653,7 +10050,10 @@ class LevelSelector(SeriesSelector):
 class ASAPAx(LWPAx):
     fit_vline = None
     fit_curve = None
-    fit_methods = ("Pgopher", "Polynom", "MultiPolynom", "Gauss", "Lorentz")
+
+    @classmethod
+    def get_fit_methods(cls):
+        return ("Pgopher", "Polynom", "MultiPolynom", "Gauss", "Lorentz")
 
     egy_df = None
     egy_filename = None
@@ -11015,7 +10415,8 @@ class ASAPAx(LWPAx):
         peakdirection = config["fit_peakdirection"]
         fitmethod = config["fit_fitmethod"]
 
-        if (len(exp_xs) == 0) or ((len(exp_xs) < 2) and fitmethod != "Pgopher"):
+        fit_method = get_fitmethod(fitmethod)
+        if (len(exp_xs) == 0) or (len(exp_xs) < fit_method.min_points):
             notify_error.emit(
                 "The data could not be fit as there were too few points selected."
             )
@@ -11024,10 +10425,10 @@ class ASAPAx(LWPAx):
             )
 
         try:
-            fit_function = get_fitfunction(fitmethod, config["fit_offset"])
-            fit_results = fit_function(exp_xs, exp_ys, peakdirection, fit_xs)
-            xmiddle, xuncert = fit_results["xmiddle"], fit_results["xuncert"]
-            fit_xs, fit_ys = fit_results["fit_xs"], fit_results["fit_ys"]
+            fit_results = fit_method.fit_single(exp_xs, exp_ys, peakdirection, fit_xs)
+            fit_method.remember(fit_results.values)
+            xmiddle, xuncert = fit_results.xmiddle, fit_results.xuncert
+            fit_xs, fit_ys = fit_results.fit_xs, fit_results.fit_ys
 
         except Exception as E:
             self.fit_curve = None
@@ -12178,7 +11579,8 @@ class ASAPSquaredWindow(EQDockWidget):
         fitmethod = config["fit_fitmethod"]
         peakdirection = config["fit_peakdirection"]
 
-        if (len(exp_xs) == 0) or ((len(exp_xs) < 2) and fitmethod != "Pgopher"):
+        fit_method = get_fitmethod(fitmethod)
+        if (len(exp_xs) == 0) or (len(exp_xs) < fit_method.min_points):
             notify_error.emit(
                 "The data could not be fit as there were too few points selected."
             )
@@ -12187,13 +11589,13 @@ class ASAPSquaredWindow(EQDockWidget):
             )
 
         try:
-            fit_function = get_fitfunction(fitmethod, config["fit_offset"])
-            fit_results = fit_function(exp_xs, exp_ys, peakdirection, fit_xs)
-            xmiddle, xuncert = fit_results["xmiddle"], fit_results["xuncert"]
-            fit_xs, fit_ys = fit_results["fit_xs"], fit_results["fit_ys"]
+            fit_results = fit_method.fit_single(exp_xs, exp_ys, peakdirection, fit_xs)
+            fit_method.remember(fit_results.values)
+            xmiddle, xuncert = fit_results.xmiddle, fit_results.xuncert
+            fit_xs, fit_ys = fit_results.fit_xs, fit_results.fit_ys
 
-            if "popt" in fit_results and "perr" in fit_results:
-                popt, perr = fit_results["popt"], fit_results["perr"]
+            if fit_results.popt is not None:
+                popt, perr = fit_results.popt, fit_results.perr
                 notify_info.emit(
                     f"The following parameters were determined: \n{popt=}\n{perr=}"
                 )
@@ -12328,7 +11730,7 @@ if __name__ == "__main__":
 
 ## Define postprocessing for FID-fit
 
-# BlendedLinesWindow.instance.FID_postprocessing_function = lambda ts, ys: (ts, ys * np.hanning(len(ts)))
+# FIDLineshape.postprocessing_function = lambda ts, ys: (ts, ys * np.hanning(len(ts)))
 
 ## Or with a custom function
 
@@ -12346,4 +11748,4 @@ if __name__ == "__main__":
 #     ys = ys_fid * window_function
 #     return(ts, ys)
 
-# BlendedLinesWindow.instance.FID_postprocessing_function = FID_postprocessing_function
+# FIDLineshape.postprocessing_function = FID_postprocessing_function
