@@ -55,7 +55,12 @@ import pyckett
 from functools import lru_cache
 from scipy import signal
 
-from .fitmethods import FitMethod, FIDLineshape  # noqa: F401
+from .fitmethods import (  # noqa: F401
+    FitMethod,
+    Param,
+    ParametricLineshape,
+    FIDLineshape,
+)
 
 from PyQt6.QtCore import (
     pyqtSignal,
@@ -3561,25 +3566,15 @@ class Menu:
         for i, view_action in enumerate(view_actions):
             view_action.setShortcut(f"Shift+{i + 2}")
 
-        fitfunction_menu = QMenu("Choose Fit Function", parent=parent)
+        self.menu_parent = parent
+        fitfunction_menu = self.fitfunction_menu = QMenu(
+            "Choose Fit Function", parent=parent
+        )
         self.fitfunction_actions = {}
-
-        current_method = config["fit_fitmethod"]
-        for method in self.fitfunction_ax_class.get_fit_methods():
-            is_checked = method == current_method
-
-            def callback(_, method=method):
-                return self.set_fitmethod_gui(method)
-
-            self.fitfunction_actions[method] = QQ(
-                QAction,
-                parent=parent,
-                text=f"{method}",
-                change=callback,
-                checkable=True,
-                value=is_checked,
-            )
-            fitfunction_menu.addAction(self.fitfunction_actions[method])
+        self.update_fitfunction_menu()
+        FitMethod.registration_callbacks.append(
+            lambda cls: self.update_fitfunction_menu()
+        )
         config.register("fit_fitmethod", self.on_fitfunction_changed)
 
         self.toggle_theme_action = QQ(
@@ -3807,6 +3802,29 @@ class Menu:
             self.on_fitfunction_changed()
         else:
             config["fit_fitmethod"] = method
+
+    def update_fitfunction_menu(self):
+        """Lists all fit methods, including those that were registered later on."""
+        current_method = config["fit_fitmethod"]
+        for method in self.fitfunction_ax_class.get_fit_methods():
+            if method in self.fitfunction_actions:
+                continue
+
+            def callback(_, method=method):
+                return self.set_fitmethod_gui(method)
+
+            self.fitfunction_actions[method] = QQ(
+                QAction,
+                parent=self.menu_parent,
+                text=f"{method}",
+                change=callback,
+                checkable=True,
+                value=method == current_method,
+            )
+
+        self.fitfunction_menu.clear()
+        for method in self.fitfunction_ax_class.get_fit_methods():
+            self.fitfunction_menu.addAction(self.fitfunction_actions[method])
 
     def on_fitfunction_changed(self):
         value = config["fit_fitmethod"]
@@ -4568,7 +4586,9 @@ class ConsoleDialog(QDialog):
         old_stdout = sys.stdout
         red_output = sys.stdout = io.StringIO()
         try:
-            exec(command)
+            # A single namespace is needed so that class bodies and functions defined
+            # in the command can see names defined or imported in the command
+            exec(command, dict(globals()))
         except Exception as E:
             message.append(f"Executing the code raised an error: {str(E)}")
             raise
@@ -7201,20 +7221,12 @@ class ConvolutionWindow(EQDockWidget):
 
         # One input for each width parameter that is used by a lineshape, shared between lineshapes
         self.width_widgets = {}
-        for name in FitMethod.convolution_names():
-            for param in FitMethod.registry[name].kernel_params():
-                if param.name in self.width_widgets:
-                    continue
-                label = QQ(QLabel, text=f"{param.label}: ")
-                input_ = QQ(QDoubleSpinBox, range=(None, None))
-                input_.setValue(config["convolution_widths"].get(param.name, 1))
-                input_.valueChanged.connect(
-                    lambda value, key=param.name: self.on_width_changed(key, value)
-                )
-                self.general_layout.addWidget(label, row_i, 0)
-                self.general_layout.addWidget(input_, row_i, 1)
-                self.width_widgets[param.name] = (label, input_)
-                row_i += 1
+        self.widths_layout = QGridLayout()
+        self.general_layout.addLayout(self.widths_layout, row_i, 0, 1, 2)
+        self.update_options()
+        FitMethod.registration_callbacks.append(lambda cls: self.update_options())
+
+        row_i += 1
 
         self.custom_kernel_input = QQ(QPlainTextEdit)
         self.custom_kernel_label = QQ(QLabel, text="Custom Kernel: ")
@@ -7255,6 +7267,35 @@ class ConvolutionWindow(EQDockWidget):
         config.register("fit_fitmethod", self.on_fit_function_changed)
 
         self.update_gui()
+
+    def update_options(self):
+        """Adds lineshapes that were registered after the window was created."""
+        box = self.selection_box
+        names = FitMethod.convolution_names()
+        chosen = config["convolution_function"]
+        for i, name in enumerate(["Off", CURRENT_FIT_FUNCTION] + names):
+            if box.findText(name) < 0:
+                box.insertItem(i, name)
+                if name == chosen:
+                    box.setCurrentText(name)
+
+        for name in names:
+            for param in FitMethod.registry[name].kernel_params():
+                if param.name in self.width_widgets:
+                    continue
+                label = QQ(QLabel, text=f"{param.label}: ")
+                input_ = QQ(QDoubleSpinBox, range=(None, None))
+                input_.setValue(config["convolution_widths"].get(param.name, 1))
+                input_.valueChanged.connect(
+                    lambda value, key=param.name: self.on_width_changed(key, value)
+                )
+                row = len(self.width_widgets)
+                self.widths_layout.addWidget(label, row, 0)
+                self.widths_layout.addWidget(input_, row, 1)
+                self.width_widgets[param.name] = (label, input_)
+
+        if hasattr(self, "update_button"):
+            self.update_gui()
 
     def get_method(self):
         """Returns the lineshape class and derivative to use or None if there is none."""
@@ -8014,15 +8055,15 @@ class BlendedLinesWindow(EQDockWidget):
         tmplayout = QGridLayout()
         row_id = 0
         tmplayout.addWidget(QQ(QLabel, text="Function: "), row_id, 0)
-        tmplayout.addWidget(
-            QQ(
-                QComboBox,
-                "blendedlines_lineshape",
-                items=[CURRENT_FIT_FUNCTION] + FitMethod.labels("can_fit_multi"),
-                minWidth=120,
-            ),
-            row_id,
-            1,
+        self.lineshape_box = QQ(
+            QComboBox,
+            "blendedlines_lineshape",
+            items=[CURRENT_FIT_FUNCTION] + FitMethod.labels("can_fit_multi"),
+            minWidth=120,
+        )
+        tmplayout.addWidget(self.lineshape_box, row_id, 1)
+        FitMethod.registration_callbacks.append(
+            lambda cls: self.update_lineshape_items()
         )
 
         tmplayout.addWidget(QQ(QLabel, text="Transparency: "), row_id, 2)
@@ -8115,6 +8156,18 @@ class BlendedLinesWindow(EQDockWidget):
         )
         self.fill_table_requested.connect(self.fill_table)
         self.plot_widget.from_current_plot()
+
+    def update_lineshape_items(self):
+        """Adds fit methods that were registered after the window was created."""
+        box = self.lineshape_box
+        chosen = config["blendedlines_lineshape"]
+        for i, label in enumerate(
+            [CURRENT_FIT_FUNCTION] + FitMethod.labels("can_fit_multi")
+        ):
+            if box.findText(label) < 0:
+                box.insertItem(i, label)
+                if label == chosen:
+                    box.setCurrentText(label)
 
     @QThread.threaded_d
     def fit_peaks(self, plot_widget, thread=None):
@@ -9726,8 +9779,8 @@ def restart():
     # Start as a module, as the file uses relative imports and cannot be run as a script.
     # The directory containing the package is added to the path in case it is not installed.
     package_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    paths = [package_dir] + [os.environ["PYTHONPATH"]] * ("PYTHONPATH" in os.environ)
-    os.environ["PYTHONPATH"] = os.pathsep.join(paths)
+    paths = [package_dir, os.environ.get("PYTHONPATH")]
+    os.environ["PYTHONPATH"] = os.pathsep.join(path for path in paths if path)
     os.execl(
         sys.executable,
         sys.executable,
