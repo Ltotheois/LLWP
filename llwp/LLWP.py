@@ -4231,12 +4231,9 @@ class LLWP(QApplication):
             mainwindow = self.mainwindow_class(self)
             mainwindow.create_gui_components()
 
-            if len(sys.argv) > 1:
-                project = sys.argv[1]
-                if project != "--ASAP":
-                    File.load_files(project)
-
             mainwindow.show()
+
+            self.load_command_line_files()
 
             if messages:
                 notify_warning.emit("\n".join(messages))
@@ -4283,6 +4280,28 @@ class LLWP(QApplication):
                 elif not is_dark and normalized_color == "#ffffff":
                     file.color = "#000000"
                     file.apply_color()
+
+    @staticmethod
+    def load_command_line_files():
+        files = []
+        invalid_files = []
+        for argument in sys.argv[1:]:
+            if argument == "--ASAP":
+                continue
+            if os.path.isfile(argument):
+                files.append(os.path.abspath(argument))
+            else:
+                invalid_files.append(argument)
+
+        if invalid_files:
+            invalid_files_string = ", ".join(invalid_files)
+            notify_warning.emit(
+                f"The following command line arguments are not existing and were ignored: {invalid_files_string}"
+            )
+
+        if files:
+            files_by_type = File.sort_files_by_type(files)
+            File.add_multiple_files_by_type(files_by_type)
 
     def run_init_commands(self):
         try:
@@ -11754,10 +11773,8 @@ if __name__ == "__main__":
 # File.add_multiple_files_by_type(files)
 
 
-
 ## Additional actions to change series selector in specific way:
 # config["series_changeqnsactions"] = {"Next Ka": [[0, 1, -1], [0, 1, -1]], "Prev Ka": [[0, -1, 1], [0, -1, 1]]}
-
 
 
 ## Hotkey to change series selector in specific way (increase Ka, decrease Kc)
@@ -11787,7 +11804,6 @@ if __name__ == "__main__":
 # QShortcut('Ctrl+Shift+Y', mainwindow).activated.connect(lambda tmp_function=tmp_function: tmp_function(-1))
 
 
-
 ## Define postprocessing for FID-fit
 
 # FIDLineshape.postprocessing_function = lambda ts, ys: (ts, ys * np.hanning(len(ts)))
@@ -11809,7 +11825,6 @@ if __name__ == "__main__":
 #     return(ts, ys)
 
 # FIDLineshape.postprocessing_function = FID_postprocessing_function
-
 
 
 ## Add Doppler splitted lines to fitting methods
