@@ -11754,8 +11754,10 @@ if __name__ == "__main__":
 # File.add_multiple_files_by_type(files)
 
 
+
 ## Additional actions to change series selector in specific way:
 # config["series_changeqnsactions"] = {"Next Ka": [[0, 1, -1], [0, 1, -1]], "Prev Ka": [[0, -1, 1], [0, -1, 1]]}
+
 
 
 ## Hotkey to change series selector in specific way (increase Ka, decrease Kc)
@@ -11785,6 +11787,7 @@ if __name__ == "__main__":
 # QShortcut('Ctrl+Shift+Y', mainwindow).activated.connect(lambda tmp_function=tmp_function: tmp_function(-1))
 
 
+
 ## Define postprocessing for FID-fit
 
 # FIDLineshape.postprocessing_function = lambda ts, ys: (ts, ys * np.hanning(len(ts)))
@@ -11806,3 +11809,55 @@ if __name__ == "__main__":
 #     return(ts, ys)
 
 # FIDLineshape.postprocessing_function = FID_postprocessing_function
+
+
+
+## Add Doppler splitted lines to fitting methods
+
+# from llwp.fitmethods import Gauss, Lorentz
+
+# # Splitting known at one frequency (same unit as x, e.g. MHz)
+# REFERENCE_FREQUENCY = 12218.0
+# REFERENCE_DELTA = 0.05  # distance of each component from the center at that frequency
+
+
+# def delta_at(frequency):
+#     """Distance of each component from the center at the given frequency.
+
+#     The splitting is proportional to the frequency (relative splitting)."""
+#     return REFERENCE_DELTA * frequency / REFERENCE_FREQUENCY
+
+
+# class RelativeDoppler(ParametricLineshape):
+#     """Doublet with the components at x0 +- delta_at(x0). Nothing about the splitting is fitted."""
+
+#     abstract = True
+#     component = None  # Lineshape class of the two components
+
+#     def __init__(self, derivative=0, **options):
+#         # Start the center of a single fit in the middle of the marked area. The highest
+#         # point is one of the two components and not the center of the doublet.
+#         options.setdefault("xs_weight_factor", 0)
+#         super().__init__(derivative, **options)
+#         self._component = self.component(derivative, **options)
+
+#     def profile(self, x, *values):
+#         x0, amp, *other = values
+#         delta = delta_at(x0)
+#         return self._component.profile(
+#             x, x0 - delta, amp, *other
+#         ) + self._component.profile(x, x0 + delta, amp, *other)
+
+
+# class RelativeDopplerGauss(RelativeDoppler):
+#     name = "Doppler Gauss (relative)"
+#     derivatives = (0, 1, 2)
+#     component = Gauss
+#     params = Gauss.params
+
+
+# class RelativeDopplerLorentz(RelativeDoppler):
+#     name = "Doppler Lorentz (relative)"
+#     derivatives = (0, 1, 2)
+#     component = Lorentz
+#     params = Lorentz.params
