@@ -1,4 +1,4 @@
-include llwp/LLWP.svg
-include llwp/ASAP.svg
-include llwp/LLWPMac.png
-include llwp/ASAPMac.png
+include llwp/IconLLWP.svg
+include llwp/IconASAP.svg
+include llwp/IconLLWPMac.png
+include llwp/IconASAPMac.png

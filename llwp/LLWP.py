@@ -3908,11 +3908,11 @@ class MainWindow(QMainWindow):
             ]
             for folder in possible_folders:
                 if sys.platform == "darwin":
-                    iconpath = os.path.join(folder, f"{APP_TAG}Mac.png")
+                    iconpath = os.path.join(folder, f"Icon{APP_TAG}Mac.png")
                     if os.path.isfile(iconpath):
                         break
 
-                iconpath = os.path.join(folder, f"{APP_TAG}.svg")
+                iconpath = os.path.join(folder, f"Icon{APP_TAG}.svg")
                 if os.path.isfile(iconpath):
                     break
 
