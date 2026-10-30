@@ -3262,6 +3262,9 @@ class LWPWidget(QGroupBox):
             self.fig.savefig(fname)
 
     def on_click(self, event):
+        if event.canvas.widgetlock.locked():  # Pan or zoom of the matplotlib toolbar is active
+            return
+
         ax = event.inaxes
         index = np.asarray(np.where(self.axes == ax)).T
 
@@ -5410,6 +5413,9 @@ class AssignAllDialog(QDialog):
         NewAssignments.get_instance().add_rows(new_assignments)
 
     def on_click(self, event):
+        if event.canvas.widgetlock.locked():  # Pan or zoom of the matplotlib toolbar is active
+            return
+
         clicked_axis = event.inaxes
 
         if not clicked_axis or event.button != 1:
@@ -8312,6 +8318,9 @@ class BlendedLinesWindow(EQDockWidget):
         plot_widget.update_plot_requested.emit()
 
     def add_peak(self, event):
+        if event.canvas.widgetlock.locked():  # Pan or zoom of the matplotlib toolbar is active
+            return
+
         x, y = event.xdata, event.ydata
         is_left_mouse_button = event.button == 1
         if not (x and y and is_left_mouse_button):
@@ -11006,6 +11015,9 @@ class ASAPWidget(LWPWidget):
         mainwindow.statusbar.position_label.setText(text_cursor)
 
     def on_click(self, event):
+        if event.canvas.widgetlock.locked():  # Pan or zoom of the matplotlib toolbar is active
+            return
+
         super().on_click(event)
 
         ax = event.inaxes
