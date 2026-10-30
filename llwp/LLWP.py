@@ -766,11 +766,11 @@ class PlotWidget(QWidget):
             )
 
         if config["convolution_kernel"]:
-            kernel_ys = np.array(config["convolution_kernel"])
+            xmin, xmax = self.xrange
+            kernel_ys = ConvolutionWindow.kernel_at((xmin + xmax) / 2)
             convolution_padding = len(kernel_ys) // 2
             stepwidth = config["convolution_stepwidth"]
 
-            xmin, xmax = self.xrange
             n_xs = (xmax - xmin) // stepwidth + 1
             con_xs = np.arange(-n_xs, n_xs + 1) * stepwidth + (xmax + xmin) / 2
 
@@ -2745,7 +2745,7 @@ class LWPAx:
                     )
 
                 if config["convolution_kernel"]:
-                    kernel_ys = np.array(config["convolution_kernel"])
+                    kernel_ys = ConvolutionWindow.kernel_at((xmin + xmax) / 2)
                     convolution_padding = len(kernel_ys) // 2
                     stepwidth = config["convolution_stepwidth"]
 
@@ -7393,7 +7393,7 @@ class ConvolutionWindow(EQDockWidget):
     def on_width_changed(self, name, value):
         config["convolution_widths"] = {**config["convolution_widths"], name: value}
 
-    def on_change(self):
+    def compute_kernel(self, frequency=None):
         function = config["convolution_function"]
 
         if function == "Off":
@@ -7420,6 +7420,13 @@ class ConvolutionWindow(EQDockWidget):
                     p.name: config["convolution_widths"].get(p.name, p.default or 1)
                     for p in method.kernel_params()
                 }
+                if method.frequency_dependent_kernel:
+                    if frequency is None:
+                        # Only used to fill the stored kernel, the plots call kernel_at
+                        axes = getattr(mainwindow.lwpwidget, "lwpaxes", None)
+                        axes = [] if axes is None else axes.flatten()
+                        frequency = np.mean(axes[0].xrange) if len(axes) else 0.0
+                    widths["frequency"] = frequency
                 kernel = method(derivative).kernel(kernel_xs, amplitude, **widths)
         else:  # Custom Kernel
             tmp = self.custom_kernel_input.toPlainText().strip()
@@ -7428,7 +7435,23 @@ class ConvolutionWindow(EQDockWidget):
             else:
                 tmp = tmp.split(",")
                 kernel = [float(x) for x in tmp]
+        return kernel
 
+    @classmethod
+    def kernel_at(cls, frequency):
+        """Convolution kernel for a plot centered at `frequency`."""
+        self = cls.instance
+        if config["convolution_kernel"] and config["convolution_function"] not in (
+            "Off",
+            "Custom",
+        ):
+            method = self.get_method()
+            if method is not None and method[0].frequency_dependent_kernel:
+                return np.array(self.compute_kernel(frequency))
+        return np.array(config["convolution_kernel"])
+
+    def on_change(self):
+        kernel = self.compute_kernel()
         config["convolution_kernel"] = list(kernel)
         mainwindow.lwpwidget.set_data()
 
@@ -11831,23 +11854,36 @@ if __name__ == "__main__":
 
 # from llwp.fitmethods import Gauss, Lorentz
 
-# # Splitting known at one frequency (same unit as x, e.g. MHz)
-# REFERENCE_FREQUENCY = 12218.0
-# REFERENCE_DELTA = 0.05  # distance of each component from the center at that frequency
+# # The splitting is proportional to the frequency. The fitted parameter is the relative
+# # splitting in ppm: the distance of each component from the center at the frequency f is
+# # delta * 1e-6 * f (in the unit of x, e.g. MHz). For 0.05 MHz at 12218 MHz this is 4.1 ppm.
+# START_DELTA = 2.75
 
 
-# def delta_at(frequency):
-#     """Distance of each component from the center at the given frequency.
-
-#     The splitting is proportional to the frequency (relative splitting)."""
-#     return REFERENCE_DELTA * frequency / REFERENCE_FREQUENCY
+# def delta_at(frequency, delta):
+#     """Distance of each component from the center at the given frequency."""
+#     return delta * 1e-6 * frequency
 
 
-# class RelativeDoppler(ParametricLineshape):
-#     """Doublet with the components at x0 +- delta_at(x0). Nothing about the splitting is fitted."""
+# # Tick "All Same Width" to use the same relative splitting for all lines.
+# DELTA = Param(
+#     "delta", "Delta (ppm)", shareable=True, default=START_DELTA, in_kernel=True
+# )
+
+
+# class ScaledDoppler(ParametricLineshape):
+#     """Doublet with the components at x0 +- delta_at(x0, delta).
+
+#     The relative splitting is fitted, starting at START_DELTA with bounds 0 and
+#     `max_factor` times that. In the convolution window the relative splitting is entered
+#     by hand (or taken from the last fit). The kernel is created for the frequency at the
+#     center of the plot."""
 
 #     abstract = True
+#     can_convolve = True
+#     frequency_dependent_kernel = True  # kernel() receives the plot's center frequency
 #     component = None  # Lineshape class of the two components
+#     max_factor = 5
 
 #     def __init__(self, derivative=0, **options):
 #         # Start the center of a single fit in the middle of the marked area. The highest
@@ -11856,23 +11892,44 @@ if __name__ == "__main__":
 #         super().__init__(derivative, **options)
 #         self._component = self.component(derivative, **options)
 
+#     def initial_guess(self, guess):
+#         guesses = super().initial_guess(guess)
+#         guesses[-1] = (START_DELTA, 0, self.max_factor * START_DELTA)
+#         return guesses
+
 #     def profile(self, x, *values):
-#         x0, amp, *other = values
-#         delta = delta_at(x0)
+#         *line, delta = values
+#         x0, amp, *other = line
+#         return self.doublet(x, x0, amp, other, delta_at(x0, delta))
+
+#     def doublet(self, x, x0, amp, other, delta):
 #         return self._component.profile(
 #             x, x0 - delta, amp, *other
 #         ) + self._component.profile(x, x0 + delta, amp, *other)
 
+#     def kernel(self, xs, amplitude, frequency, **widths):
+#         values = []
+#         for param in self.params[:-1]:
+#             if param.role == "center":
+#                 values.append(0)
+#             elif param.role == "amplitude":
+#                 values.append(amplitude)
+#             else:
+#                 values.append(widths.get(param.name, param.default))
+#         delta = delta_at(frequency, widths.get("delta", START_DELTA))
+#         _, amp, *other = values
+#         return self.doublet(xs, 0, amp, other, delta)
 
-# class RelativeDopplerGauss(RelativeDoppler):
-#     name = "Doppler Gauss (relative)"
+
+# class ScaledDopplerGauss(ScaledDoppler):
+#     name = "Doppler Gauss (scaled)"
 #     derivatives = (0, 1, 2)
 #     component = Gauss
-#     params = Gauss.params
+#     params = Gauss.params + (DELTA,)
 
 
-# class RelativeDopplerLorentz(RelativeDoppler):
-#     name = "Doppler Lorentz (relative)"
+# class ScaledDopplerLorentz(ScaledDoppler):
+#     name = "Doppler Lorentz (scaled)"
 #     derivatives = (0, 1, 2)
 #     component = Lorentz
-#     params = Lorentz.params
+#     params = Lorentz.params + (DELTA,)

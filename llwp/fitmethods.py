@@ -11,6 +11,8 @@ its menus, depending on which capabilities a class declares:
 * ``can_fit_single``: fits a single line (main axes, assign all, ...)
 * ``can_fit_multi``:  fits several lines at once (Blended Lines window)
 * ``can_convolve``:   can create a kernel to convolute a stick spectrum
+* ``frequency_dependent_kernel``: the kernel depends on the frequency, ``kernel`` then
+                      receives the keyword argument ``frequency`` (center of the plot)
 
 Hierarchy::
 
@@ -174,6 +176,7 @@ class FitMethod:
     can_fit_single = False
     can_fit_multi = False
     can_convolve = False
+    frequency_dependent_kernel = False
     min_points = 2  # Minimum number of data points for a single fit
 
     def __init_subclass__(cls, **kwargs):
