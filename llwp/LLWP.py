@@ -10,7 +10,7 @@ CREDITSSTRING = """Made by Luis Bonah
 
 As this programs GUI is based on PyQt6, which is GNU GPL v3 licensed, this program is also licensed under GNU GPL v3 (See the bottom paragraph).
 
-pandas, matplotlib, scipy and numpy were used for this program, speeding up the development process massively.
+pandas, pyqtgraph, scipy and numpy were used for this program, speeding up the development process massively.
 
 Copyright (C) 2024
 
@@ -40,7 +40,6 @@ import re
 import io
 import csv
 import time
-import wrapt
 import pickle
 import json
 import threading
@@ -55,6 +54,35 @@ import pyckett
 from functools import lru_cache
 from scipy import signal
 
+from .plotting import (  # noqa: F401
+    EdgeLabelAxisItem,
+    FramedViewBox,
+    RoundedGraphicsLayoutWidget,
+    RoundedPlotWidget,
+    ScatterPlotWidget,
+    SpanViewBox,
+    SpectrumItems,
+    is_dark_theme,
+    make_pen,
+    plot_background,
+    plot_font,
+    plot_foreground,
+    plot_frame_color,
+    plot_inner_frame_color,
+    run_in_gui,
+    create_stacked_plots,
+    install_save_menu,
+    is_symbol,
+    save_figure_dialog,
+    set_plot_radius,
+    setup_axis,
+    split_by_color,
+    stick_xy,
+    theme,
+    to_hex,
+    to_qcolor,
+    update_pyqtgraph_options,
+)
 from .fitmethods import (  # noqa: F401
     FitMethod,
     Param,
@@ -115,7 +143,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import (
     QAction,
     QColor,
-    QCursor,
     QGuiApplication,
     QIcon,
     QShortcut,
@@ -123,9 +150,7 @@ from PyQt6.QtGui import (
     QValidator,
 )
 
-import matplotlib
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_qtagg import FigureCanvas, NavigationToolbar2QT
+import pyqtgraph as pg
 
 import warnings
 
@@ -143,7 +168,6 @@ N_QNS = int(os.environ.get("LLWP_QNS", 10))
 N_QNS = max(6, N_QNS)  # Makes sure that N_QNS is at least 6
 
 QLocale.setDefault(QLocale("en_EN"))
-matplotlib.rcParams["axes.formatter.useoffset"] = False
 
 
 def status_d(func):
@@ -161,19 +185,6 @@ def status_d(func):
             tmp = mw.status_counter.decrease()
             if not tmp:
                 mw.waiting.emit()
-
-    return _wrapper
-
-
-# Guards all modifications of matplotlib artists as well as the rendering of the figures
-matplotlib_lock = threading.RLock()
-
-
-def lock_d(lock):
-    @wrapt.decorator
-    def _wrapper(wrapped, instance, args, kwargs):
-        with lock:
-            return wrapped(*args, **kwargs)
 
     return _wrapper
 
@@ -273,13 +284,13 @@ class DynamicDecorator:
 
 class Config(dict):
     initial_values = {
-        "plot_dpi": (100, int),
         "plot_width": (20, float),
         "plot_offset": (0, float),
         "plot_offsetisrelative": (True, bool),
         "plot_rows": (5, int),
         "plot_cols": (1, int),
-        "plot_linmarker": ("*", str),
+        # Any symbol of pyqtgraph, e.g. "o", "s", "t", "d", "+", "x", "p", "h" or "star"
+        "plot_linmarker": ("star", str),
         "plot_widthexpression": ("", str),
         "plot_offsetexpression": ("", str),
         "plot_yscale": ("Per Plot", str),
@@ -288,22 +299,19 @@ class Config(dict):
         "plot_yscale_min": (-100, float),
         "plot_yscale_max": (300, float),
         "plot_ymargin": (0.1, float),
+        # Radius of the rounded corners of the plots in pixels (0 for square corners)
+        "plot_radius": (4, int),
         "plot_xticks": (3, int),
+        "plot_xminorticks": (4, int),
         "plot_xtickformat": ("offset", str),
-        "plot_gridspeckwargs": ({"hspace": 0, "wspace": 0}, dict),
-        "plot_fontdict": ({"size": 10}, dict),
         "plot_bins": (4000, int),
         "plot_skipbinning": (1000, int),
         "plot_hovercutoff": (20, float),
-        "plot_annotationkwargs": (
-            {
-                "x": 1,
-                "y": 1,
-                "horizontalalignment": "right",
-                "verticalalignment": "top",
-            },
-            dict,
-        ),
+        # Position of the annotation of the plots as fractions of the plot (x, y) and
+        # which point of the text is placed there (anchor, from 0 to 1 for x and y from the top)
+        "plot_annotationposition": ({"x": 1, "y": 1, "anchor": [1, 0]}, dict),
+        # Font size of the annotations of the plots in points
+        "plot_annotationfontsize": (10, float),
         "plot_annotationfstring": ("{qns}", str),
         "convolution_kernel": ([], list),
         "convolution_stepwidth": (0.2, float),
@@ -331,7 +339,6 @@ class Config(dict):
         "fit_polynomrank": (2, int),
         "fit_polynommaxrank": (10, int),
         "fit_offset": (True, bool),
-        "isvisible_matplotlibtoolbar": (False, bool),
         "isvisible_controlsmainplot": (True, bool),
         "isvisible_controlsrowscols": (True, bool),
         "isvisible_controlswidth": (True, bool),
@@ -394,7 +401,6 @@ class Config(dict):
         "blendedlines_color_points": ("#ff3352", Color),
         "blendedlines_color_baseline": ("#f6fa14", Color),
         "blendedlines_autopositionpeaks": (True, bool),
-        "blendedlines_matplotlibtoolbar": (True, bool),
         "blendedlines_fidresolution": (0.05, float),
         "report_blends": (True, bool),
         "report_query": ("", str),
@@ -413,7 +419,6 @@ class Config(dict):
         "peakfinder_onlyunassigned": (True, bool),
         "peakfinder_width": (1, float),
         "peakfinder_maxentries": (1000, int),
-        "peakfinder_matplotlibtoolbar": (True, bool),
         "energylevels_defaultcolor": ("#000000", Color),
         "energylevels_query": ("", str),
         "energylevels_colorinput": ("", str),
@@ -553,13 +558,13 @@ class Config(dict):
         for key, value in self.items():
             if key in self.initial_values and self.initial_values[key][1] == Color:
                 if is_dark_theme():
-                    if matplotlib.colors.to_hex(value) == "#000000":
+                    if to_hex(value) == "#000000":
                         self[key] = "#ffffff"
                         self.messages.append(
                             f"Changed the color of '{key}' from black to white as it is otherwise invisible."
                         )
                 else:
-                    if matplotlib.colors.to_hex(value) == "#ffffff":
+                    if to_hex(value) == "#ffffff":
                         self[key] = "#000000"
                         self.messages.append(
                             f"Changed the color of '{key}' from white to black as it is otherwise invisible."
@@ -646,19 +651,22 @@ class Geometry:
 
 
 class PlotWidget(QWidget):
-    request_redraw = pyqtSignal()
+    """Plot of the spectrum around a plot of the Loomis-Wood plot, that is used as the
+    base of the plots of the Blended Lines and the Peakfinder window.
+
+    The range of the plot is controlled by the buttons, the shortcuts and the mouse wheel.
+    Dragging a rectangle while holding shift zooms to it."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self.parent = parent
         self.xrange = (-1, 1)
+        self.yrange_override = None  # Range of y of the last zoom
         self.gui()
         self.from_current_plot(reset_width=True)
-        self.span_selector = matplotlib.widgets.SpanSelector(
-            self.ax, self.on_range, "horizontal", useblit=True, button=3
-        )
         self.shortcuts()
+        theme.changed.connect(self.apply_theme)
 
     def gui(self):
         layout = QVBoxLayout()
@@ -681,30 +689,40 @@ class PlotWidget(QWidget):
             )
         )
 
-        self.fig = Figure(dpi=config["plot_dpi"])
-        self.plotcanvas = FigureCanvas(self.fig)
+        self.vb = SpanViewBox(
+            button=Qt.MouseButton.LeftButton,
+            color=config["color_fit"],
+            modifier=Qt.KeyboardModifier.ShiftModifier,
+            rectangle=True,
+        )
+        self.vb.limits = lambda: self.xrange
+        self.vb.on_span = self.on_zoom
+        self.vb.disableAutoRange()
+        self.vb.setDefaultPadding(0)
+
+        self.plotcanvas = RoundedPlotWidget(
+            viewBox=self.vb,
+            axisItems={"bottom": EdgeLabelAxisItem("bottom")},
+            background=plot_background(),
+        )
+        self.plotcanvas.wheelEvent = self.wheelEvent
+        install_save_menu(self.plotcanvas)
         layout.addWidget(self.plotcanvas, 6)
         layout.addStretch()
 
-        self.ax = self.fig.subplots()
+        self.plot = self.plotcanvas.getPlotItem()
+        self.plot.hideButtons()
+        self.plot.setMenuEnabled(False)
 
-        self.exp_coll = matplotlib.collections.LineCollection(
-            np.zeros(shape=(0, 2, 2)), colors=config["color_exp"], capstyle="round"
-        )
-        self.cat_coll = matplotlib.collections.LineCollection(
-            np.zeros(shape=(0, 2, 2)), colors=config["color_cat"], capstyle="round"
-        )
-        self.lin_coll = self.ax.scatter(
-            [],
-            [],
-            color=config["color_ref"],
-            marker=config["plot_linmarker"],
-            zorder=100,
-        )
-        self.ax.add_collection(self.exp_coll, autolim=False)
-        self.ax.add_collection(self.cat_coll, autolim=False)
+        self.apply_theme()
 
-        self.request_redraw.connect(self.plotcanvas.draw_idle)
+        self.spectrum = SpectrumItems(self.plot, lin_marker_symbol())
+
+    def apply_theme(self):
+        self.plotcanvas.setBackground(plot_background())
+        self.vb.setBorder(pg.mkPen(plot_frame_color()))
+        for name in ("bottom", "left"):
+            setup_axis(self.plot.getAxis(name))
 
     def from_current_plot(self, reset_width=False):
         tmp_ax = mainwindow.lwpwidget.get_current_ax()
@@ -719,124 +737,23 @@ class PlotWidget(QWidget):
 
         self.update_plot()
 
-    @lock_d(matplotlib_lock)
     def update_plot(self):
-        scaling = config["plot_yscale"]
+        xrange = self.xrange
+        frames = {
+            "exp": ExpFile.get_data(xrange=xrange, binning=True),
+            "cat": CatFile.get_data(xrange=xrange, binning=True),
+            "lin": LinFile.get_data(xrange=xrange, binning=True),
+        }
+        spec = build_spectrum_spec(frames, xrange)
+        spec["xrange"] = tuple(xrange)
+        run_in_gui(lambda: self.apply_spec(spec))
 
-        # Exp Data
-        exp_df = ExpFile.get_data(xrange=self.xrange, binning=True)
-        self.exp_xs = xs = exp_df["x"].to_numpy()
-        self.exp_ys = ys = exp_df["y"].to_numpy()
-        exp_yrange = (ys.min(), ys.max()) if len(ys) else (-1, 1)
-        segs, colors = [], []
-
-        filenames = exp_df["filename"]
-        unique_filenames = filenames.unique()
-        for unique_filename in unique_filenames:
-            mask = filenames == unique_filename
-            tmp_xs, tmp_ys = xs[mask], ys[mask]
-
-            colors.append(exp_df.loc[mask, "color"].values)
-            if ExpFile.ids[unique_filename].is_stickspectrum:
-                segs.append(
-                    np.array(((tmp_xs, tmp_xs), (np.zeros(tmp_ys.shape), tmp_ys))).T
-                )
-            else:
-                segs.append(
-                    np.array(((tmp_xs[:-1], tmp_xs[1:]), (tmp_ys[:-1], tmp_ys[1:]))).T
-                )
-
-        if segs:
-            segs = np.concatenate(segs)
-            colors = np.concatenate(colors)
-
-        self.exp_coll.set(segments=segs, colors=colors)
-
-        # Cat Data
-        cat_df = CatFile.get_data(xrange=self.xrange, binning=True)
-        self.cat_xs = xs = cat_df["x"].to_numpy()
-        self.cat_ys = ys = cat_df["y"].to_numpy()
-        cat_yrange = (ys.min(), ys.max()) if len(ys) else (-1, 1)
-
-        if scaling == "Per Plot":
-            ys = ys * exp_yrange[1] / cat_yrange[1]
-        elif scaling in ["Global", "Custom"]:
-            ys = (
-                ys * config["plot_expcat_factor"] * 10 ** config["plot_expcat_exponent"]
-            )
-
-        if config["convolution_kernel"]:
-            xmin, xmax = self.xrange
-            kernel_ys = ConvolutionWindow.kernel_at((xmin + xmax) / 2)
-            convolution_padding = len(kernel_ys) // 2
-            stepwidth = config["convolution_stepwidth"]
-
-            n_xs = (xmax - xmin) // stepwidth + 1
-            con_xs = np.arange(-n_xs, n_xs + 1) * stepwidth + (xmax + xmin) / 2
-
-            segs, colors = [], []
-
-            filenames = cat_df["filename"]
-            unique_filenames = filenames.unique()
-            for unique_filename in unique_filenames:
-                mask = filenames == unique_filename
-                tmp_xs, tmp_ys = xs[mask], ys[mask]
-
-                hist_ys, _ = np.histogram(tmp_xs, bins=con_xs, weights=tmp_ys)
-                con_ys = np.convolve(hist_ys, kernel_ys, "full")
-
-                con_ys = con_ys[convolution_padding:-convolution_padding]
-                con_xs = con_xs[:-1]
-
-                tmp_mask = con_ys != 0
-                con_xs = con_xs[tmp_mask]
-                con_ys = con_ys[tmp_mask]
-
-                color = CatFile.ids[unique_filename]._color
-                colors.append(np.full((len(con_xs) - 1), color))
-                segs.append(
-                    np.array(((con_xs[:-1], con_xs[1:]), (con_ys[:-1], con_ys[1:]))).T
-                )
-
-            if segs:
-                segs = np.concatenate(segs)
-                colors = np.concatenate(colors)
-
-        else:
-            segs = np.array(((xs, xs), (ys * 0, ys))).T
-            colors = cat_df["color"].to_numpy()
-
-        self.cat_coll.set(segments=segs, colors=colors)
-
-        # Lin Data
-        lin_df = LinFile.get_data(xrange=self.xrange, binning=True)
-        self.lin_xs = xs = lin_df["x"].to_numpy()
-        tuples = [(x, 0) for x in xs]
-        tuples = tuples if len(tuples) != 0 else [[None, None]]
-        colors = lin_df["color"].to_numpy()
-
-        self.lin_coll.set_offsets(tuples)
-        self.lin_coll.set_color(colors)
-
-        # Set Limits
-        self.ax.set_xlim(self.xrange)
-
-        if scaling == "Per Plot":
-            yrange = exp_yrange
-        elif scaling == "Global":
-            yrange = ExpFile.yrange
-        else:
-            yrange = (config["plot_yscale_min"], config["plot_yscale_max"])
-        margin = config["plot_ymargin"]
-        yrange = [
-            yrange[0] - margin * (yrange[1] - yrange[0]),
-            yrange[1] + margin * (yrange[1] - yrange[0]),
-        ]
-        if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
-            yrange = [-1, +1]
-        self.ax.set_ylim(yrange)
-
-        self.request_redraw.emit()
+    def apply_spec(self, spec):
+        self.spectrum.apply(spec)
+        self.plot.setXRange(*spec["xrange"], padding=0)
+        # The range of y of a zoom is only kept until the next update of the data
+        self.plot.setYRange(*(self.yrange_override or spec["yrange"]), padding=0)
+        self.yrange_override = None
 
     def move_plot(self, dir, factor=None):
         xmin, xmax = self.xrange
@@ -915,16 +832,16 @@ class PlotWidget(QWidget):
             tmp.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             tmp.activated.connect(function)
 
-    def on_range(self, xmin, xmax):
-        xmin_ax, xmax_ax = self.xrange
-        if xmax == xmin or xmax > xmax_ax or xmin < xmin_ax:
+    def on_zoom(self, xmin, xmax, ymin, ymax):
+        if xmax == xmin or ymax == ymin:
             return
 
         self.xrange = (xmin, xmax)
+        self.yrange_override = (ymin, ymax)
         self.update_plot()
 
 
-drawplot_decorator = DynamicDecorator()
+plot_update_decorator = DynamicDecorator()
 
 
 ##
@@ -1151,63 +1068,6 @@ class QGridLayout(QGridLayout):
             self.setContentsMargins(0, 0, 0, 0)
 
 
-class Figure(Figure):
-    def savefig(self, *args, **kwargs):
-        # Matplotlib spins up a different backend for saving the figure
-        # Any callbacks during this will cause errors
-        # Therefore, we have to clear all callbacks and then update them afterwards
-        callbacks = self.canvas.callbacks.callbacks.copy()
-        self.canvas.callbacks.callbacks.clear()
-        try:
-            super().savefig(*args, **kwargs)
-        finally:
-            self.canvas.callbacks.callbacks.update(callbacks)
-
-
-class FigureCanvas(FigureCanvas):
-    # Rendering and painting run in the GUI thread, while worker threads modify the
-    # artists of the figure. Both have to hold the matplotlib_lock, otherwise the
-    # renderer might traverse artists that are removed at the same time.
-    def draw(self):
-        with matplotlib_lock:
-            super().draw()
-
-    def paintEvent(self, event):
-        with matplotlib_lock:
-            super().paintEvent(event)
-
-    def blit(self, *args, **kwargs):
-        with matplotlib_lock:
-            super().blit(*args, **kwargs)
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.wheelEvent = lambda event: event.ignore()
-        # self.setStyleSheet('background-color: #00000000')
-
-        gui_app = QGuiApplication.instance()
-        gui_app.styleHints().colorSchemeChanged.connect(self.update_theme)
-        self.update_theme()
-
-    def update_theme(self):
-        background = "black" if is_dark_theme() else "white"
-        textcolor = "white" if is_dark_theme() else "black"
-
-        figure = self.figure
-
-        for ax in figure.get_axes():
-            ax.tick_params(color=textcolor, labelcolor=textcolor, which="both")
-            for spine in ax.spines.values():
-                spine.set_edgecolor(textcolor)
-
-            ax.xaxis.label.set_color(textcolor)
-            ax.yaxis.label.set_color(textcolor)
-            ax.title.set_color(textcolor)
-
-        self.setStyleSheet(f"background-color: {background}")
-        self.draw_idle()
-
-
 # class EQDockWidgetMeta(type(QDockWidget)):
 # def __call__(cls, *args, **kwargs):
 # if hasattr(cls, '_instance'):
@@ -1415,7 +1275,7 @@ class File:
 
     def set_default_values(self, default_values={}):
         color = default_values.get("color", config[self.default_color_key])
-        normalized_color = matplotlib.colors.to_hex(color)
+        normalized_color = to_hex(color)
 
         if is_dark_theme():
             if normalized_color == "#000000":
@@ -2615,16 +2475,132 @@ class FileAdditionalSettingsDialog(QDialog):
 ##
 ## Application and MainWindow
 ##
+_warned_symbols = set()
+
+
+def lin_marker_symbol():
+    """The symbol for the assignments, a warning is shown once if it is not valid."""
+    symbol = config["plot_linmarker"]
+    if is_symbol(symbol):
+        return symbol
+
+    if symbol not in _warned_symbols:
+        _warned_symbols.add(symbol)
+        notify_warning.emit(
+            f"'{symbol}' is not a symbol of pyqtgraph. The option 'plot_linmarker' has to be one "
+            "of 'o', 's', 't', 'd', '+', 'x', 'p', 'h' or 'star' (and a few more). Using 'star' instead."
+        )
+    return "star"
+
+
+def build_spectrum_spec(frames, xrange, ref_position=None):
+    """Describes the curves and markers of a spectrum, see plotting.py for the format.
+
+    `frames` holds the (binned) data of the experiment, the prediction and the
+    assignments as `exp`, `cat` and `lin`. The line of the prediction at `ref_position`
+    is drawn in the color of the reference."""
+    xmin, xmax = xrange
+    scaling = config["plot_yscale"]
+    spec = {"exp": [], "cat": []}
+    yrange_exp = [-1, 1]
+
+    # Experiment
+    dataframe = frames["exp"]
+    xs, ys = dataframe["x"].to_numpy(), dataframe["y"].to_numpy()
+    if scaling == "Per Plot" and len(ys):
+        yrange_exp = [ys.min(), ys.max()]
+
+    filenames = dataframe["filename"].to_numpy()
+    colors = dataframe["color"].to_numpy()
+    for unique_filename in pd.unique(filenames):
+        mask = filenames == unique_filename
+        is_stick = ExpFile.ids[unique_filename].is_stickspectrum
+        for color, color_mask in split_by_color(colors[mask]):
+            tmp_xs, tmp_ys = xs[mask][color_mask], ys[mask][color_mask]
+            if is_stick:
+                tmp_xs, tmp_ys = stick_xy(tmp_xs, tmp_ys)
+            spec["exp"].append((tmp_xs, tmp_ys, "pairs" if is_stick else "all", color))
+
+    # Prediction
+    dataframe = frames["cat"]
+    xs, ys = dataframe["x"].to_numpy(), dataframe["y"].to_numpy()
+    if scaling == "Per Plot":
+        yrange_cat = [ys.min(), ys.max()] if len(ys) else [-1, 1]
+        ys = ys * yrange_exp[1] / yrange_cat[1]
+    elif scaling in ["Global", "Custom"]:
+        ys = ys * config["plot_expcat_factor"] * 10 ** config["plot_expcat_exponent"]
+
+    if config["convolution_kernel"]:
+        kernel_ys = ConvolutionWindow.kernel_at((xmin + xmax) / 2)
+        convolution_padding = len(kernel_ys) // 2
+        stepwidth = config["convolution_stepwidth"]
+
+        n_xs = (xmax - xmin) // stepwidth + 1
+        bin_edges = np.arange(-n_xs, n_xs + 1) * stepwidth + (xmax + xmin) / 2
+
+        filenames = dataframe["filename"].to_numpy()
+        for unique_filename in pd.unique(filenames):
+            mask = filenames == unique_filename
+            hist_ys, _ = np.histogram(xs[mask], bins=bin_edges, weights=ys[mask])
+            con_ys = np.convolve(hist_ys, kernel_ys, "full")
+            con_ys = con_ys[convolution_padding:-convolution_padding]
+            con_xs = bin_edges[:-1]
+
+            nonzero = con_ys != 0
+            color = CatFile.ids[unique_filename]._color
+            spec["cat"].append((con_xs[nonzero], con_ys[nonzero], "all", color))
+
+    else:
+        colors = dataframe["color"].to_numpy().copy()
+        if ref_position is not None:
+            colors[xs == ref_position] = config["color_ref"]
+        for color, mask in split_by_color(colors):
+            tmp_xs, tmp_ys = stick_xy(xs[mask], ys[mask])
+            spec["cat"].append((tmp_xs, tmp_ys, "pairs", color))
+
+    # Assignments
+    dataframe = frames["lin"]
+    xs = dataframe["x"].to_numpy()
+    spec["lin"] = (xs, np.zeros(xs.shape), list(dataframe["color"].to_numpy()))
+
+    # Range of the y axis
+    if scaling == "Per Plot":
+        yrange = yrange_exp
+    elif scaling == "Global":
+        yrange = ExpFile.yrange
+    else:
+        yrange = (config["plot_yscale_min"], config["plot_yscale_max"])
+
+    margin = config["plot_ymargin"]
+    yrange = [
+        yrange[0] - margin * (yrange[1] - yrange[0]),
+        yrange[1] + margin * (yrange[1] - yrange[0]),
+    ]
+    if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
+        yrange = [-1, +1]
+    spec["yrange"] = tuple(yrange)
+    return spec
+
+
 class LWPAx:
-    fit_vline = None
-    fit_curve = None
+    # Items highlighting the last fit as (plot, item), shared by all axes
+    fit_items = []
 
     @classmethod
     def get_fit_methods(cls):
         return FitMethod.labels("can_fit_single")
 
-    def __init__(self, ax, row_i, col_i):
-        self.ax = ax
+    @classmethod
+    def clear_fit_items(cls):
+        def clear(items):
+            for plot, item in items:
+                plot.removeItem(item)
+
+        items, cls.fit_items = cls.fit_items, []
+        run_in_gui(lambda: clear(items))
+
+    def __init__(self, plot, row_i, col_i):
+        self.plot = plot
         self.row_i = row_i
         self.col_i = col_i
 
@@ -2635,57 +2611,101 @@ class LWPAx:
         self.qns = None
         self.lin_df = None
 
-        with matplotlib_lock:
-            self.span = matplotlib.widgets.SpanSelector(
-                ax,
-                lambda xmin, xmax: self.on_range(xmin, xmax),
-                "horizontal",
-                useblit=True,
-                button=1,
-            )
+        self.setup_plot()
 
-        self.exp_coll = matplotlib.collections.LineCollection(
-            np.zeros(shape=(0, 2, 2)), colors=config["color_exp"], capstyle="round"
+    def setup_plot(self):
+        """Creates the items of the plot. Has to be called from the GUI thread."""
+        plot = self.plot
+
+        plot.setMenuEnabled(False)
+        plot.hideButtons()
+        plot.setContentsMargins(0, 0, 0, 0)
+        plot.layout.setContentsMargins(0, 0, 0, 0)
+        plot.layout.setSpacing(0)
+        plot.setMouseEnabled(False, False)
+        plot.hideAxis("left")
+        if self.row_i:
+            plot.hideAxis("bottom")
+        else:
+            # The line of the axis is not drawn, as the frame of the plot is at the same place
+            setup_axis(plot.getAxis("bottom"), hide_line=True, outward_ticks=True)
+
+        self.vb = vb = plot.getViewBox()
+        vb.limits = lambda: self.xrange
+        vb.on_start = self.make_active
+        vb.on_span = self.on_range
+        vb.disableAutoRange()
+        vb.setDefaultPadding(0)
+        n_rows, n_cols = max(config["plot_rows"], 1), max(config["plot_cols"], 1)
+        vb.set_frame(
+            plot_frame_color(),
+            plot_inner_frame_color(),
+            {
+                "left": self.col_i == 0,
+                "top": self.row_i == n_rows - 1,
+                "right": self.col_i == n_cols - 1,
+                "bottom": self.row_i == 0,
+            },
         )
-        self.cat_coll = matplotlib.collections.LineCollection(
-            np.zeros(shape=(0, 2, 2)), colors=config["color_cat"], capstyle="round"
+
+        self.spectrum = SpectrumItems(plot, lin_marker_symbol())
+        self.lin_item = self.spectrum.lin_item
+
+        self.annotation_item = pg.TextItem()
+        self.annotation_item.setZValue(150)
+        plot.addItem(self.annotation_item, ignoreBounds=True)
+        self.annotation_item.hide()
+
+    def apply_theme(self):
+        self.vb.set_frame(plot_frame_color(), plot_inner_frame_color())
+        if not self.row_i:
+            setup_axis(self.plot.getAxis("bottom"), hide_line=True, outward_ticks=True)
+
+    def make_active(self):
+        mainwindow.setFocus()
+        mainwindow.lwpwidget.__class__._active_ax_index = (self.row_i, self.col_i)
+
+    # Drawing, the apply_* functions have to be called from the GUI thread
+    def apply_update(self, spec):
+        self.plot.setXRange(*spec["xrange"], padding=0)
+        self.plot.setYRange(*spec["yrange"], padding=0)
+
+        if spec["xticks"] is not None:
+            self.plot.getAxis("bottom").setTicks(spec["xticks"])
+
+        self.spectrum.apply(spec)
+        self.apply_annotation(spec["annotation"], spec["xrange"], spec["yrange"])
+
+    def apply_annotation(self, annotation, xrange, yrange):
+        item = self.annotation_item
+        if annotation is None:
+            item.hide()
+            return
+
+        text, color = annotation
+        item.setFont(plot_font(config["plot_annotationfontsize"]))
+        position = config["plot_annotationposition"]
+        fx, fy = position.get("x", 1), position.get("y", 1)
+        item.setAnchor(tuple(position.get("anchor", (1, 0))))
+        item.setText(text, color=to_qcolor(color))
+        item.setPos(
+            xrange[0] + fx * (xrange[1] - xrange[0]),
+            yrange[0] + fy * (yrange[1] - yrange[0]),
         )
-        self.lin_coll = ax.scatter(
-            [],
-            [],
-            color=config["color_ref"],
-            marker=config["plot_linmarker"],
-            zorder=100,
-        )
+        item.show()
 
-        with matplotlib_lock:
-            ax.add_collection(self.exp_coll, autolim=False)
-            ax.add_collection(self.cat_coll, autolim=False)
-
-            ax.yaxis.set_visible(False)
-            if row_i:
-                ax.xaxis.set_visible(False)
-            else:
-                ax.set_xticks([])
-
-    @drawplot_decorator.d
-    @lock_d(matplotlib_lock)
+    @plot_update_decorator.d
     def update(self):
-        ax = self.ax
-        ax.set_xlim(self.xrange)
+        xmin, xmax = self.xrange
+        bins = config["plot_bins"]
+        nobinning = config["plot_skipbinning"]
+        binwidth = (xmax - xmin) / bins
 
-        self.set_xticklabels()
-
-        yrange_exp = [-1, 1]
-
+        frames = {}
         for datatype, cls in {"exp": ExpFile, "cat": CatFile, "lin": LinFile}.items():
             minindex, maxindex = self.indices[datatype]
-            xmin, xmax = self.xrange
             with cls.lock:
                 dataframe = cls.df.iloc[minindex:maxindex]
-            bins = config["plot_bins"]
-            nobinning = config["plot_skipbinning"]
-            scaling = config["plot_yscale"]
 
             dataframe = dataframe[dataframe["visible"]]
 
@@ -2694,141 +2714,25 @@ class LWPAx:
             # even higher number of points)
             # It was decided, that the added complexity was not worth the benefit for these extreme cases. Additionally, the overhead of threads
             # would reduce performance for the majority of use cases
-            binwidth = (xmax - xmin) / bins
             if len(dataframe) > max(bins, nobinning) and binwidth:
                 dataframe = bin_data(dataframe, binwidth, (xmin, xmax))
+            frames[datatype] = dataframe
 
-            xs = dataframe["x"].to_numpy()
-            ys = dataframe["y"].to_numpy() if datatype != "lin" else np.zeros(xs.shape)
+        self.lin_df = frames["lin"]
+        spec = build_spectrum_spec(frames, self.xrange, self.ref_position)
+        spec["xrange"] = tuple(self.xrange)
+        spec["xticks"] = self.xticks()
+        spec["annotation"] = self.annotation_text()
+        run_in_gui(lambda: self.apply_update(spec))
 
-            if datatype == "exp":
-                if scaling == "Per Plot" and len(ys):
-                    yrange_exp = [ys.min(), ys.max()]
-
-                segs, colors = [], []
-
-                filenames = dataframe["filename"]
-                unique_filenames = filenames.unique()
-                for unique_filename in unique_filenames:
-                    mask = filenames == unique_filename
-                    tmp_xs, tmp_ys = xs[mask], ys[mask]
-
-                    colors.append(dataframe.loc[mask, "color"].values)
-                    if cls.ids[unique_filename].is_stickspectrum:
-                        segs.append(
-                            np.array(
-                                ((tmp_xs, tmp_xs), (np.zeros(tmp_ys.shape), tmp_ys))
-                            ).T
-                        )
-                    else:
-                        segs.append(
-                            np.array(
-                                ((tmp_xs[:-1], tmp_xs[1:]), (tmp_ys[:-1], tmp_ys[1:]))
-                            ).T
-                        )
-
-                if segs:
-                    segs = np.concatenate(segs)
-                    colors = np.concatenate(colors)
-
-                self.exp_coll.set(segments=segs, colors=colors)
-
-            elif datatype == "cat":
-                if scaling == "Per Plot":
-                    yrange_cat = [ys.min(), ys.max()] if len(ys) else [-1, 1]
-                    ys = ys * yrange_exp[1] / yrange_cat[1]
-                elif scaling in ["Global", "Custom"]:
-                    ys = (
-                        ys
-                        * config["plot_expcat_factor"]
-                        * 10 ** config["plot_expcat_exponent"]
-                    )
-
-                if config["convolution_kernel"]:
-                    kernel_ys = ConvolutionWindow.kernel_at((xmin + xmax) / 2)
-                    convolution_padding = len(kernel_ys) // 2
-                    stepwidth = config["convolution_stepwidth"]
-
-                    n_xs = (xmax - xmin) // stepwidth + 1
-                    con_xs = np.arange(-n_xs, n_xs + 1) * stepwidth + (xmax + xmin) / 2
-
-                    segs, colors = [], []
-
-                    filenames = dataframe["filename"]
-                    unique_filenames = filenames.unique()
-                    for unique_filename in unique_filenames:
-                        mask = filenames == unique_filename
-                        tmp_xs, tmp_ys = xs[mask], ys[mask]
-
-                        hist_ys, _ = np.histogram(tmp_xs, bins=con_xs, weights=tmp_ys)
-                        con_ys = np.convolve(hist_ys, kernel_ys, "full")
-
-                        con_ys = con_ys[convolution_padding:-convolution_padding]
-                        con_xs = con_xs[:-1]
-
-                        tmp_mask = con_ys != 0
-                        con_xs = con_xs[tmp_mask]
-                        con_ys = con_ys[tmp_mask]
-
-                        color = CatFile.ids[unique_filename]._color
-                        colors.append(np.full((len(con_xs) - 1), color))
-                        segs.append(
-                            np.array(
-                                ((con_xs[:-1], con_xs[1:]), (con_ys[:-1], con_ys[1:]))
-                            ).T
-                        )
-
-                    if segs:
-                        segs = np.concatenate(segs)
-                        colors = np.concatenate(colors)
-
-                else:
-                    segs = np.array(((xs, xs), (ys * 0, ys))).T
-                    colors = dataframe["color"].to_numpy().copy()
-
-                    mask = xs == self.ref_position
-                    colors[mask] = config["color_ref"]
-
-                self.cat_coll.set(segments=segs, colors=colors)
-
-            elif datatype == "lin":
-                self.lin_df = dataframe
-                tuples = list(zip(xs, ys))
-                tuples = tuples if len(tuples) != 0 else [[None, None]]
-                colors = dataframe["color"].to_numpy()
-
-                self.lin_coll.set_offsets(tuples)
-                self.lin_coll.set_color(colors)
-
-        if scaling == "Per Plot":
-            yrange = yrange_exp
-        elif scaling == "Global":
-            yrange = ExpFile.yrange
-        else:
-            yrange = (config["plot_yscale_min"], config["plot_yscale_max"])
-
-        margin = config["plot_ymargin"]
-
-        yrange = [
-            yrange[0] - margin * (yrange[1] - yrange[0]),
-            yrange[1] + margin * (yrange[1] - yrange[0]),
-        ]
-        if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
-            yrange = [-1, +1]
-        ax.set_ylim(yrange)
-        self.update_annotation()
-
-    def update_annotation(self):
+    def annotation_text(self):
+        """Text and color of the annotation or None if it is not shown."""
         fstring = config["plot_annotationfstring"]
 
         if not fstring:
-            if self.annotation:
-                self.annotation.remove()
-                self.annotation.set_visible(False)
-                self.annotation = None
-            return
+            return None
 
-        color = matplotlib.rcParams["text.color"]
+        color = plot_foreground()
 
         if self.qns is not None:
             qns_dict = self.create_qns_dict()
@@ -2873,23 +2777,26 @@ class LWPAx:
             "width": width,
             **qns_dict,
         }
-        text = fstring.format(**vars)
+        return fstring.format(**vars), color
 
-        if self.annotation is None:
-            kwargs = config["plot_annotationkwargs"]
-            ax = self.ax
-            self.annotation = ax.text(
-                **kwargs, s=text, color=color, transform=ax.transAxes
-            )
-        else:
-            self.annotation.set_text(text)
-            self.annotation.set_color(color)
+    def minor_ticks(self, ticks):
+        """Unlabeled ticks between the major ticks, as many as `plot_xminorticks`."""
+        n_minor = config["plot_xminorticks"]
+        if n_minor < 1 or len(ticks) < 2:
+            return []
 
-    def set_xticklabels(self):
+        fractions = np.arange(1, n_minor + 1) / (n_minor + 1)
+        return [
+            (start + fraction * (stop - start), "")
+            for start, stop in zip(ticks[:-1], ticks[1:])
+            for fraction in fractions
+        ]
+
+    def xticks(self):
+        """Major (with labels) and minor ticks, only the lowest row has any."""
         if self.row_i:
-            return
+            return None
 
-        ax = self.ax
         ticks = np.linspace(*self.xrange, config["plot_xticks"])
         tickformat = config["plot_xtickformat"]
 
@@ -2902,11 +2809,11 @@ class LWPAx:
         else:  # 'offset' tickformat
             ticklabels = symmetric_ticklabels(ticks - self.ref_position)
 
+        minor_ticks = self.minor_ticks(ticks)
         if self.col_i and len(ticks) > 1:
             ticks = ticks[1:]
             ticklabels = ticklabels[1:]
-        ax.set_xticks(ticks)
-        ax.set_xticklabels(ticklabels)
+        return [list(zip(ticks, ticklabels)), minor_ticks]
 
     def on_range(self, xmin, xmax):
         xmin_ax, xmax_ax = self.xrange
@@ -2953,14 +2860,8 @@ class LWPAx:
             return config["fit_uncertainty"]
 
     def fit_data(self, xmin, xmax):
-        # Delete artists highlighting previous fit
-        with matplotlib_lock:
-            if self.__class__.fit_vline is not None:
-                self.__class__.fit_vline.remove()
-                self.__class__.fit_vline = None
-            if self.__class__.fit_curve is not None:
-                self.__class__.fit_curve.remove()
-                self.__class__.fit_curve = None
+        # Remove the highlighting of the previous fit
+        self.clear_fit_items()
 
         # Fit the data
         xmiddle, xuncert, fit_xs, fit_ys = self.fit_peak(xmin, xmax)
@@ -2968,13 +2869,7 @@ class LWPAx:
             QApplication.clipboard().setText(str(xmiddle))
 
         # Highlight fit in plot
-        with matplotlib_lock:
-            self.__class__.fit_curve = self.ax.plot(
-                fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1
-            )[0]
-            self.__class__.fit_vline = self.ax.axvline(
-                x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1
-            )
+        self.show_fit(xmiddle, fit_xs, fit_ys)
 
         # Create assignment object
         new_assignment = {
@@ -2994,6 +2889,31 @@ class LWPAx:
         if self.check_blends(new_assignment):
             return ()
         NewAssignments.get_instance().add_row(new_assignment)
+
+    def show_fit(self, xmiddle, fit_xs=None, fit_ys=None):
+        """Highlights the fit with its curve (if given) and a line at its center."""
+
+        def draw():
+            items = []
+            if fit_xs is not None:
+                # Twice as thick as the spectrum to be visible on top of it
+                curve = pg.PlotCurveItem(
+                    fit_xs,
+                    fit_ys,
+                    pen=make_pen(config["color_fit"], alpha=0.7, width=2),
+                )
+                items.append((self.plot, curve))
+            vline = pg.InfiniteLine(
+                xmiddle,
+                angle=90,
+                pen=make_pen(config["color_fit"], style=Qt.PenStyle.DashLine),
+            )
+            items.append((self.plot, vline))
+            for plot, item in items:
+                plot.addItem(item, ignoreBounds=True)
+            self.__class__.fit_items = items
+
+        run_in_gui(draw)
 
     def fit_peak(self, xmin, xmax):
         indices_exp = self.indices.get("exp")
@@ -3024,8 +2944,6 @@ class LWPAx:
             xmiddle, xuncert = fit_results.xmiddle, fit_results.xuncert
             fit_xs, fit_ys = fit_results.fit_xs, fit_results.fit_ys
         except Exception as E:
-            self.fit_curve = None
-            self.fit_line = None
             notify_error.emit(
                 f"The fitting failed with the following error message : {str(E)}"
             )
@@ -3104,15 +3022,15 @@ class LWPAx:
                 return True
 
         # After guard clauses we want to show the dialog
-        mainwindow.lwpwidget.drawplot.emit()
+        mainwindow.lwpwidget.updates_finished.emit()
         AssignBlendsDialog.show_dialog(new_assignment, entries)
         return True
 
 
 class LWPWidget(QGroupBox):
-    drawplot = pyqtSignal()
+    updates_finished = pyqtSignal()
     plotscreated = pyqtSignal()
-    draw_counter = AtomicCounter()
+    running_updates = AtomicCounter()
     _active_ax_index = (0, 0)
 
     _ax_class = LWPAx
@@ -3121,23 +3039,23 @@ class LWPWidget(QGroupBox):
         super().__init__(*args, **kwargs)
         self.initialize_dynamic_decorator_for_drawing_plot()
 
-        with matplotlib_lock:
-            self.fig = Figure(dpi=config["plot_dpi"])
-            self.listener_onclick = self.fig.canvas.mpl_connect(
-                "button_press_event", self.on_click
-            )
-            self.listener_onhover = self.fig.canvas.mpl_connect(
-                "motion_notify_event", self.on_hover
-            )
-            self.plotcanvas = FigureCanvas(self.fig)
-            self.plotcanvas.contextMenuEvent = self.contextMenuCanvas
-
-        config.register("plot_dpi", lambda: self.fig.set_dpi(config["plot_dpi"]))
+        run_in_gui(lambda: None)  # Creates the invoker in the GUI thread
+        theme.changed.connect(self.apply_theme)
+        self.plotcanvas = RoundedGraphicsLayoutWidget()
+        self.plotcanvas.setBackground(plot_background())
+        self.plotcanvas.contextMenuEvent = self.contextMenuCanvas
+        self.plotcanvas.wheelEvent = self.wheelEvent
+        self.plotcanvas.scene().sigMouseMoved.connect(self.on_hover)
+        self.plotcanvas.scene().sigMouseClicked.connect(self.on_click)
 
         self.plotcanvas.setMinimumHeight(200)
         self.plotcanvas.setMinimumWidth(200)
 
-        self.drawplot.connect(self.draw_canvas)
+        # The shortcuts (wasd) only work if the main window has the focus
+        self.plotcanvas.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.plotcanvas.viewport().setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        self.updates_finished.connect(self.enable_repainting)
         keys = (
             "plot_width",
             "plot_widthexpression",
@@ -3150,15 +3068,10 @@ class LWPWidget(QGroupBox):
             "plot_yscale_max",
             "plot_expcat_factor",
             "plot_expcat_exponent",
+            "plot_xminorticks",
+            "plot_annotationfontsize",
         )
         config.register(keys, lambda: self.set_data())
-
-        self.mpltoolbar = NavigationToolbar2QT(self.plotcanvas, self)
-        self.mpltoolbar.setVisible(config["isvisible_matplotlibtoolbar"])
-        config.register(
-            "isvisible_matplotlibtoolbar",
-            lambda: self.mpltoolbar.setVisible(config["isvisible_matplotlibtoolbar"]),
-        )
 
         toplayout = self.toplayout = QHBoxLayout()
 
@@ -3231,7 +3144,6 @@ class LWPWidget(QGroupBox):
         layout = QVBoxLayout()
         layout.addLayout(toplayout)
         layout.addWidget(self.plotcanvas, 1)
-        layout.addWidget(self.mpltoolbar)
         self.setLayout(layout)
 
         self.lwpaxes = np.zeros((0, config["plot_cols"]))
@@ -3241,41 +3153,50 @@ class LWPWidget(QGroupBox):
 
     def initialize_dynamic_decorator_for_drawing_plot(self):
         def exit_func():
-            counter_value = self.draw_counter.decrease()
+            counter_value = self.running_updates.decrease()
             if not counter_value:
-                self.drawplot.emit()
+                self.updates_finished.emit()
 
         def init_func():
-            self.draw_counter.increase()
+            # Do not repaint while the plots are updated, enable_repainting enables it again
+            if self.running_updates.increase() == 1:
+                run_in_gui(lambda: self.plotcanvas.setUpdatesEnabled(False))
 
-        drawplot_decorator.init_func = init_func
-        drawplot_decorator.exit_func = exit_func
+        plot_update_decorator.init_func = init_func
+        plot_update_decorator.exit_func = exit_func
 
-    def draw_canvas(self):
-        with matplotlib_lock:
-            self.plotcanvas.draw_idle()
+    def enable_repainting(self):
+        self.plotcanvas.setUpdatesEnabled(True)
+        self.plotcanvas.viewport().update()
 
     def save_figure(self, fname=None):
-        if fname is None:
-            fname = QFileDialog.getSaveFileName(None, "Choose file to save to")[0]
-        if fname:
-            self.fig.savefig(fname)
+        save_figure_dialog(self.plotcanvas, fname)
+
+    def apply_theme(self):
+        self.plotcanvas.setBackground(plot_background())
+        for lwpax in self.lwpaxes.flatten():
+            lwpax.apply_theme()
+        self.set_data()
+
+    def locate(self, scene_pos):
+        """Returns the ax at the position in the scene with the position in data coordinates."""
+        for lwpax in self.lwpaxes.flatten():
+            vb = lwpax.vb
+            if vb.sceneBoundingRect().contains(scene_pos):
+                point = vb.mapSceneToView(scene_pos)
+                return lwpax, point.x(), point.y()
+        return None, None, None
 
     def on_click(self, event):
-        if event.canvas.widgetlock.locked():  # Pan or zoom of the matplotlib toolbar is active
-            return
+        mainwindow.setFocus()
+        lwpax, x, y = self.locate(event.scenePos())
+        if lwpax is not None:
+            lwpax.make_active()
 
-        ax = event.inaxes
-        index = np.asarray(np.where(self.axes == ax)).T
+    def on_hover(self, scene_pos):
+        lwpax, x, y = self.locate(scene_pos)
 
-        if len(index):
-            self.__class__._active_ax_index = tuple(index[0])
-
-    def on_hover(self, event):
-        x = event.xdata
-        y = event.ydata
-
-        if not all([x, y, event.inaxes]):
+        if lwpax is None:
             text_cursor = ""
         else:
             if config["flag_showmainplotposition"]:
@@ -3291,35 +3212,27 @@ class LWPWidget(QGroupBox):
         factor = 2 ** (-steps)
         WidthDialog.gui_set_width(factor)
 
-    @QThread.threaded_d
-    @lock_d(matplotlib_lock)
     @status_d
-    def create_plots(self, thread=None):
+    def create_plots(self, *args):
         n_rows = max(config["plot_rows"], 1)
         n_cols = max(config["plot_cols"], 1)
-        gridspec_kw = config["plot_gridspeckwargs"]
 
-        # The following performed better than self.fig.clf()
-        for ax in self.fig.get_axes():
-            self.fig.delaxes(ax)
+        self.plotcanvas.clear()
 
-        for lwpax in self.lwpaxes.flatten():
-            lwpax.span = None
-
-        thread.earlyreturn()
-
-        axes = self.fig.subplots(
-            n_rows, n_cols, gridspec_kw=gridspec_kw, squeeze=False
-        )[::-1]
-        self.axes = axes
-
-        thread.earlyreturn()
-
-        self.lwpaxes = np.empty(axes.shape, dtype=object)
-        for i, j in np.ndindex(axes.shape):
-            self.lwpaxes[i, j] = self._ax_class(axes[i, j], i, j)
-
-        thread.earlyreturn()
+        # The lowest row has the index 0
+        # Only assigned once it is complete, worker threads might access it any time
+        lwpaxes = np.empty((n_rows, n_cols), dtype=object)
+        for i, j in np.ndindex(n_rows, n_cols):
+            viewbox = FramedViewBox(color=config["color_fit"])
+            plot = self.plotcanvas.addPlot(
+                row=n_rows - 1 - i,
+                col=j,
+                viewBox=viewbox,
+                axisItems={"bottom": EdgeLabelAxisItem("bottom")},
+                enableMenu=False,
+            )
+            lwpaxes[i, j] = self._ax_class(plot, i, j)
+        self.lwpaxes = lwpaxes
 
         self.set_data()
         self.plotscreated.emit()
@@ -3335,7 +3248,7 @@ class LWPWidget(QGroupBox):
 
     @QThread.threaded_d
     @status_d
-    @drawplot_decorator.d
+    @plot_update_decorator.d
     def set_data(self, thread=None):
         if not hasattr(ReferenceSeriesWindow, "instance"):
             return
@@ -3427,28 +3340,26 @@ class LWPWidget(QGroupBox):
         thread.earlyreturn()
 
         # Set the correct values to the LWPAxes
-        # The lock makes sure that the axes are not replaced while they are updated
-        with matplotlib_lock:
-            if self.lwpaxes.shape != (n_rows, n_cols):
-                notify_error.emit(
-                    "Shape of LWPAxes is out of sync with requested values."
-                )
-                return
+        if self.lwpaxes.shape != (n_rows, n_cols):
+            notify_error.emit(
+                "Shape of LWPAxes is out of sync with requested values."
+            )
+            return
 
-            for i_row in range(n_rows):
-                for i_col in range(n_cols):
-                    ax = self.lwpaxes[i_row, i_col]
-                    ax.ref_position = positions[i_row, i_col]
-                    ax.xrange = (xmins[i_row, i_col], xmaxs[i_row, i_col])
-                    ax.qns = qns[i_row, i_col]
-                    ax.indices = {
-                        label: (
-                            min_indices[label][i_row, i_col],
-                            max_indices[label][i_row, i_col],
-                        )
-                        for label in ("exp", "cat", "lin")
-                    }
-                    ax.update()
+        for i_row in range(n_rows):
+            for i_col in range(n_cols):
+                ax = self.lwpaxes[i_row, i_col]
+                ax.ref_position = positions[i_row, i_col]
+                ax.xrange = (xmins[i_row, i_col], xmaxs[i_row, i_col])
+                ax.qns = qns[i_row, i_col]
+                ax.indices = {
+                    label: (
+                        min_indices[label][i_row, i_col],
+                        max_indices[label][i_row, i_col],
+                    )
+                    for label in ("exp", "cat", "lin")
+                }
+                ax.update()
 
     def get_current_ax(self):
         shape = self.lwpaxes.shape
@@ -3458,38 +3369,22 @@ class LWPWidget(QGroupBox):
         else:
             return self.lwpaxes[0, 0]
 
-    def get_assignments_at(self, lwpax, event):
+    def get_assignments_at(self, lwpax, scene_pos):
         """Return the assignments whose markers are under the cursor."""
         lin_df = lwpax.lin_df
         if lin_df is None or not len(lin_df):
             return pd.DataFrame()
 
-        ratio = self.plotcanvas.device_pixel_ratio
-        height = self.plotcanvas.get_width_height(physical=True)[1]
-        mouseevent = matplotlib.backend_bases.MouseEvent(
-            "button_press_event",
-            self.plotcanvas,
-            event.x() * ratio,
-            height - event.y() * ratio,
-        )
-        contained, info = lwpax.lin_coll.contains(mouseevent)
-        if not contained:
+        points = lwpax.lin_item.pointsAt(lwpax.vb.mapSceneToView(scene_pos))
+        if not len(points):
             return pd.DataFrame()
 
-        assignments = lin_df.iloc[info["ind"]].copy()
-        return assignments
+        return lin_df.iloc[[point.index() for point in points]].copy()
 
     def contextMenuCanvas(self, event):
-        x, y = event.x(), event.y()
-        geometry = self.plotcanvas.geometry()
-        width, height = geometry.width(), geometry.height()
-        x_rel, y_rel = x / width, 1 - y / height
-
-        for lwpax in self.lwpaxes.flatten():
-            xmin, ymin, width, height = lwpax.ax.get_position().bounds
-            if xmin <= x_rel <= xmin + width and ymin <= y_rel <= ymin + height:
-                break
-        else:  # Clicked outside of ax
+        scene_pos = self.plotcanvas.mapToScene(event.pos())
+        lwpax, x, y = self.locate(scene_pos)
+        if lwpax is None:  # Clicked outside of ax
             return
 
         menu = QMenu(self)
@@ -3500,7 +3395,7 @@ class LWPWidget(QGroupBox):
         open_blend_action = menu.addAction("Open in Blended Lines")
         fit_all_action = menu.addAction("Fit all")
 
-        assignments = self.get_assignments_at(lwpax, event)
+        assignments = self.get_assignments_at(lwpax, scene_pos)
         delete_assignment_action = None
         if len(assignments):
             menu.addSeparator()
@@ -4226,8 +4121,9 @@ class LLWP(QApplication):
 
         config.register("flag_pyckettquanta", self.update_pyckett_quanta_settings)
         self.update_pyckett_quanta_settings()
-
-        self.initialize_matplotlib_settings()
+        update_pyqtgraph_options()
+        set_plot_radius(config["plot_radius"])
+        config.register("plot_radius", lambda: set_plot_radius(config["plot_radius"]))
 
         with config:
             global mainwindow
@@ -4267,7 +4163,7 @@ class LLWP(QApplication):
         pass
 
     def on_theme_change(self):
-        self.update_matplotlib_theme()
+        theme.changed.emit()
 
         config.update_colors()
 
@@ -4275,7 +4171,7 @@ class LLWP(QApplication):
         for cls in (ExpFile, CatFile, LinFile):
             for id in cls.ids:
                 file = cls.ids[id]
-                normalized_color = matplotlib.colors.to_hex(file.color)
+                normalized_color = to_hex(file.color)
 
                 if is_dark and normalized_color == "#000000":
                     file.color = "#ffffff"
@@ -4314,23 +4210,6 @@ class LLWP(QApplication):
                     ConsoleDialog.run_command(command)
         except Exception as E:
             notify_error.emit(f"{E}:\n{tb.format_stack()}")
-
-    def initialize_matplotlib_settings(self):
-        matplotlib.rc("font", **config["plot_fontdict"])
-        config.register(
-            "plot_fontdict", lambda: matplotlib.rc("font", **config["plot_fontdict"])
-        )
-
-        self.update_matplotlib_theme()
-
-        mpl_style_filename = llwpfile(".mplstyle")
-        if os.path.exists(mpl_style_filename):
-            matplotlib.style.use(mpl_style_filename)
-
-    def update_matplotlib_theme(self):
-        matplotlib.style.use("dark_background" if is_dark_theme() else "default")
-        matplotlib.rcParams["figure.facecolor"] = "#00000000"
-        matplotlib.rcParams["axes.facecolor"] = "#00000000"
 
     def update_pyckett_quanta_settings(self):
         pyckett.QUANTA = config["flag_pyckettquanta"]
@@ -4900,7 +4779,6 @@ class QNsDialog(QDialog):
 
 
 class AssignAllDialog(QDialog):
-    drawplot = pyqtSignal()
     _instance = None
 
     @classmethod
@@ -4925,8 +4803,33 @@ class AssignAllDialog(QDialog):
         self.__class__._instance = self
 
         self.init_gui()
-        self.drawplot.connect(self.plotcanvas.draw_idle)
         self.update_gui()
+
+    def create_rows(self):
+        """Creates a plot for each row, the first one is the lowest and shows the x axis."""
+        return create_stacked_plots(
+            self.plotcanvas,
+            self.n_rows,
+            link_x=True,
+            color=config["color_fit"],
+        )
+
+    def finish_plots(self):
+        """Sets the ranges: The rows share the x range and have their own y range."""
+        xs = np.concatenate([data for row in self.axs for data in row.xs] or [[]])
+        xrange = (xs.min(), xs.max()) if len(xs) else None
+        for row in self.axs:
+            row.set_ranges(xrange=xrange, ymargin=config["plot_ymargin"])
+
+    def update_gui_theme(self):
+        self.plotcanvas.setBackground(plot_background())
+        self.update_gui(reset_axes_to_skip=False)
+
+    def row_at(self, scene_pos):
+        for i, row in enumerate(self.axs):
+            if row.vb.sceneBoundingRect().contains(scene_pos):
+                return i
+        return None
 
     def update_gui_asap(self, reset_axes_to_skip=True):
         if reset_axes_to_skip:
@@ -4991,12 +4894,7 @@ class AssignAllDialog(QDialog):
             raise GUIAbortedError(msg)
 
         # Create new assignments
-        for ax in self.fig.get_axes():
-            self.fig.delaxes(ax)
-        axs = self.fig.subplots(
-            self.n_rows, sharex=True, gridspec_kw={"hspace": 0, "wspace": 0}
-        )
-        self.axs = axs = axs[::-1]
+        self.axs = axs = self.create_rows()
 
         self.new_assignments = []
         for i_row, (xref, qnus, ax) in enumerate(zip(positions, qns, axs)):
@@ -5005,9 +4903,7 @@ class AssignAllDialog(QDialog):
 
             if already_assigned:
                 xpre = xref + offsets[i_row]
-                ax.scatter(
-                    offsets[i_row], 0, color=config["color_ref"], marker="*", zorder=100
-                )
+                ax.star(offsets[i_row], config["color_ref"])
             else:
                 offset_values = np.array(
                     [[key, value] for key, value in offsets.items()]
@@ -5041,10 +4937,7 @@ class AssignAllDialog(QDialog):
                 corr_ys[minindex_plot:maxindex_plot],
             )
 
-            ax.plot(exp_xs_plot, exp_ys_plot, color=config["color_exp"])
-            ax.xaxis.set_visible(False)
-            ax.yaxis.set_visible(False)
-            ax.margins(y=config["plot_ymargin"])
+            ax.curve(exp_xs_plot, exp_ys_plot, config["color_exp"])
 
             if already_assigned or user_flagged_to_skip or len(exp_xs) == 0:
                 continue
@@ -5103,14 +4996,10 @@ class AssignAllDialog(QDialog):
                         }
                     )
 
-            ax.plot(fit_xs - xref, fit_ys, color=config["color_fit"], lw=2, alpha=0.5)
-            ax.axvline(xmiddle - xref, zorder=10, color=config["color_fit"])
+            ax.curve(fit_xs - xref, fit_ys, config["color_fit"], width=2, alpha=0.5)
+            ax.vline(xmiddle - xref, config["color_fit"])
 
-        ax = axs[0]
-        ax.xaxis.set_visible(True)
-        ax.margins(x=0)
-
-        self.drawplot.emit()
+        self.finish_plots()
 
     def update_gui_llwp(self, reset_axes_to_skip=True):
         if reset_axes_to_skip:
@@ -5181,12 +5070,7 @@ class AssignAllDialog(QDialog):
             raise GUIAbortedError(msg)
 
         # Create new assignments
-        for ax in self.fig.get_axes():
-            self.fig.delaxes(ax)
-        axs = self.fig.subplots(
-            self.n_rows, sharex=True, gridspec_kw={"hspace": 0, "wspace": 0}
-        )
-        self.axs = axs = axs[::-1]
+        self.axs = axs = self.create_rows()
 
         self.new_assignments = []
         for i_row, (xref, row_qns, ax) in enumerate(zip(positions, qns, axs)):
@@ -5195,9 +5079,7 @@ class AssignAllDialog(QDialog):
 
             if already_assigned:
                 xpre = xref + offsets[i_row]
-                ax.scatter(
-                    offsets[i_row], 0, color=config["color_ref"], marker="*", zorder=100
-                )
+                ax.star(offsets[i_row], config["color_ref"])
             else:
                 offset_values = np.array(
                     [[key, value] for key, value in offsets.items()]
@@ -5217,10 +5099,7 @@ class AssignAllDialog(QDialog):
             exp_xs, exp_ys = df["x"].to_numpy(), df["y"].to_numpy()
             exp_xs_plot, exp_ys_plot = df_plot["x"].to_numpy(), df_plot["y"].to_numpy()
 
-            ax.plot(exp_xs_plot - xref, exp_ys_plot, color=config["color_exp"])
-            ax.xaxis.set_visible(False)
-            ax.yaxis.set_visible(False)
-            ax.margins(y=config["plot_ymargin"])
+            ax.curve(exp_xs_plot - xref, exp_ys_plot, config["color_exp"])
 
             if already_assigned or user_flagged_to_skip or len(exp_xs) == 0:
                 continue
@@ -5292,14 +5171,10 @@ class AssignAllDialog(QDialog):
                     }
                 )
 
-            ax.plot(fit_xs - xref, fit_ys, color=config["color_fit"], lw=2, alpha=0.5)
-            ax.axvline(xmiddle - xref, zorder=10, color=config["color_fit"])
+            ax.curve(fit_xs - xref, fit_ys, config["color_fit"], width=2, alpha=0.5)
+            ax.vline(xmiddle - xref, config["color_fit"])
 
-        ax = axs[0]
-        ax.xaxis.set_visible(True)
-        ax.margins(x=0)
-
-        self.drawplot.emit()
+        self.finish_plots()
 
     def update_gui(self, *args, **kwargs):
         self.update_gui_llwp(*args, **kwargs)
@@ -5308,16 +5183,13 @@ class AssignAllDialog(QDialog):
         layout = QVBoxLayout(margin=True)
         self.setLayout(layout)
 
-        self.fig = Figure(dpi=config["plot_dpi"])
-
-        self.plotcanvas = FigureCanvas(self.fig)
-        self.mpl_toolbar = NavigationToolbar2QT(self.plotcanvas, self)
-
-        self.cid = self.fig.canvas.mpl_connect("button_press_event", self.on_click)
+        self.plotcanvas = RoundedGraphicsLayoutWidget()
+        self.plotcanvas.setBackground(plot_background())
         self.plotcanvas.contextMenuEvent = self.show_context_menu
+        self.plotcanvas.scene().sigMouseClicked.connect(self.on_click)
+        theme.changed.connect(self.update_gui_theme)
 
         layout.addWidget(self.plotcanvas, 1)
-        layout.addWidget(self.mpl_toolbar)
 
         grid_layout = QGridLayout()
 
@@ -5413,35 +5285,21 @@ class AssignAllDialog(QDialog):
         NewAssignments.get_instance().add_rows(new_assignments)
 
     def on_click(self, event):
-        if event.canvas.widgetlock.locked():  # Pan or zoom of the matplotlib toolbar is active
+        if event.button() != Qt.MouseButton.LeftButton:
             return
 
-        clicked_axis = event.inaxes
-
-        if not clicked_axis or event.button != 1:
+        i = self.row_at(event.scenePos())
+        if i is None:
             return
 
-        for i, ax in enumerate(self.axs):
-            if ax == event.inaxes:
-                if i in self.axes_to_skip:
-                    self.axes_to_skip.remove(i)
-                else:
-                    self.axes_to_skip.add(i)
-                self.update_gui(reset_axes_to_skip=False)
-                return
+        if i in self.axes_to_skip:
+            self.axes_to_skip.remove(i)
+        else:
+            self.axes_to_skip.add(i)
+        self.update_gui(reset_axes_to_skip=False)
 
     def show_context_menu(self, event):
-        x, y = event.x(), event.y()
-        geometry = self.plotcanvas.geometry()
-        width, height = geometry.width(), geometry.height()
-        x_rel, y_rel = x / width, 1 - y / height
-
-        for i_clicked_axis, ax in enumerate(self.axs):
-            xmin, ymin, width, height = ax.get_position().bounds
-            if xmin <= x_rel <= xmin + width and ymin <= y_rel <= ymin + height:
-                break
-        else:
-            return
+        i_clicked_axis = self.row_at(self.plotcanvas.mapToScene(event.pos()))
 
         menu = QMenu(self)
 
@@ -5453,10 +5311,25 @@ class AssignAllDialog(QDialog):
         menu.addSeparator()
         ignore_all_below_action = menu.addAction("Ignore this line and all below")
         add_all_above_action = menu.addAction("Add this line and all below")
+        menu.addSeparator()
+        save_figure_action = menu.addAction("Save Figure")
+
+        # The actions for a single line need a line under the cursor
+        if i_clicked_axis is None:
+            for action in (
+                ignore_all_above_action,
+                add_all_below_action,
+                ignore_all_below_action,
+                add_all_above_action,
+            ):
+                action.setEnabled(False)
 
         action = menu.exec(self.plotcanvas.mapToGlobal(event.pos()))
         n_rows = self.n_rows
-        if action == add_all_action:
+        if action == save_figure_action:
+            save_figure_dialog(self.plotcanvas)
+            return
+        elif action == add_all_action:
             self.axes_to_skip = set()
         elif action == ignore_all_action:
             self.axes_to_skip = set(range(0, n_rows))
@@ -6578,7 +6451,7 @@ class ReferenceSeriesWindow(EQDockWidget):
             values.append(tmp)
         return values
 
-    @drawplot_decorator.d
+    @plot_update_decorator.d
     def check_order(self, x=None):
         if self.tab_order is None:
             return
@@ -7738,29 +7611,11 @@ class ResidualsWindow(EQDockWidget):
         super().__init__(*args, **kwargs)
         self.setWindowTitle("Residuals")
 
-        self.fig = Figure(dpi=config["plot_dpi"])
-        self.plotcanvas = FigureCanvas(self.fig)
+        self.plotcanvas = ScatterPlotWidget()
+        self.plotcanvas.hovered.connect(self.on_hover)
+        self.plotcanvas.clicked.connect(self.on_click)
+        self.plotcanvas.context_actions = self.context_actions
 
-        self.ax = self.fig.subplots()
-
-        self.points = self.ax.scatter([], [], color=[], marker=".")
-        self.annot = self.ax.annotate(
-            "",
-            xy=(0, 0),
-            xytext=(5, 5),
-            textcoords="offset points",
-            color="black",
-            ha="center",
-            va="bottom",
-            bbox=dict(boxstyle="round", fc="w"),
-        )
-        self.annot.set_visible(False)
-        self.fig.canvas.mpl_connect("motion_notify_event", self.on_hover)
-        self.fig.canvas.mpl_connect(
-            "button_press_event", lambda x: self.on_hover(x, True)
-        )
-
-        self.mpl_toolbar = NavigationToolbar2QT(self.plotcanvas, self)
         self.df = None
 
         layout = QVBoxLayout(margin=True)
@@ -7811,7 +7666,6 @@ class ResidualsWindow(EQDockWidget):
             QQ(QCheckBox, "residuals_autoscale", text="Autoscale on Update")
         )
         layout.addLayout(hlayout)
-        layout.addWidget(self.mpl_toolbar)
         layout.addWidget(
             QQ(
                 QPlainTextEdit,
@@ -7849,7 +7703,6 @@ class ResidualsWindow(EQDockWidget):
 
         self.plotting_started.connect(lambda: self.update_button.setDisabled(True))
         self.plotting_finished.connect(lambda: self.update_button.setDisabled(False))
-        self.plotting_finished.connect(lambda: self.fig.canvas.draw_idle())
 
     def get_residuals(self):
         noq = config["series_qns"]
@@ -7917,38 +7770,20 @@ class ResidualsWindow(EQDockWidget):
                         f"{len(indices)} lines are colored in <span style='color:{color};'>{color}</span>."
                     )
 
-            self.df = df
-
             yvariable = config["residuals_yvariable"].strip() or "x_dev"
             xvariable = config["residuals_xvariable"].strip() or "x_lin"
             ys = df.eval(yvariable).to_numpy()
             xs = df.eval(xvariable).to_numpy()
             colors = df["color"].to_numpy()
-            tuples = list(zip(xs, ys))
-            tuples = tuples if len(tuples) != 0 else [[None, None]]
-            with matplotlib_lock:
-                self.points.set_offsets(tuples)
-                self.points.set_color(colors)
-                if len(xs) and config["residuals_autoscale"]:
-                    xmin, xmax = np.min(xs), np.max(xs)
-                    if xmin == xmax:
-                        xmin -= 1
-                        xmax += 1
-                    self.ax.set_xlim(
-                        [
-                            xmin - 0.02 * (xmax - xmin),
-                            xmax + 0.02 * (xmax - xmin),
-                        ]
-                    )
-                    ymin, ymax = np.min(ys), np.max(ys)
-                    if ymin == ymax:
-                        ymin -= 1
-                        ymax += 1
-                    y_range = [ymin, ymax]
-                    self.ax.set_ylim(
-                        y_range[0] - config["plot_ymargin"] * (y_range[1] - y_range[0]),
-                        y_range[1] + config["plot_ymargin"] * (y_range[1] - y_range[0]),
-                    )
+            autoscale = config["residuals_autoscale"]
+            ymargin = config["plot_ymargin"]
+
+            def show():
+                # The data and the points have to change together as the hover uses both
+                self.df = df
+                self.plotcanvas.set_points(xs, ys, colors, autoscale, ymargin)
+
+            run_in_gui(show)
 
             notify_info.emit("<br/>".join(message))
         except Exception:
@@ -7967,69 +7802,97 @@ class ResidualsWindow(EQDockWidget):
         if fname:
             df.to_csv(fname, index=None, sep="\t")
 
-    def on_hover(self, event, click=False):
-        if event.inaxes == self.ax and isinstance(self.df, pd.DataFrame):
-            cont, ind = self.points.contains(event)
-            noq = None
-            if cont:
-                self.annot.xy = self.points.get_offsets()[ind["ind"][0]]
-                tmp_transitions = self.df.iloc[ind["ind"]]
-                text = []
-                if len(tmp_transitions):
-                    noq = self.noq
-                for i, row in tmp_transitions.iterrows():
-                    qnus = [row[f"qnu{n + 1}"] for n in range(noq)]
-                    qnls = [row[f"qnl{n + 1}"] for n in range(noq)]
-                    text.append(
-                        f"{', '.join(map(str, qnus))} ← {', '.join(map(str, qnls))}"
-                    )
-                text = "\n".join(text)
-                self.annot.set_text(text)
-                self.annot.set_visible(True)
-            else:
-                self.annot.set_visible(False)
-            self.fig.canvas.draw_idle()
+    def on_hover(self, indices):
+        if not len(indices) or not isinstance(self.df, pd.DataFrame):
+            return
 
-            # clicked and transition(s) under cursor
-            if click and noq:
-                action_to_perform = "showinplot"
+        tmp_transitions = self.df.iloc[indices]
+        text = []
+        for i, row in tmp_transitions.iterrows():
+            qnus = [row[f"qnu{n + 1}"] for n in range(self.noq)]
+            qnls = [row[f"qnl{n + 1}"] for n in range(self.noq)]
+            text.append(f"{', '.join(map(str, qnus))} ← {', '.join(map(str, qnls))}")
 
-                is_right_click = event.button == 3
-                if is_right_click:
-                    menu = QMenu()
-                    showinplot_action = menu.addAction("Show in plot")
-                    deletefromfile_action = menu.addAction("Delete from file")
+        # The tooltip is shown at the first of the hovered points
+        plot = self.plotcanvas
+        plot.show_tooltip(plot.xs[indices[0]], plot.ys[indices[0]], "\n".join(text))
 
-                    action = menu.exec(QCursor.pos())
-                    if action == showinplot_action:
-                        action_to_perform = "showinplot"
-                    elif action == deletefromfile_action:
-                        action_to_perform = "deletefromfile"
+    def on_click(self, indices, button):
+        # A right click opens the context menu, a click on a point shows the line
+        if button == Qt.MouseButton.RightButton or not len(indices):
+            return
+        self.show_in_plot(indices)
 
-                if action_to_perform == "showinplot":
-                    tab_widget = ReferenceSeriesWindow.instance.tab
-                    refwidget = tab_widget.widget(config["series_currenttab"])
-                    refwidget.setCurrentIndex(0)
-                    seriesselector = refwidget.series_selector
+    def context_actions(self, hovered, selected):
+        actions = []
+        if len(hovered):
+            actions.append(("Show in plot", lambda: self.show_in_plot(hovered)))
+            actions.append(("Delete from file", lambda: self.delete_lines(hovered)))
+        if len(selected):
+            plural = "s" if len(selected) > 1 else ""
+            actions.append(
+                (
+                    f"Delete {len(selected)} selected line{plural} from file",
+                    lambda: self.delete_lines(selected),
+                )
+            )
+            actions.append(("Clear selection", self.plotcanvas.clear_selection))
+        return actions
 
-                    current_state = seriesselector.state
-                    current_state["qnus"][:noq] = qnus
-                    current_state["qnls"][:noq] = qnls
-                    config["series_qns"] = noq
+    def show_in_plot(self, indices):
+        if not isinstance(self.df, pd.DataFrame):
+            return
 
-                    seriesselector.set_state()
+        noq = self.noq
+        last_row = self.df.iloc[indices[-1]]
+        qnus = [last_row[f"qnu{n + 1}"] for n in range(noq)]
+        qnls = [last_row[f"qnl{n + 1}"] for n in range(noq)]
 
-                    mainwindow.lwpwidget.set_data()
-                    mainwindow.show()
-                    mainwindow.raise_()
-                    mainwindow.activateWindow()
-                elif action_to_perform == "deletefromfile":
-                    columns = {
-                        x: x.replace("_lin", "").replace("_x", "")
-                        for x in tmp_transitions.columns
-                        if (x.endswith("_lin") or x.endswith("_x"))
-                    }
-                    delete_assignments(tmp_transitions.rename(columns=columns))
+        tab_widget = ReferenceSeriesWindow.instance.tab
+        refwidget = tab_widget.widget(config["series_currenttab"])
+        refwidget.setCurrentIndex(0)
+        seriesselector = refwidget.series_selector
+
+        current_state = seriesselector.state
+        current_state["qnus"][:noq] = qnus
+        current_state["qnls"][:noq] = qnls
+        config["series_qns"] = noq
+
+        seriesselector.set_state()
+
+        mainwindow.lwpwidget.set_data()
+        mainwindow.show()
+        mainwindow.raise_()
+        mainwindow.activateWindow()
+
+    def delete_lines(self, indices):
+        """Deletes the assignments of the lines at the indices from their files."""
+        if not isinstance(self.df, pd.DataFrame):
+            return
+
+        transitions = self.df.iloc[indices]
+        columns = {
+            x: x.replace("_lin", "").replace("_x", "")
+            for x in transitions.columns
+            if (x.endswith("_lin") or x.endswith("_x"))
+        }
+        transitions = transitions.rename(columns=columns)
+
+        if len(transitions) > 1:
+            n_files = transitions["filename"].nunique()
+            answer = QMessageBox.question(
+                self,
+                "Delete lines",
+                f"Do you really want to delete {len(transitions)} assignments from {n_files} file(s)? This cannot be undone.",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        delete_assignments(transitions)
+
+        # The points of the deleted lines are not valid anymore
+        self.plotcanvas.clear_selection()
+        self.plot_residuals()
 
     def fit_file_context_menu(self, pos):
         menu = QMenu(self)
@@ -8081,28 +7944,57 @@ class BlendedLinesWindow(EQDockWidget):
 
             def gui(self):
                 super().gui()
-                self.fit_line = self.ax.plot(
-                    [], [], color=config["blendedlines_color_total"]
-                )[0]
+                self.fit_line = pg.PlotCurveItem(
+                    pen=make_pen(config["blendedlines_color_total"])
+                )
+                self.fit_line.setZValue(50)
+                self.plot.addItem(self.fit_line, ignoreBounds=True)
                 self.plot_parts = []
                 self.update_plot_requested.connect(super().update_plot)
+
+            def clear_fit(self):
+                for item in self.plot_parts:
+                    self.plot.removeItem(item)
+                self.plot_parts = []
+                self.fit_line.setData([], [])
+
+            def draw_fit(self, spec):
+                """Shows the result of a fit, has to be called from the GUI thread."""
+                self.clear_fit()
+                self.fit_line.setData(*spec["total"][:2])
+                self.fit_line.setPen(make_pen(spec["total"][2]))
+
+                for xs, ys, color, alpha in spec["lines"]:
+                    item = pg.PlotCurveItem(xs, ys, pen=make_pen(color, alpha=alpha))
+                    item.setZValue(50)
+                    self.plot.addItem(item, ignoreBounds=True)
+                    self.plot_parts.append(item)
+
+                xs, ys, color = spec["markers"]
+                markers = pg.ScatterPlotItem(
+                    x=xs,
+                    y=ys,
+                    size=8,
+                    symbol="o",
+                    pen=pg.mkPen(None),
+                    brush=pg.mkBrush(to_qcolor(color)),
+                )
+                markers.setZValue(60)
+                self.plot.addItem(markers, ignoreBounds=True)
+                self.plot_parts.append(markers)
+
+                if spec["baseline"] is not None:
+                    xs, ys, color = spec["baseline"]
+                    item = pg.PlotCurveItem(xs, ys, pen=make_pen(color))
+                    item.setZValue(50)
+                    self.plot.addItem(item, ignoreBounds=True)
+                    self.plot_parts.append(item)
 
             def update_plot(self):
                 self.parent.fit_peaks(self)
 
         self.plot_widget = CustomPlotWidget(parent=self)
         layout.addWidget(self.plot_widget, 2)
-
-        self.mpltoolbar = NavigationToolbar2QT(self.plot_widget.plotcanvas, self)
-        layout.addWidget(self.mpltoolbar)
-
-        self.mpltoolbar.setVisible(config["blendedlines_matplotlibtoolbar"])
-        config.register(
-            "blendedlines_matplotlibtoolbar",
-            lambda: self.mpltoolbar.setVisible(
-                config["blendedlines_matplotlibtoolbar"]
-            ),
-        )
 
         tmplayout = QGridLayout()
         row_id = 0
@@ -8195,9 +8087,7 @@ class BlendedLinesWindow(EQDockWidget):
         self.table.setMinimumHeight(50)
         layout.addWidget(self.table, 1)
 
-        self.cid = self.plot_widget.plotcanvas.mpl_connect(
-            "button_press_event", lambda event: self.add_peak(event)
-        )
+        self.plot_widget.plotcanvas.scene().sigMouseClicked.connect(self.add_peak)
         config.register(
             "fit_fitmethod",
             lambda: (
@@ -8231,12 +8121,8 @@ class BlendedLinesWindow(EQDockWidget):
             self.set_indicator_text.emit(
                 f"<span style='color:#eda711;'>{method.label} cannot fit multiple lines.</span>"
             )
+            run_in_gui(plot_widget.clear_fit)
             return
-
-        with matplotlib_lock:
-            for part in plot_widget.plot_parts:
-                part.remove()
-            plot_widget.plot_parts = []
 
         thread.earlyreturn()
 
@@ -8272,41 +8158,32 @@ class BlendedLinesWindow(EQDockWidget):
         ):
             exp_mean = exp_ys.mean()
 
-        ax = plot_widget.ax
-
-        with matplotlib_lock:
-            plot_widget.fit_line.set_data(res_xs, res_ys)
-            plot_widget.fit_line.set_color(config["blendedlines_color_total"])
-
-            for i in range(len(result.lines)):
-                plot_widget.plot_parts.append(
-                    ax.plot(
-                        res_xs,
-                        result.evaluate_line(res_xs, i) + exp_mean,
-                        color=config["blendedlines_color_total"],
-                        alpha=config["blendedlines_transparency"],
-                    )[0]
+        marker_xs = [result.center(i) for i in range(len(result.lines))]
+        marker_ys = [
+            (result.amplitude(i) + exp_mean) if method.markers_at_amplitude else 0
+            for i in range(len(result.lines))
+        ]
+        spec = {
+            "total": (res_xs, res_ys, config["blendedlines_color_total"]),
+            "lines": [
+                (
+                    res_xs,
+                    result.evaluate_line(res_xs, i) + exp_mean,
+                    config["blendedlines_color_total"],
+                    config["blendedlines_transparency"],
                 )
-
-            marker_xs = [result.center(i) for i in range(len(result.lines))]
-            marker_ys = [
-                (result.amplitude(i) + exp_mean) if method.markers_at_amplitude else 0
                 for i in range(len(result.lines))
-            ]
-            plot_widget.plot_parts.append(
-                ax.scatter(
-                    marker_xs, marker_ys, color=config["blendedlines_color_points"]
-                )
+            ],
+            "markers": (marker_xs, marker_ys, config["blendedlines_color_points"]),
+            "baseline": None,
+        }
+        if len(result.baseline) and config["blendedlines_showbaseline"]:
+            spec["baseline"] = (
+                res_xs,
+                result.evaluate_baseline(res_xs),
+                config["blendedlines_color_baseline"],
             )
-
-            if len(result.baseline) and config["blendedlines_showbaseline"]:
-                plot_widget.plot_parts.append(
-                    ax.plot(
-                        res_xs,
-                        result.evaluate_baseline(res_xs),
-                        color=config["blendedlines_color_baseline"],
-                    )[0]
-                )
+        run_in_gui(lambda: plot_widget.draw_fit(spec))
 
         self.result = result
         method.remember(result.mean_values())
@@ -8318,12 +8195,15 @@ class BlendedLinesWindow(EQDockWidget):
         plot_widget.update_plot_requested.emit()
 
     def add_peak(self, event):
-        if event.canvas.widgetlock.locked():  # Pan or zoom of the matplotlib toolbar is active
+        if event.button() != Qt.MouseButton.LeftButton:
             return
 
-        x, y = event.xdata, event.ydata
-        is_left_mouse_button = event.button == 1
-        if not (x and y and is_left_mouse_button):
+        vb = self.plot_widget.vb
+        if not vb.sceneBoundingRect().contains(event.scenePos()):
+            return
+        point = vb.mapSceneToView(event.scenePos())
+        x, y = point.x(), point.y()
+        if not (x and y):
             return
         x = np.float64(x)
         y = np.float64(y)
@@ -8861,34 +8741,14 @@ class EnergyLevelsWindow(EQDockWidget):
         mainwidget.setLayout(layout)
         self.setWidget(mainwidget)
 
-        self.fig = Figure(dpi=config["plot_dpi"])
-        self.plotcanvas = FigureCanvas(self.fig)
+        self.plotcanvas = ScatterPlotWidget()
+        self.plotcanvas.hovered.connect(self.on_hover)
 
         self.fname = None
         self.dataframe = None
         self.dataframe_filtered = None
 
-        self.ax = self.fig.subplots()
-        self.ax.ticklabel_format(useOffset=False)
-
-        self.points = self.ax.scatter([], [], color=[], marker=".")
-        self.annot = self.ax.annotate(
-            "",
-            xy=(0, 0),
-            xytext=(5, 5),
-            textcoords="offset points",
-            color="black",
-            ha="center",
-            va="bottom",
-            bbox=dict(boxstyle="round", fc="w"),
-        )
-        self.annot.set_visible(False)
-        self.fig.canvas.mpl_connect("motion_notify_event", self.on_hover)
-
-        self.mpl_toolbar = NavigationToolbar2QT(self.plotcanvas, self)
-
         layout.addWidget(self.plotcanvas, 6)
-        layout.addWidget(self.mpl_toolbar)
         hlayout = QHBoxLayout()
         hlayout.addWidget(
             QQ(QPushButton, text="Open", change=lambda x: self.load_file())
@@ -8943,7 +8803,6 @@ class EnergyLevelsWindow(EQDockWidget):
 
         self.plotting_started.connect(lambda: self.update_button.setDisabled(True))
         self.plotting_finished.connect(lambda: self.update_button.setDisabled(False))
-        self.plotting_finished.connect(lambda: self.fig.canvas.draw_idle())
 
     def load_file(self, fname=None):
         if fname is None:
@@ -8976,63 +8835,39 @@ class EnergyLevelsWindow(EQDockWidget):
                     color, query = row.split(";")
                     df.loc[df.query(query).index, "color"] = color
 
-            self.dataframe_filtered = df
-
             xvariable = config["energylevels_xvariable"].strip() or "qn1"
             yvariable = config["energylevels_yvariable"].strip() or "egy"
             xs = df.eval(xvariable).to_numpy()
             ys = df.eval(yvariable).to_numpy()
             colors = df["color"].to_numpy()
-            tuples = list(zip(xs, ys))
-            tuples = tuples if len(tuples) != 0 else [[None, None]]
-            with matplotlib_lock:
-                self.points.set_offsets(tuples)
-                self.points.set_color(colors)
-                if len(xs) and config["energylevels_autoscale"]:
-                    xmin, xmax = np.min(xs), np.max(xs)
-                    if xmin == xmax:
-                        xmin -= 1
-                        xmax += 1
-                    self.ax.set_xlim(
-                        [
-                            xmin - 0.02 * (xmax - xmin),
-                            xmax + 0.02 * (xmax - xmin),
-                        ]
-                    )
-                    ymin, ymax = np.min(ys), np.max(ys)
-                    if ymin == ymax:
-                        ymin -= 1
-                        ymax += 1
-                    y_range = [ymin, ymax]
-                    self.ax.set_ylim(
-                        y_range[0] - config["plot_ymargin"] * (y_range[1] - y_range[0]),
-                        y_range[1] + config["plot_ymargin"] * (y_range[1] - y_range[0]),
-                    )
+            autoscale = config["energylevels_autoscale"]
+            ymargin = config["plot_ymargin"]
+
+            def show():
+                # The data and the points have to change together as the hover uses both
+                self.dataframe_filtered = df
+                self.plotcanvas.set_points(xs, ys, colors, autoscale, ymargin)
+
+            run_in_gui(show)
         except Exception:
             notify_error.emit("There was an error in your Energy Levels window inputs")
             raise
         finally:
             self.plotting_finished.emit()
 
-    def on_hover(self, event):
-        if event.inaxes == self.ax and isinstance(
-            self.dataframe_filtered, pd.DataFrame
-        ):
-            cont, ind = self.points.contains(event)
-            if cont:
-                self.annot.xy = self.points.get_offsets()[ind["ind"][0]]
-                tmp_levels = self.dataframe_filtered.iloc[ind["ind"]]
-                text = []
-                for i, row in tmp_levels.iterrows():
-                    text.append(
-                        ",".join(str(int(row[f"qn{i + 1}"])) for i in range(self.noq))
-                    )
-                text = "\n".join(text)
-                self.annot.set_text(text)
-                self.annot.set_visible(True)
-            else:
-                self.annot.set_visible(False)
-            self.fig.canvas.draw_idle()
+    def on_hover(self, indices):
+        if not len(indices) or not isinstance(self.dataframe_filtered, pd.DataFrame):
+            return
+
+        tmp_levels = self.dataframe_filtered.iloc[indices]
+        text = [
+            ",".join(str(int(row[f"qn{i + 1}"])) for i in range(self.noq))
+            for _, row in tmp_levels.iterrows()
+        ]
+
+        # The tooltip is shown at the first of the hovered points
+        plot = self.plotcanvas
+        plot.show_tooltip(plot.xs[indices[0]], plot.ys[indices[0]], "\n".join(text))
 
     def dragEnterEvent(self, event):
         mimeData = event.mimeData()
@@ -9082,30 +8917,23 @@ class PeakfinderWindow(EQDockWidget):
         class CustomPlotWidget(PlotWidget):
             def gui(self):
                 super().gui()
-                self.peaks_artist = self.ax.scatter(
-                    [], [], color=config["peakfinder_peakcolor"], marker="*"
+                self.peaks_item = pg.ScatterPlotItem(
+                    size=12, symbol="star", pen=pg.mkPen(None)
                 )
+                self.peaks_item.setZValue(60)
+                self.plot.addItem(self.peaks_item, ignoreBounds=True)
 
-            @lock_d(matplotlib_lock)
             def update_plot(self):
                 xmin, xmax = self.xrange
-                tuples = list(filter(lambda x: xmin < x[0] < xmax, self.parent.peaks))
-                tuples = tuples if len(tuples) != 0 else [[None, None]]
-                self.peaks_artist.set_offsets(tuples)
-                self.peaks_artist.set_color(config["peakfinder_peakcolor"])
+                tuples = [peak for peak in self.parent.peaks if xmin < peak[0] < xmax]
+                xs = [peak[0] for peak in tuples]
+                ys = [peak[1] for peak in tuples]
+                brush = pg.mkBrush(to_qcolor(config["peakfinder_peakcolor"]))
+                run_in_gui(lambda: self.peaks_item.setData(x=xs, y=ys, brush=brush))
                 super().update_plot()
 
         self.plot_widget = CustomPlotWidget(parent=self)
         layout.addWidget(self.plot_widget)
-
-        self.mpltoolbar = NavigationToolbar2QT(self.plot_widget.plotcanvas, self)
-        layout.addWidget(self.mpltoolbar)
-
-        self.mpltoolbar.setVisible(config["peakfinder_matplotlibtoolbar"])
-        config.register(
-            "peakfinder_matplotlibtoolbar",
-            lambda: self.mpltoolbar.setVisible(config["peakfinder_matplotlibtoolbar"]),
-        )
 
         tmp_layout = QHBoxLayout()
         layout.addLayout(tmp_layout)
@@ -9605,10 +9433,6 @@ def symmetric_ticklabels(ticks):
             )
             tick_labels.append(tick)
     return tick_labels
-
-
-def is_dark_theme():
-    return QGuiApplication.instance().styleHints().colorScheme() == Qt.ColorScheme.Dark
 
 
 def QQ(widgetclass, config_key=None, **kwargs):
@@ -10188,8 +10012,7 @@ class LevelSelector(SeriesSelector):
 
 
 class ASAPAx(LWPAx):
-    fit_vline = None
-    fit_curve = None
+    fit_items = []
 
     @classmethod
     def get_fit_methods(cls):
@@ -10198,8 +10021,8 @@ class ASAPAx(LWPAx):
     egy_df = None
     egy_filename = None
 
-    def __init__(self, ax, row_i, col_i):
-        self.ax = ax
+    def __init__(self, plot, row_i, col_i):
+        self.plot = plot
 
         self.row_i = row_i
         self.col_i = col_i
@@ -10220,74 +10043,35 @@ class ASAPAx(LWPAx):
         self.corr_col = None
         self.curr_state = {}
 
-        with matplotlib_lock:
-            self.span = matplotlib.widgets.SpanSelector(
-                ax,
-                lambda xmin, xmax: self.on_range(xmin, xmax),
-                "horizontal",
-                useblit=True,
-                button=1,
-            )
+        self.setup_plot()
 
-        self.exp_coll = matplotlib.collections.LineCollection(
-            np.zeros(shape=(0, 2, 2)), colors=config["color_exp"], capstyle="round"
-        )
-        self.lin_coll = self.ax.scatter(
-            [],
-            [],
-            color=config["color_ref"],
-            marker=config["plot_linmarker"],
-            zorder=100,
-        )
-
-        with matplotlib_lock:
-            ax.add_collection(self.exp_coll, autolim=False)
-
-            ax.yaxis.set_visible(False)
-            if row_i:
-                ax.xaxis.set_visible(False)
-            else:
-                ax.set_xticks([])
-
-            if row_i != 0:
-                ax.spines["bottom"].set_visible(False)
-            if row_i != config["plot_rows"] - 1:
-                ax.spines["top"].set_visible(False)
-            if col_i != 0:
-                ax.spines["left"].set_visible(False)
-            if col_i != config["plot_cols"] - 1:
-                ax.spines["right"].set_visible(False)
-
-    def vals_to_coll(self, xs, ys, color=None):
+    def vals_to_spec(self, xs, ys, color=None):
         if xs is None or ys is None:
-            segs = np.array([])
-        else:
-            xrange = self.xrange
-            bins = config["plot_bins"]
-            nobinning = config["plot_skipbinning"]
-            binwidth = (xrange[1] - xrange[0]) / bins
+            return []
 
-            if len(xs) > max(bins, nobinning) and binwidth != 0:
-                df = pd.DataFrame({"x": xs, "y": ys, "filename": 0})
-                df = bin_data(df, binwidth, xrange)
-                xs, ys = df["x"], df["y"]
+        xrange = self.xrange
+        bins = config["plot_bins"]
+        nobinning = config["plot_skipbinning"]
+        binwidth = (xrange[1] - xrange[0]) / bins
 
-            segs = np.array(((xs[:-1], xs[1:]), (ys[:-1], ys[1:]))).T
+        if len(xs) > max(bins, nobinning) and binwidth != 0:
+            df = pd.DataFrame({"x": xs, "y": ys, "filename": 0})
+            df = bin_data(df, binwidth, xrange)
+            xs, ys = df["x"], df["y"]
 
         if color is None:
             color = config["color_exp"]
-        self.exp_coll.set(segments=segs, color=color)
+        elif isinstance(color, (list, tuple)) and len(color) == 1:
+            color = color[0]
+        return [
+            (np.asarray(xs, dtype=float), np.asarray(ys, dtype=float), "all", color)
+        ]
 
-    @drawplot_decorator.d
-    @lock_d(matplotlib_lock)
+    @plot_update_decorator.d
     def update(self):
-        ax = self.ax
-
         offset, width = config["plot_offset"], config["plot_width"]
         self.xrange = (offset - width / 2, offset + width / 2)
 
-        ax.set_xlim(self.xrange)
-        self.set_xticklabels()
         yrange = [-0.1, 1.1]
 
         tot_xs = self.corr_xs
@@ -10300,7 +10084,7 @@ class ASAPAx(LWPAx):
             tot_xs = tot_xs[min_index:max_index]
             tot_ys = tot_ys[min_index:max_index]
 
-        self.vals_to_coll(tot_xs, tot_ys, self.corr_col)
+        spec = {"exp": self.vals_to_spec(tot_xs, tot_ys, self.corr_col), "cat": []}
 
         if not config["asap_scaletoexpints"]:
             if tot_ys is not None and len(tot_ys):
@@ -10314,9 +10098,12 @@ class ASAPAx(LWPAx):
             )
             if np.isnan(yrange[0]) or np.isnan(yrange[1]) or yrange[0] == yrange[1]:
                 yrange = (-2, +2)
-        ax.set_ylim(yrange)
 
-        self.update_annotation()
+        spec["xrange"] = tuple(self.xrange)
+        spec["yrange"] = tuple(yrange)
+        spec["xticks"] = self.xticks()
+        spec["annotation"] = self.annotation_text()
+        spec["lin"] = ([], [], [])
 
         # Plot position of previous assignments
         if self.qns is not None and self.egy_df is not None:
@@ -10337,30 +10124,25 @@ class ASAPAx(LWPAx):
             egy_val = vals[0] if len(vals) else 0
 
             lin_positions = lin_positions - egy_val
-            tuples = (
-                [(x, 0) for x in lin_positions]
-                if len(lin_positions)
-                else [[None, None]]
-            )
 
-            self.lin_coll.set_offsets(tuples)
             # We always use the colors of the *.lin file because it is clear
             # that the assignments belong to the reference series in ASAP
-            self.lin_coll.set_color(lin_colors)
-        else:
-            self.lin_coll.set_offsets([[None, None]])
+            spec["lin"] = (
+                lin_positions,
+                np.zeros(lin_positions.shape),
+                list(lin_colors),
+            )
 
-    def update_annotation(self):
+        run_in_gui(lambda: self.apply_update(spec))
+
+    def annotation_text(self):
+        """Text and color of the annotation or None if it is not shown."""
         fstring = config["plot_annotationfstring"]
 
         if not fstring:
-            if self.annotation:
-                self.annotation.remove()
-                self.annotation.set_visible(False)
-                self.annotation = None
-            return
+            return None
 
-        color = matplotlib.rcParams["text.color"]
+        color = plot_foreground()
 
         if self.qns is not None:
             qnstring = ",".join(map(str, self.qns))
@@ -10385,27 +10167,13 @@ class ASAPAx(LWPAx):
             "width": config["plot_width"],
             **qns_dict,
         }
-        text = fstring.format(**vars)
+        return fstring.format(**vars), color
 
-        if self.annotation is None:
-            kwargs = config["plot_annotationkwargs"]
-            ax = self.ax
-            self.annotation = ax.text(
-                **kwargs, s=text, color=color, transform=ax.transAxes
-            )
-        else:
-            if self.annotation.get_text() != text:
-                self.annotation.set_text(text)
-            if matplotlib.colors.to_rgba(
-                self.annotation.get_color()
-            ) != matplotlib.colors.to_rgba(color):
-                self.annotation.set_color(color)
-
-    def set_xticklabels(self):
+    def xticks(self):
+        """Major (with labels) and minor ticks, only the lowest row has any."""
         if self.row_i:
-            return
+            return None
 
-        ax = self.ax
         ticks = np.linspace(*self.xrange, config["plot_xticks"])
         tickformat = config["plot_xtickformat"]
 
@@ -10416,11 +10184,11 @@ class ASAPAx(LWPAx):
         else:
             ticklabels = symmetric_ticklabels(ticks)
 
+        minor_ticks = self.minor_ticks(ticks)
         if self.col_i and len(ticks) > 1:
             ticks = ticks[1:]
             ticklabels = ticklabels[1:]
-        ax.set_xticks(ticks)
-        ax.set_xticklabels(ticklabels)
+        return [list(zip(ticks, ticklabels)), minor_ticks]
 
     def create_qns_dict(self, complete=False):
         qns_dict = (
@@ -10448,32 +10216,18 @@ class ASAPAx(LWPAx):
         if self.qns is None:
             return
 
-        # Delete artists highlighting previous fit
-        with matplotlib_lock:
-            if self.__class__.fit_vline is not None:
-                self.__class__.fit_vline.remove()
-                self.__class__.fit_vline = None
-            if self.__class__.fit_curve is not None:
-                self.__class__.fit_curve.remove()
-                self.__class__.fit_curve = None
+        # Remove the highlighting of the previous fit
+        self.clear_fit_items()
 
         if onclick:
             xmiddle = xmin
             xuncert = 0
+            self.show_fit(xmiddle)
 
         else:
             # Fit the data
             xmiddle, xuncert, fit_xs, fit_ys = self.fit_peak(xmin, xmax)
-            with matplotlib_lock:
-                self.__class__.fit_curve = self.ax.plot(
-                    fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1
-                )[0]
-
-        # Highlight fit in plot
-        with matplotlib_lock:
-            self.__class__.fit_vline = self.ax.axvline(
-                x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1
-            )
+            self.show_fit(xmiddle, fit_xs, fit_ys)
 
         # Emit signal for detail viewer
         self.x_fit = xmiddle
@@ -10571,8 +10325,6 @@ class ASAPAx(LWPAx):
             fit_xs, fit_ys = fit_results.fit_xs, fit_results.fit_ys
 
         except Exception as E:
-            self.fit_curve = None
-            self.fit_line = None
             notify_error.emit(
                 f"The fitting failed with the following error message : {str(E)}"
             )
@@ -10924,15 +10676,9 @@ class ASAPWidget(LWPWidget):
 
     @QThread.threaded_d
     @status_d
-    @drawplot_decorator.d
+    @plot_update_decorator.d
     def calc_correlation_plots(self, thread=None):
-        with matplotlib_lock:
-            if self._ax_class.fit_vline is not None:
-                self._ax_class.fit_vline.remove()
-                self._ax_class.fit_vline = None
-            if self._ax_class.fit_curve is not None:
-                self._ax_class.fit_curve.remove()
-                self._ax_class.fit_curve = None
+        self._ax_class.clear_fit_items()
 
         if not hasattr(ASAPSettingsWindow, "instance"):
             return
@@ -10953,126 +10699,110 @@ class ASAPWidget(LWPWidget):
         width = config["plot_width"]
         stepsize = config["asap_stepsize"]
 
-        with matplotlib_lock:
-            if self.lwpaxes.shape != (n_rows, n_cols):
-                notify_error.emit(
-                    "Shape of LWPAxes is out of sync with requested values."
-                )
-                return
+        if self.lwpaxes.shape != (n_rows, n_cols):
+            notify_error.emit(
+                "Shape of LWPAxes is out of sync with requested values."
+            )
+            return
 
-            for i_col in range(n_widgets):
-                thread.earlyreturn()
-                if i_col >= n_cols:
-                    continue
+        for i_col in range(n_widgets):
+            thread.earlyreturn()
+            if i_col >= n_cols:
+                continue
 
-                refwidget = tab_widget.widget(i_col)
-                state = refwidget.state
+            refwidget = tab_widget.widget(i_col)
+            state = refwidget.state
 
-                entries, qns, diffs, ul = self.prefilter_correlation_plot_entries(
-                    state, n_rows, n_qns, offset, width
-                )
+            entries, qns, diffs, ul = self.prefilter_correlation_plot_entries(
+                state, n_rows, n_qns, offset, width
+            )
 
-                thread.earlyreturn()
+            thread.earlyreturn()
 
-                # Get the specific entries for each ax
-                for i_row in range(n_rows):
-                    row_qns = qns + i_row * diffs
-                    cond = [f"(qn{ul}{i + 1} == {qn})" for i, qn in enumerate(row_qns)]
-                    condition = " & ".join(cond)
-                    row_entries_all = entries.query(condition).copy()
+            # Get the specific entries for each ax
+            for i_row in range(n_rows):
+                row_qns = qns + i_row * diffs
+                cond = [f"(qn{ul}{i + 1} == {qn})" for i, qn in enumerate(row_qns)]
+                condition = " & ".join(cond)
+                row_entries_all = entries.query(condition).copy()
 
-                    if config["asap_minrelratio"]:
-                        row_entries = row_entries_all[
-                            row_entries_all["use_for_cross_correlation"]
-                        ]
-                        ymax = row_entries["y"].max()
-                        ythreshold = ymax * config["asap_minrelratio"]  # noqa: F841
-                        row_entries_all.loc[:, "use_for_cross_correlation"] = (
-                            row_entries_all.eval(
-                                "(use_for_cross_correlation) & (y > @ythreshold)"
-                            )
-                        )
-
+                if config["asap_minrelratio"]:
                     row_entries = row_entries_all[
                         row_entries_all["use_for_cross_correlation"]
                     ]
-
-                    corr_xs, corr_ys, corr_col, mask = self.calc_correlation_plot(
-                        row_qns, row_entries, offset, width, stepsize
+                    ymax = row_entries["y"].max()
+                    ythreshold = ymax * config["asap_minrelratio"]  # noqa: F841
+                    row_entries_all.loc[:, "use_for_cross_correlation"] = (
+                        row_entries_all.eval(
+                            "(use_for_cross_correlation) & (y > @ythreshold)"
+                        )
                     )
-                    row_entries_all.loc[
-                        row_entries.index, "use_for_cross_correlation"
-                    ] = mask
 
-                    ax = self.lwpaxes[i_row, i_col]
-                    ax.entries = row_entries_all
-                    ax.corr_xs = corr_xs
-                    ax.corr_ys = corr_ys
-                    ax.corr_col = corr_col
-                    ax.qns = row_qns
-                    ax.offset = offset
-                    ax.width = width
-                    ax.stepsize = stepsize
-                    ax.is_upper_state = state["is_upper_state"]
-                    ax.update()
+                row_entries = row_entries_all[
+                    row_entries_all["use_for_cross_correlation"]
+                ]
 
-                    thread.earlyreturn()
-            # Edge cases of no reference tabs and too few tabs
-            for i_col in range(n_widgets, n_cols):
-                for i_row in range(n_rows):
-                    ax = self.lwpaxes[i_row, i_col]
-                    ax.entries = None
-                    ax.qns = None
-                    ax.corr_xs = ax.corr_ys = np.array([])
-                    ax.update()
+                corr_xs, corr_ys, corr_col, mask = self.calc_correlation_plot(
+                    row_qns, row_entries, offset, width, stepsize
+                )
+                row_entries_all.loc[
+                    row_entries.index, "use_for_cross_correlation"
+                ] = mask
+
+                ax = self.lwpaxes[i_row, i_col]
+                ax.entries = row_entries_all
+                ax.corr_xs = corr_xs
+                ax.corr_ys = corr_ys
+                ax.corr_col = corr_col
+                ax.qns = row_qns
+                ax.offset = offset
+                ax.width = width
+                ax.stepsize = stepsize
+                ax.is_upper_state = state["is_upper_state"]
+                ax.update()
+
+                thread.earlyreturn()
+        # Edge cases of no reference tabs and too few tabs
+        for i_col in range(n_widgets, n_cols):
+            for i_row in range(n_rows):
+                ax = self.lwpaxes[i_row, i_col]
+                ax.entries = None
+                ax.qns = None
+                ax.corr_xs = ax.corr_ys = np.array([])
+                ax.update()
 
     @QThread.threaded_d
     @status_d
-    @drawplot_decorator.d
+    @plot_update_decorator.d
     def set_data(self, thread=None):
         for asap_ax in self.lwpaxes.flatten():
             asap_ax.update()
 
-    def on_hover(self, event):
-        x = event.xdata
-        y = event.ydata
+    def on_hover(self, scene_pos):
+        lwpax, x, y = self.locate(scene_pos)
 
-        if not all([x, y, event.inaxes]):
+        if lwpax is None or not config["flag_showmainplotposition"]:
             text_cursor = ""
         else:
-            if config["flag_showmainplotposition"]:
-                text_cursor = f"  ({x=:{config['flag_xformatfloat']}}, {y=:{config['flag_xformatfloat']}})  "
-            else:
-                text_cursor = ""
+            text_cursor = f"  ({x=:{config['flag_xformatfloat']}}, {y=:{config['flag_xformatfloat']}})  "
         mainwindow.statusbar.position_label.setText(text_cursor)
 
     def on_click(self, event):
-        if event.canvas.widgetlock.locked():  # Pan or zoom of the matplotlib toolbar is active
-            return
-
         super().on_click(event)
 
-        ax = event.inaxes
-        x = event.xdata
+        lwpax, x, y = self.locate(event.scenePos())
         is_ctrl_pressed = (
             QApplication.keyboardModifiers() == Qt.KeyboardModifier.ControlModifier
         )
 
-        if ax and x and is_ctrl_pressed:
+        if lwpax is not None and x and is_ctrl_pressed:
             asap_ax = self.lwpaxes[self.__class__._active_ax_index]
             asap_ax.fit_data(x, x, onclick=True)
 
     def contextMenuCanvas(self, event):
-        x, y = event.x(), event.y()
-        geometry = self.plotcanvas.geometry()
-        width, height = geometry.width(), geometry.height()
-        x_rel, y_rel = x / width, 1 - y / height
-
-        for lwpax in self.lwpaxes.flatten():
-            xmin, ymin, width, height = lwpax.ax.get_position().bounds
-            if xmin <= x_rel <= xmin + width and ymin <= y_rel <= ymin + height:
-                break
-        else:  # Clicked outside of ax
+        scene_pos = self.plotcanvas.mapToScene(event.pos())
+        lwpax, x, y = self.locate(scene_pos)
+        if lwpax is None:  # Clicked outside of ax
             return
 
         menu = QMenu(self)
@@ -11081,7 +10811,7 @@ class ASAPWidget(LWPWidget):
         fit_all_action = menu.addAction("Fit all")
         show_detail_viewer_action = menu.addAction("Show in Detail Viewer")
 
-        action = menu.exec(self.mapToGlobal(event.pos()))
+        action = menu.exec(self.plotcanvas.mapToGlobal(event.pos()))
         if action == set_active_action:
             mainwindow.lwpwidget._active_ax_index = (lwpax.row_i, lwpax.col_i)
         elif action == fit_all_action:
@@ -11090,8 +10820,7 @@ class ASAPWidget(LWPWidget):
         elif action == save_figure_action:
             self.save_figure()
         elif action == show_detail_viewer_action:
-            data_xmin, data_xmax = lwpax.xrange
-            lwpax.x_fit = data_xmin + (x_rel - xmin) / width * (data_xmax - data_xmin)
+            lwpax.x_fit = x
             ASAPDetailViewer.instance.update_view(lwpax)
 
 
@@ -11112,8 +10841,6 @@ class ASAPDetailViewer(EQDockWidget):
     available_in = [
         "ASAP",
     ]
-
-    drawplot = pyqtSignal()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -11144,13 +10871,18 @@ class ASAPDetailViewer(EQDockWidget):
             )
         )
 
-        self.fig = Figure(dpi=config["plot_dpi"])
-        self.plotcanvas = FigureCanvas(self.fig)
+        self.plotcanvas = RoundedGraphicsLayoutWidget()
+        self.plotcanvas.setBackground(plot_background())
         self.plotcanvas.contextMenuEvent = self.contextMenuCanvas
         layout.addWidget(self.plotcanvas)
 
         mainwindow.lwpwidget.peak_fitted.connect(self.update_view)
-        self.drawplot.connect(self.draw_canvas)
+        theme.changed.connect(self.on_theme_change)
+
+    def on_theme_change(self):
+        self.plotcanvas.setBackground(plot_background())
+        if self.asap_ax is not None:
+            self.update_view(self.asap_ax)
 
     def update_view(self, asap_ax):
         x_fit = asap_ax.x_fit
@@ -11158,8 +10890,8 @@ class ASAPDetailViewer(EQDockWidget):
         if not self.isVisible():
             return
 
-        for ax in self.fig.get_axes():
-            self.fig.delaxes(ax)
+        self.plotcanvas.clear()
+        self.axes = []
 
         # Prepare Entries
         entries = asap_ax.entries.copy()
@@ -11177,36 +10909,31 @@ class ASAPDetailViewer(EQDockWidget):
             entries["xmin"], entries["xmax"]
         )
 
-        gridspec_kw = {"hspace": 0, "wspace": 0}
-        axes = self.fig.subplots(len(entries), gridspec_kw=gridspec_kw, squeeze=False)[
-            ::-1, 0
-        ]
-
-        annotate_kwargs = {
-            "x": 1,
-            "y": 0.95,
-            "horizontalalignment": "right",
-            "verticalalignment": "top",
-            "color": matplotlib.rcParams["text.color"],
-            "fontsize": "small",
-        }
+        axes = create_stacked_plots(
+            self.plotcanvas,
+            len(entries),
+            color=config["color_fit"],
+            tick_density=0.5,
+        )
+        text_font = plot_font(0.8 * config["plot_annotationfontsize"])
         qns_labels = [
             [f"qn{ul}{i + 1}" for i in range(config["series_qns"])] for ul in "ul"
         ]
 
         for ax, (i, row) in zip(axes, entries.iterrows()):
-            ax.xaxis.set_visible(False)
-            ax.axvline(x_fit + row["x"], color=config["color_fit"])
+            ax.vline(x_fit + row["x"], config["color_fit"])
 
             min_index, max_index = row["min_index"], row["max_index"]
             dataframe = ExpFile.df.iloc[min_index:max_index].copy()
             dataframe = dataframe[dataframe["visible"]]
+            xrange = (row["xmin"], row["xmax"])
 
             if not len(dataframe):
+                ax.set_ranges(xrange, (0, 1), ymargin=0)
                 continue
 
-            xs = dataframe["x"]
-            ys = dataframe["y"]
+            xs = dataframe["x"].to_numpy()
+            ys = dataframe["y"].to_numpy()
 
             qnus_string = ",".join([f"{row[qn]}" for qn in qns_labels[0]])
             qnls_string = ",".join([f"{row[qn]}" for qn in qns_labels[1]])
@@ -11214,39 +10941,33 @@ class ASAPDetailViewer(EQDockWidget):
             # qnstring = f'{qnus_string} ← {qnls_string}, {row["y"]:.1e}'
             qnstring = f"{qnus_string} ← {qnls_string}"
 
-            ax.plot(xs, ys, color=config["color_exp"])
-            ax.text(**annotate_kwargs, s=qnstring, transform=ax.transAxes)
-            ax.set_xlim(row["xmin"], row["xmax"])
-            ax.margins(y=0.1)
-
-        ax = axes[0]
-        ax.xaxis.set_visible(True)
-        ax.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(3))
+            ax.curve(xs, ys, config["color_exp"])
+            ax.text(qnstring, plot_foreground(), text_font)
+            ax.set_ranges(xrange, (ys.min(), ys.max()), ymargin=0.1)
 
         self.axes = axes
         self.entries = entries.copy()
         self.asap_ax = asap_ax
 
-        self.drawplot.emit()
-
     def contextMenuCanvas(self, event):
-        x, y = event.x(), event.y()
-        geometry = self.plotcanvas.geometry()
-        width, height = geometry.width(), geometry.height()
-        x_rel, y_rel = x / width, 1 - y / height
-
+        scene_pos = self.plotcanvas.mapToScene(event.pos())
         for i, ax in enumerate(self.axes):
-            xmin, ymin, width, height = ax.get_position().bounds
-            if xmin <= x_rel <= xmin + width and ymin <= y_rel <= ymin + height:
+            if ax.vb.sceneBoundingRect().contains(scene_pos):
+                is_on_ax = True
                 break
         else:  # Clicked outside of ax
-            return
+            is_on_ax = False
 
         menu = QMenu(self)
         remove_action = menu.addAction("Remove this transition")
+        remove_action.setEnabled(is_on_ax)
+        menu.addSeparator()
+        save_figure_action = menu.addAction("Save Figure")
 
         action = menu.exec(self.plotcanvas.mapToGlobal(event.pos()))
-        if action == remove_action:
+        if action == save_figure_action:
+            save_figure_dialog(self.plotcanvas)
+        elif action == remove_action:
             index = self.entries.index[i]
             entry = self.entries.iloc[i]
 
@@ -11285,11 +11006,7 @@ class ASAPDetailViewer(EQDockWidget):
             ax.corr_col = corr_col
 
             ax.update()
-            self.drawplot.emit()
             self.update_view(ax)
-
-    def draw_canvas(self):
-        self.plotcanvas.draw_idle()
 
 
 class ASAPSettingsWindow(ReferenceSeriesWindow):
@@ -11453,7 +11170,6 @@ class ASAPSquaredWindow(EQDockWidget):
         "ASAP",
     ]
 
-    drawplot = pyqtSignal()
     clipboard_requested = pyqtSignal(str)
 
     def __init__(self, *args, **kwargs):
@@ -11465,12 +11181,24 @@ class ASAPSquaredWindow(EQDockWidget):
         self.setWidget(widget)
         widget.setLayout(layout)
 
-        self.fig = Figure(dpi=config["plot_dpi"])
-        self.plotcanvas = FigureCanvas(self.fig)
+        # A drag with the left mouse button selects a range (fit, or zoom with shift),
+        # the other buttons and the wheel move and zoom the plot
+        self.vb = SpanViewBox(
+            button=Qt.MouseButton.LeftButton,
+            color=config["color_fit"],
+            native_mouse=True,
+        )
+        self.vb.on_span = self.on_range
+        self.plotcanvas = RoundedPlotWidget(
+            viewBox=self.vb, background=plot_background()
+        )
+        self.plot = self.plotcanvas.getPlotItem()
+        self.plot.hideButtons()
+        self.plot.setMenuEnabled(False)
+        self.apply_theme()
+        theme.changed.connect(self.apply_theme)
+        install_save_menu(self.plotcanvas, self.plot.autoRange)
         layout.addWidget(self.plotcanvas)
-
-        self.mpltoolbar = NavigationToolbar2QT(self.plotcanvas, self)
-        layout.addWidget(self.mpltoolbar)
 
         tmp_layout = QHBoxLayout()
         tmp_layout.addWidget(QQ(QLabel, text="Width: "))
@@ -11534,16 +11262,47 @@ class ASAPSquaredWindow(EQDockWidget):
         tmp_layout.addStretch(1)
         layout.addLayout(tmp_layout)
 
-        self.drawplot.connect(self.draw_canvas)
         self.clipboard_requested.connect(self.copy_to_clipboard)
 
         self.data = None
+        self.curve_item = None
         self.fit_vline = None
         self.fit_curve = None
         self.xmiddle = None
         self.xuncert = None
         self.assignments = None
         self.noq = None
+
+    def apply_theme(self):
+        self.plotcanvas.setBackground(plot_background())
+        self.vb.setBorder(pg.mkPen(plot_frame_color()))
+        for name in ("bottom", "left"):
+            setup_axis(self.plot.getAxis(name))
+
+    def reset_plot(self):
+        """Removes the curve and the fit, has to be called from the GUI thread."""
+        for item in (self.curve_item, self.fit_curve, self.fit_vline):
+            if item is not None:
+                self.plot.removeItem(item)
+        self.curve_item = self.fit_curve = self.fit_vline = None
+
+    def show_curve(self, xs, ys, log):
+        self.plot.setLogMode(y=log)
+        self.curve_item = pg.PlotDataItem(xs, ys, pen=make_pen(config["color_exp"]))
+        self.plot.addItem(self.curve_item)
+        self.plot.autoRange()
+
+    def show_fit(self, xs, ys, xmiddle):
+        self.fit_curve = pg.PlotDataItem(
+            xs, ys, pen=make_pen(config["color_fit"], alpha=0.7)
+        )
+        self.fit_vline = pg.InfiniteLine(
+            xmiddle,
+            angle=90,
+            pen=make_pen(config["color_fit"], style=Qt.PenStyle.DashLine),
+        )
+        self.plot.addItem(self.fit_curve)
+        self.plot.addItem(self.fit_vline)
 
     @QThread.threaded_d
     @status_d
@@ -11553,15 +11312,7 @@ class ASAPSquaredWindow(EQDockWidget):
         self.noq = config["series_qns"]
         assignments = []
 
-        with matplotlib_lock:
-            for ax in self.fig.get_axes():
-                self.fig.delaxes(ax)
-            self.fit_vline = None
-            self.fit_curve = None
-            self.ax = self.fig.subplots()
-            self.span_selector = matplotlib.widgets.SpanSelector(
-                self.ax, self.on_range, "horizontal", useblit=True
-            )
+        run_in_gui(self.reset_plot)
 
         width = config["asap_squaredwidth"] or config["plot_width"]
         stepsize = config["asap_squaredstepsize"] or config["asap_stepsize"]
@@ -11629,13 +11380,9 @@ class ASAPSquaredWindow(EQDockWidget):
                 tot_ys /= ys_max
                 log_y_max += np.log10(ys_max)
 
-        with matplotlib_lock:
-            self.ax.plot(rel_xs, tot_ys, color=config["color_exp"])
-            if config["asap_squaredplotlog"]:
-                self.ax.set_yscale("log")
-
         self.data = np.vstack((rel_xs, tot_ys)).T
-        self.drawplot.emit()
+        log = config["asap_squaredplotlog"]
+        run_in_gui(lambda: self.show_curve(rel_xs, tot_ys, log))
 
         for x, *qns in cat_df[["x"] + qn_labels].values:
             assignments.append((x, +1, *qns))
@@ -11694,8 +11441,7 @@ class ASAPSquaredWindow(EQDockWidget):
             QApplication.keyboardModifiers() == Qt.KeyboardModifier.ShiftModifier
         )
         if is_shift_pressed:  # Zoom xrange
-            self.ax.set_xlim(xmin, xmax)
-            self.drawplot.emit()
+            self.plot.setXRange(xmin, xmax, padding=0)
         else:  # Fit xrange
             self.fit_data(xmin, xmax)
 
@@ -11703,13 +11449,13 @@ class ASAPSquaredWindow(EQDockWidget):
     @status_d
     def fit_data(self, xmin, xmax, thread=None):
         # Delete artists highlighting previous fit
-        with matplotlib_lock:
-            if self.fit_vline is not None:
-                self.fit_vline.remove()
-                self.fit_vline = None
-            if self.fit_curve is not None:
-                self.fit_curve.remove()
-                self.fit_curve = None
+        def clear_fit():
+            for item in (self.fit_curve, self.fit_vline):
+                if item is not None:
+                    self.plot.removeItem(item)
+            self.fit_curve = self.fit_vline = None
+
+        run_in_gui(clear_fit)
 
         if self.data is None:
             notify_warning.emit("No cross-correlation data available.")
@@ -11754,17 +11500,9 @@ class ASAPSquaredWindow(EQDockWidget):
             self.clipboard_requested.emit(str(xmiddle))
 
         # Highlight fit in plot
-        with matplotlib_lock:
-            self.fit_curve = self.ax.plot(
-                fit_xs, fit_ys, color=config["color_fit"], alpha=0.7, linewidth=1
-            )[0]
-            self.fit_vline = self.ax.axvline(
-                x=xmiddle, color=config["color_fit"], ls="--", alpha=1, linewidth=1
-            )
+        run_in_gui(lambda: self.show_fit(fit_xs, fit_ys, xmiddle))
         self.xmiddle = xmiddle
         self.xuncert = xuncert
-
-        self.drawplot.emit()
 
     def export_data(self):
         if self.data is None:
@@ -11781,9 +11519,6 @@ class ASAPSquaredWindow(EQDockWidget):
         )[0]
         if fname:
             np.savetxt(fname, self.data, delimiter="\t")
-
-    def draw_canvas(self):
-        self.plotcanvas.draw_idle()
 
     def copy_to_clipboard(self, value):
         QApplication.clipboard().setText(value)
